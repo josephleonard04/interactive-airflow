@@ -57,12 +57,19 @@ data/
 checkpoints/
 outputs/
 
+# ---- Local Claude Code tooling (machine-specific paths) ----
+.claude/
+
 # ---- Secrets ----
 .env
 .env.local
 *.key
 secrets.*
 
-# ---- Vendored simulator (decide later: submodule vs. local clone) ----
-# Uncomment if you clone LFM locally rather than as a submodule:
-# simulator/lfm/
+# ---- Vendored simulator (local clone; not part of this repo's history) ----
+# LFM lives upstream at https://github.com/yuchen-sun-cg/lfm — keep it out of
+# our tree for now. Revisit as a git submodule once the integration is real.
+simulator/lfm/
+
+# ---- TS build info ----
+*.tsbuildinfo
