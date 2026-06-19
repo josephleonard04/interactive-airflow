@@ -1,6 +1,6 @@
 import { exportBoundaryConditions } from "../bc/exportBoundaryConditions";
 import { HOUSING_TYPES } from "../floorplan/templates";
-import type { FloorPlan, HousingType, PlacedItem, RoomDef, Vec3 } from "../floorplan/types";
+import type { FloorPlan, HousingType, PlacedItem, RoomDef, Vec2, Vec3 } from "../floorplan/types";
 import { useSceneStore } from "./store";
 
 // Programmatic control surface — the second of the two control paths the advisor
@@ -63,8 +63,26 @@ export const sceneApi = {
     useSceneStore.getState().updateItem(id, patch);
   },
 
+  /** Add an item (furniture or HVAC) by catalog type, optionally at a position. */
+  add(type: string, position?: Vec3): string | null {
+    return useSceneStore.getState().addItem(type, position);
+  },
+
+  remove(id: string): void {
+    useSceneStore.getState().removeItem(id);
+  },
+
+  /** Add an axis-aligned wall between two floor points [x, z]. */
+  addWall(a: Vec2, b: Vec2): void {
+    useSceneStore.getState().addWall(a, b);
+  },
+
+  removeWall(id: string): void {
+    useSceneStore.getState().removeWall(id);
+  },
+
   select(id: string | null): void {
-    useSceneStore.getState().select(id);
+    useSceneStore.getState().selectItem(id);
   },
 
   /** Export the current plan as boundary conditions for the fluid solver. */

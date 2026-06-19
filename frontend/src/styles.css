@@ -274,3 +274,83 @@ button.type.selected {
   display: inline-block;
   flex: 0 0 auto;
 }
+
+.muted-line {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* edit tools */
+.tools {
+  display: flex;
+  gap: 6px;
+}
+
+button.tool {
+  flex: 1;
+  font-size: 13px;
+}
+
+button.tool.active {
+  border-color: var(--accent);
+  background: #11343b;
+  color: var(--accent);
+}
+
+.banner {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  background: #11343b;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+}
+
+/* selected box */
+.selected-box {
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #0e2a30;
+}
+
+button.danger {
+  width: 100%;
+  margin-top: 8px;
+  border-color: #7f1d1d;
+  background: #2a1212;
+  color: #fca5a5;
+}
+
+button.danger:hover {
+  border-color: #ef4444;
+  color: #fecaca;
+}
+
+/* add palette */
+.palette-group {
+  margin-bottom: 10px;
+}
+
+.palette-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+button.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
+}

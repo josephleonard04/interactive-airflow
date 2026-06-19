@@ -7,13 +7,14 @@ import {
   makeOpening,
   sharedEdge,
 } from "./geometry";
-import { furnishRoom, type IdGen } from "./furniture";
+import { furnishRoom, type DoorsBySide, type IdGen, type RoomContext, type Side } from "./furniture";
 import { placeHvac } from "./hvac";
 import { rasterize } from "./raster";
 import { TEMPLATES } from "./templates";
 import type { FloorPlan, HousingType, Opening, RoomDef, WallSeg } from "./types";
 
-const HABITABLE = new Set(["living", "bedroom", "kitchen", "dining"]);
+// Rooms that get windows on their exterior walls.
+const WINDOWED = new Set(["living", "bedroom", "kitchen", "dining", "bathroom"]);
 
 function makeIdGen(): IdGen {
   const counters: Record<string, number> = {};
@@ -34,16 +35,17 @@ function wallRange(w: WallSeg): { start: number; end: number; line: number } {
   return { start: Math.min(w.a[0], w.b[0]), end: Math.max(w.a[0], w.b[0]), line: w.a[1] };
 }
 
+function openingAlong(o: Opening): [number, number] {
+  const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // constant x → along z
+  return vertical
+    ? [Math.min(o.a[1], o.b[1]), Math.max(o.a[1], o.b[1])]
+    : [Math.min(o.a[0], o.b[0]), Math.max(o.a[0], o.b[0])];
+}
+
 /** Free intervals along a wall not already taken by an opening. */
 function freeIntervals(w: WallSeg): Array<[number, number]> {
   const { start, end } = wallRange(w);
-  const taken = w.openings
-    .map((o) => {
-      const s = w.axis === "z" ? Math.min(o.a[1], o.b[1]) : Math.min(o.a[0], o.b[0]);
-      const e = w.axis === "z" ? Math.max(o.a[1], o.b[1]) : Math.max(o.a[0], o.b[0]);
-      return [s, e] as [number, number];
-    })
-    .sort((p, q) => p[0] - q[0]);
+  const taken = w.openings.map(openingAlong).sort((p, q) => p[0] - q[0]);
   const free: Array<[number, number]> = [];
   let cursor = start;
   for (const [s, e] of taken) {
@@ -98,37 +100,58 @@ function placeDoors(
   return doors;
 }
 
+/** A window on every exterior wall (with room for one) of a windowed room. */
 function placeWindows(rooms: RoomDef[], walls: WallSeg[], gen: IdGen): Opening[] {
   const windows: Opening[] = [];
   for (const room of rooms) {
-    const isHabitable = HABITABLE.has(room.type) || room.program === "studio";
-    if (!isHabitable) continue;
-
-    const ext = walls
-      .filter((w) => w.roomId === room.id && w.exterior && wallLength(w) >= WINDOW_WIDTH + 0.6)
-      .sort((p, q) => wallLength(q) - wallLength(p));
-    if (ext.length === 0) continue;
-
-    // pick the exterior wall with the longest free run.
-    let best: { wall: WallSeg; interval: [number, number]; len: number } | null = null;
-    for (const w of ext) {
-      for (const iv of freeIntervals(w)) {
-        const len = iv[1] - iv[0];
-        if (len >= WINDOW_WIDTH + 0.4 && (!best || len > best.len)) best = { wall: w, interval: iv, len };
+    if (!WINDOWED.has(room.type) && room.program !== "studio") continue;
+    const ext = walls.filter(
+      (w) => w.roomId === room.id && w.exterior && wallLength(w) >= WINDOW_WIDTH + 0.6,
+    );
+    for (const wall of ext) {
+      // widest free run on this wall
+      let best: [number, number] | null = null;
+      for (const iv of freeIntervals(wall)) {
+        if (iv[1] - iv[0] >= WINDOW_WIDTH + 0.4 && (!best || iv[1] - iv[0] > best[1] - best[0])) best = iv;
       }
+      if (!best) continue;
+      const mid = (best[0] + best[1]) / 2;
+      const { line } = wallRange(wall);
+      const win = makeOpening(
+        gen("window"),
+        "window",
+        wall.axis,
+        line,
+        mid - WINDOW_WIDTH / 2,
+        mid + WINDOW_WIDTH / 2,
+        [room.id, "outside"],
+      );
+      carveOpening(walls, win);
+      windows.push(win);
     }
-    if (!best) continue;
-
-    const { wall, interval } = best;
-    const mid = (interval[0] + interval[1]) / 2;
-    const s = mid - WINDOW_WIDTH / 2;
-    const e = mid + WINDOW_WIDTH / 2;
-    const { line } = wallRange(wall);
-    const win = makeOpening(gen("window"), "window", wall.axis, line, s, e, [room.id, "outside"]);
-    carveOpening(walls, win);
-    windows.push(win);
   }
   return windows;
+}
+
+/** Which side of `room` an opening sits on, plus its along-interval. */
+function doorsForRoom(room: RoomDef, doors: Opening[]): DoorsBySide {
+  const { x, z, w, d } = room.rect;
+  const out: DoorsBySide = { north: [], south: [], east: [], west: [] };
+  const eq = (a: number, b: number) => Math.abs(a - b) < 1e-3;
+  for (const o of doors) {
+    const vertical = eq(o.a[0], o.b[0]); // constant x
+    const [s, e] = openingAlong(o);
+    if (vertical) {
+      const lineX = o.a[0];
+      if (eq(lineX, x) && s >= z - 0.01 && e <= z + d + 0.01) out.west.push([s, e]);
+      else if (eq(lineX, x + w) && s >= z - 0.01 && e <= z + d + 0.01) out.east.push([s, e]);
+    } else {
+      const lineZ = o.a[1];
+      if (eq(lineZ, z) && s >= x - 0.01 && e <= x + w + 0.01) out.south.push([s, e]);
+      else if (eq(lineZ, z + d) && s >= x - 0.01 && e <= x + w + 0.01) out.north.push([s, e]);
+    }
+  }
+  return out;
 }
 
 export function generateFloorPlan(housingType: HousingType): FloorPlan {
@@ -141,7 +164,11 @@ export function generateFloorPlan(housingType: HousingType): FloorPlan {
   const doors = placeDoors(rooms, walls, template.connections, gen);
   const windows = placeWindows(rooms, walls, gen);
 
-  const furniture = rooms.flatMap((room) => furnishRoom(gen, room));
+  // furniture is placed AFTER doors so it can avoid blocking doorways.
+  const furniture = rooms.flatMap((room) => {
+    const ctx: RoomContext = { doors: doorsForRoom(room, doors) };
+    return furnishRoom(gen, room, ctx);
+  });
   const hvac = placeHvac(gen, rooms, template.wallHeight, { fans: template.fans });
 
   const grid = rasterize(rooms, bounds);
@@ -159,3 +186,5 @@ export function generateFloorPlan(housingType: HousingType): FloorPlan {
     grid,
   };
 }
+
+export type { Side };
