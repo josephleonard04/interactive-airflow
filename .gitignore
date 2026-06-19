@@ -1,0 +1,68 @@
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# ---- Node / web frontend ----
+node_modules/
+dist/
+build/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vite/
+
+# ---- Python (intent layer / tooling) ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- C++ / CUDA (LFM simulator build artifacts) ----
+*.o
+*.obj
+*.exe
+*.lib
+*.a
+*.so
+*.dll
+*.dylib
+*.ptx
+*.cubin
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+
+# ---- Large data / sim outputs (keep out of git; use external storage) ----
+data/
+*.vdb
+*.vtk
+*.vti
+*.npz
+*.npy
+*.h5
+*.hdf5
+checkpoints/
+outputs/
+
+# ---- Secrets ----
+.env
+.env.local
+*.key
+secrets.*
+
+# ---- Vendored simulator (decide later: submodule vs. local clone) ----
+# Uncomment if you clone LFM locally rather than as a submodule:
+# simulator/lfm/
