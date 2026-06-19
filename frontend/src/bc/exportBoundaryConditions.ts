@@ -1,65 +1,140 @@
-import type { Room, SceneObject, Vec3 } from "../scene/types";
+import type { FloorPlan, PlacedItem, Vec3 } from "../floorplan/types";
 
-// Translate the editor scene into a solver-agnostic boundary-condition
-// description. This is the seam between the editor and the LFM fluid simulator:
-// when an object moves, we re-derive this and hand it to the solver.
+// Translate a floor plan into a solver-agnostic boundary-condition description —
+// the seam between the editor and the LFM fluid simulator. It carries both the
+// vector geometry (walls / doors / windows / solids) and the rasterised room
+// labels so the solver knows which cells belong to which room, for airflow /
+// temperature / humidity / CO2 simulation.
 //
-// The exact schema LFM wants is TBD (pending Yuchen's answer on how solid
-// objects / BCs are defined — see docs/draft-reply-yuchen.md, question 4). For
-// now we emit a neutral JSON the bridge can adapt: an axis-aligned bounding box
-// per solid, and inlet/outlet patches with a flow magnitude.
+// The exact schema LFM wants is TBD (see docs/draft-reply-yuchen.md, Q4); this
+// is a neutral JSON the integration bridge can adapt.
 
-export interface SolidBC {
+export interface AABB {
   id: string;
-  name: string;
-  // Axis-aligned bounding box in room-local metres.
+  type: string;
+  roomId: string;
   min: Vec3;
   max: Vec3;
 }
 
 export interface FlowBC {
   id: string;
-  name: string;
-  type: "inlet" | "outlet";
+  type: string; // supply / return / ac
+  role: "inlet" | "outlet";
+  roomId: string;
   center: Vec3;
   size: Vec3;
-  flow: number; // m^3/s
+  flow: number;
+}
+
+export interface WallBC {
+  a: [number, number];
+  b: [number, number];
+  thickness: number;
+  height: number;
+  exterior: boolean;
+  roomId: string;
+}
+
+export interface OpeningBC {
+  id: string;
+  a: [number, number];
+  b: [number, number];
+  width: number;
+  sill: number;
+  height: number;
+  rooms: [string, string];
 }
 
 export interface BoundaryConditions {
-  room: { size: Vec3 };
-  solids: SolidBC[];
+  housingType: string;
+  name: string;
+  bounds: FloorPlan["bounds"];
+  wallHeight: number;
+  rooms: Array<{ id: string; type: string; name: string; rect: FloorPlan["bounds"] }>;
+  grid: FloorPlan["grid"];
+  walls: WallBC[];
+  doors: OpeningBC[];
+  windows: OpeningBC[];
+  solids: AABB[];
   flows: FlowBC[];
+  fans: AABB[];
 }
 
-function aabb(o: SceneObject): { min: Vec3; max: Vec3 } {
-  // Axis-aligned for now (rotationY ignored until we need oriented boxes).
-  const [x, y, z] = o.position;
-  const [w, h, d] = o.size;
+function aabb(it: PlacedItem): AABB {
+  const [x, y, z] = it.position;
+  const [w, h, d] = it.size;
   return {
+    id: it.id,
+    type: it.type,
+    roomId: it.roomId,
     min: [x - w / 2, y - h / 2, z - d / 2],
     max: [x + w / 2, y + h / 2, z + d / 2],
   };
 }
 
-export function exportBoundaryConditions(room: Room, objects: SceneObject[]): BoundaryConditions {
-  const solids: SolidBC[] = [];
+export function exportBoundaryConditions(plan: FloorPlan): BoundaryConditions {
+  const solids: AABB[] = [];
   const flows: FlowBC[] = [];
+  const fans: AABB[] = [];
 
-  for (const o of objects) {
-    if (o.kind === "furniture") {
-      solids.push({ id: o.id, name: o.name, ...aabb(o) });
-    } else {
+  for (const it of plan.items) {
+    if (it.category === "furniture") {
+      solids.push(aabb(it));
+    } else if (it.type === "return") {
       flows.push({
-        id: o.id,
-        name: o.name,
-        type: o.kind === "supply" ? "inlet" : "outlet",
-        center: o.position,
-        size: o.size,
-        flow: o.flow ?? 0,
+        id: it.id,
+        type: it.type,
+        role: "outlet",
+        roomId: it.roomId,
+        center: it.position,
+        size: it.size,
+        flow: it.flow ?? 0,
       });
+    } else if (it.type === "supply" || it.type === "ac") {
+      flows.push({
+        id: it.id,
+        type: it.type,
+        role: "inlet",
+        roomId: it.roomId,
+        center: it.position,
+        size: it.size,
+        flow: it.flow ?? 0,
+      });
+    } else if (it.type === "fan") {
+      fans.push(aabb(it));
     }
   }
 
-  return { room: { size: room.size }, solids, flows };
+  const mapOpening = (o: FloorPlan["doors"][number]): OpeningBC => ({
+    id: o.id,
+    a: o.a,
+    b: o.b,
+    width: o.width,
+    sill: o.sill,
+    height: o.height,
+    rooms: o.rooms as [string, string],
+  });
+
+  return {
+    housingType: plan.housingType,
+    name: plan.name,
+    bounds: plan.bounds,
+    wallHeight: plan.wallHeight,
+    rooms: plan.rooms.map((r) => ({ id: r.id, type: r.type, name: r.name, rect: r.rect })),
+    grid: plan.grid,
+    walls: plan.walls.map((w) => ({
+      a: w.a,
+      b: w.b,
+      thickness: w.thickness,
+      height: w.height,
+      exterior: w.exterior,
+      roomId: w.roomId,
+    })),
+    doors: plan.doors.map(mapOpening),
+    windows: plan.windows.map(mapOpening),
+    solids,
+    flows,
+    fans,
+  };
 }

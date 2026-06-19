@@ -1,75 +1,80 @@
-import { useSceneStore } from "./store";
-import type { ObjectKind, SceneObject, Vec3 } from "./types";
 import { exportBoundaryConditions } from "../bc/exportBoundaryConditions";
+import { HOUSING_TYPES } from "../floorplan/templates";
+import type { FloorPlan, HousingType, PlacedItem, RoomDef, Vec3 } from "../floorplan/types";
+import { useSceneStore } from "./store";
 
-// Programmatic control surface for the scene.
+// Programmatic control surface — the second of the two control paths the advisor
+// asked for. The mouse moves items via the gizmo; this api moves them (and
+// switches floor plans) from scripts / the console / the future intent layer.
+// Both go through the same store, so they can never disagree.
 //
-// This is the second of the two control paths the advisor asked for: the user
-// can move objects with the mouse, AND a function call can translate/add/remove
-// objects. Both go through the same store, so they can never disagree.
-//
-// The intent->physics layer (and scripts / tests) will eventually drive the
-// scene through THIS api rather than through the UI.
+//   airflow.generate("two_bedroom")
+//   airflow.list()
+//   airflow.find("Bed")                 // first item whose type/name matches
+//   airflow.translate("bed-1", [0.5, 0, 0])
+//   airflow.exportBoundaryConditions()
 
 export const sceneApi = {
-  /** List all objects (snapshot copy). */
-  list(): SceneObject[] {
-    return useSceneStore.getState().objects.map((o) => ({ ...o }));
+  housingTypes(): HousingType[] {
+    return [...HOUSING_TYPES];
   },
 
-  get(id: string): SceneObject | undefined {
-    const o = useSceneStore.getState().objects.find((x) => x.id === id);
-    return o ? { ...o } : undefined;
+  /** Generate (replace) the floor plan for a housing type. */
+  generate(type: HousingType): void {
+    useSceneStore.getState().generate(type);
   },
 
-  /** Find the first object whose name matches (case-insensitive). */
-  find(name: string): SceneObject | undefined {
-    const n = name.toLowerCase();
-    const o = useSceneStore.getState().objects.find((x) => x.name.toLowerCase() === n);
-    return o ? { ...o } : undefined;
+  getFloorPlan(): FloorPlan {
+    return useSceneStore.getState().plan;
   },
 
-  add(spec: Partial<SceneObject> & { kind: ObjectKind }): string {
-    return useSceneStore.getState().addObject(spec);
+  listRooms(): RoomDef[] {
+    return useSceneStore.getState().plan.rooms.map((r) => ({ ...r }));
   },
 
-  remove(id: string): void {
-    useSceneStore.getState().removeObject(id);
+  /** All movable items (furniture + HVAC). */
+  list(): PlacedItem[] {
+    return useSceneStore.getState().plan.items.map((it) => ({ ...it }));
   },
 
-  /** Move an object by a delta (the "translate object in the scene" call). */
+  get(id: string): PlacedItem | undefined {
+    const it = useSceneStore.getState().plan.items.find((x) => x.id === id);
+    return it ? { ...it } : undefined;
+  },
+
+  /** First item matching by id, type, or (case-insensitive) — handy for scripting. */
+  find(query: string): PlacedItem | undefined {
+    const q = query.toLowerCase();
+    const it = useSceneStore
+      .getState()
+      .plan.items.find((x) => x.id === query || x.type.toLowerCase() === q);
+    return it ? { ...it } : undefined;
+  },
+
   translate(id: string, delta: Vec3): void {
     useSceneStore.getState().translate(id, delta);
   },
 
-  /** Set an object's absolute position. */
   setPosition(id: string, position: Vec3): void {
     useSceneStore.getState().setPosition(id, position);
   },
 
-  update(id: string, patch: Partial<SceneObject>): void {
-    useSceneStore.getState().updateObject(id, patch);
+  update(id: string, patch: Partial<PlacedItem>): void {
+    useSceneStore.getState().updateItem(id, patch);
   },
 
   select(id: string | null): void {
     useSceneStore.getState().select(id);
   },
 
-  reset(): void {
-    useSceneStore.getState().reset();
-  },
-
-  /** Export the current scene as boundary conditions for the fluid solver. */
+  /** Export the current plan as boundary conditions for the fluid solver. */
   exportBoundaryConditions() {
-    const { room, objects } = useSceneStore.getState();
-    return exportBoundaryConditions(room, objects);
+    return exportBoundaryConditions(useSceneStore.getState().plan);
   },
 };
 
 export type SceneApi = typeof sceneApi;
 
-// Expose on window so it can be driven from the browser console, scripts, or
-// the future intent layer. e.g.  airflow.translate("bed-1", [0.5, 0, 0])
 declare global {
   interface Window {
     airflow: SceneApi;

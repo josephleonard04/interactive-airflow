@@ -208,3 +208,69 @@ button.primary {
   padding: 4px 6px;
   color: var(--accent);
 }
+
+/* housing-type selector */
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+button.type {
+  text-align: left;
+  font-size: 13px;
+}
+
+button.type.selected {
+  border-color: var(--accent);
+  background: #11343b;
+  color: var(--accent);
+}
+
+/* room browser */
+.rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.room-group {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.room-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  font-size: 13px;
+}
+
+.room-head .kind {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.room-group .list {
+  padding: 4px;
+}
+
+.room-group .list li {
+  background: transparent;
+  padding: 4px 6px;
+}
+
+.room-group .list li:hover {
+  background: var(--panel-2);
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  flex: 0 0 auto;
+}
