@@ -1,66 +1,128 @@
-import { useEffect, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
-import { Grid, OrbitControls, TransformControls } from "@react-three/drei";
+import { useEffect, useRef, useState } from "react";
+import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Grid, OrbitControls } from "@react-three/drei";
+import * as THREE from "three";
 import { useSceneStore } from "../scene/store";
-import type { Vec3 } from "../floorplan/types";
+import type { Vec2, Vec3 } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { ItemMesh } from "./ItemMesh";
 
-// The 3D viewport. The plan is authored in the positive quadrant, so we wrap
-// everything in a group translated to centre the building at the origin — the
-// selected item's local position then equals its plan coordinate, which is what
-// the gizmo edits and what we commit back to the store.
-
-function SelectedTransform({ offset }: { offset: Vec3 }) {
-  const transformRef = useRef<any>(null);
-  const selectedId = useSceneStore((s) => s.selectedId);
-  const items = useSceneStore((s) => s.plan.items);
+// Drag-to-move: while an item is being dragged we raycast the pointer onto a
+// horizontal plane at the item's height and follow it. Camera orbit is disabled
+// during a drag so the two don't fight.
+function DragController({ offset }: { offset: Vec3 }) {
+  const { camera, gl, controls } = useThree();
+  const plan = useSceneStore((s) => s.plan);
+  const draggingId = useSceneStore((s) => s.draggingId);
   const setPosition = useSceneStore((s) => s.setPosition);
-  const selected = items.find((it) => it.id === selectedId) ?? null;
+  const setDragging = useSceneStore((s) => s.setDragging);
 
-  if (!selected) return null;
+  useEffect(() => {
+    if (!draggingId) return;
+    const item = plan.items.find((i) => i.id === draggingId);
+    if (!item) return;
+
+    const anyControls = controls as unknown as { enabled?: boolean } | null;
+    const prevEnabled = anyControls?.enabled;
+    if (anyControls) anyControls.enabled = false;
+
+    const worldY = item.position[1];
+    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldY);
+    const ray = new THREE.Raycaster();
+    const b = plan.bounds;
+
+    const ndc = (e: PointerEvent) => {
+      const rect = gl.domElement.getBoundingClientRect();
+      return new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+    };
+
+    const onMove = (e: PointerEvent) => {
+      ray.setFromCamera(ndc(e), camera);
+      const pt = new THREE.Vector3();
+      if (!ray.ray.intersectPlane(dragPlane, pt)) return;
+      const px = Math.min(b.x + b.w, Math.max(b.x, pt.x - offset[0]));
+      const pz = Math.min(b.z + b.d, Math.max(b.z, pt.z - offset[2]));
+      setPosition(draggingId, [px, worldY, pz]);
+    };
+    const onUp = () => setDragging(null);
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (anyControls && prevEnabled !== undefined) anyControls.enabled = prevEnabled;
+    };
+  }, [draggingId, camera, gl, controls, offset, plan.items, plan.bounds, setPosition, setDragging]);
+
+  return null;
+}
+
+// Invisible ground plane: used to add wall points in draw-wall mode, and to
+// clear the selection when clicking empty floor in select mode.
+function GroundPlane({ offset }: { offset: Vec3 }) {
+  const mode = useSceneStore((s) => s.mode);
+  const addWall = useSceneStore((s) => s.addWall);
+  const clearSelection = useSceneStore((s) => s.clearSelection);
+  const [pending, setPending] = useState<Vec2 | null>(null);
+
+  const snap = (v: number) => Math.round(v / 0.1) * 0.1;
+
+  const onDown = (e: ThreeEvent<PointerEvent>) => {
+    const px = snap(e.point.x - offset[0]);
+    const pz = snap(e.point.z - offset[2]);
+    if (mode === "draw-wall") {
+      e.stopPropagation();
+      if (!pending) setPending([px, pz]);
+      else {
+        addWall(pending, [px, pz]);
+        setPending(null);
+      }
+    } else {
+      clearSelection();
+    }
+  };
 
   return (
-    <group position={offset}>
-      <TransformControls
-        ref={transformRef}
-        mode="translate"
-        onMouseUp={() => {
-          const obj = transformRef.current?.object;
-          if (obj) setPosition(selected.id, [obj.position.x, obj.position.y, obj.position.z] as Vec3);
-        }}
-      >
-        <ItemMesh item={selected} />
-      </TransformControls>
-    </group>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} onPointerDown={onDown} visible={false}>
+      <planeGeometry args={[200, 200]} />
+    </mesh>
   );
 }
 
 export function Editor() {
   const plan = useSceneStore((s) => s.plan);
-  const selectedId = useSceneStore((s) => s.selectedId);
-  const select = useSceneStore((s) => s.select);
+  const mode = useSceneStore((s) => s.mode);
+  const draggingId = useSceneStore((s) => s.draggingId);
+  const clearSelection = useSceneStore((s) => s.clearSelection);
+  const removeSelected = useSceneStore((s) => s.removeSelected);
+  const setMode = useSceneStore((s) => s.setMode);
 
   const { bounds, wallHeight } = plan;
   const offset: Vec3 = [-(bounds.x + bounds.w / 2), 0, -(bounds.z + bounds.d / 2)];
   const span = Math.max(bounds.w, bounds.d);
+  const orbitRef = useRef<any>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") select(null);
+      if (e.key === "Escape") {
+        clearSelection();
+        setMode("select");
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        removeSelected();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [select]);
+  }, [clearSelection, removeSelected, setMode]);
 
   return (
-    <Canvas
-      shadows
-      camera={{ position: [span * 0.75, span * 0.95, span * 0.95], fov: 45 }}
-      onPointerMissed={() => select(null)}
-    >
+    <Canvas shadows camera={{ position: [span * 0.7, span * 0.95, span * 0.95], fov: 45 }}>
       <color attach="background" args={["#0f1419"]} />
-      <ambientLight intensity={0.75} />
+      <ambientLight intensity={0.78} />
       <directionalLight position={[span, span * 1.5, span]} intensity={1.1} castShadow />
       <hemisphereLight intensity={0.3} />
 
@@ -72,18 +134,24 @@ export function Editor() {
         fadeDistance={Math.max(40, span * 4)}
       />
 
+      <GroundPlane offset={offset} />
+
       <group position={offset}>
         <FloorPlanView plan={plan} />
-        {plan.items
-          .filter((it) => it.id !== selectedId)
-          .map((it) => (
-            <ItemMesh key={it.id} item={it} />
-          ))}
+        {plan.items.map((it) => (
+          <ItemMesh key={it.id} item={it} />
+        ))}
       </group>
 
-      <SelectedTransform offset={offset} />
+      <DragController offset={offset} />
 
-      <OrbitControls makeDefault enableDamping target={[0, wallHeight / 3, 0]} />
+      <OrbitControls
+        ref={orbitRef}
+        makeDefault
+        enableDamping
+        target={[0, wallHeight / 3, 0]}
+        enabled={!draggingId && mode === "select"}
+      />
     </Canvas>
   );
 }

@@ -54,18 +54,31 @@ generate.ts     generateFloorPlan(housingType) → FloorPlan (ties it all togeth
 palette.ts      room / item colours
 ```
 
+## Editing (for non-expert homeowners)
+
+The layout is a starting point — every home is editable:
+
+- **Move furniture**: click an item and **drag it across the floor**, drop to place. No typing.
+- **Add furniture / vents**: pick from the palette (furniture, kitchen & bath, HVAC); the new item drops in the centre to drag where you want.
+- **Remove**: select an item and press Delete (or use the ✕ / "Remove" button).
+- **Walls**: "Add wall" mode — click two floor points to draw an axis-aligned wall. Click an existing wall to select it, then Delete to open up a room.
+
+Furniture is placed minimally and **avoids blocking doorways** (placement skips door spans). HVAC is sensible: one ceiling supply per conditioned room, **one central return**, a wall AC unit, bathroom exhaust fans, and optional ceiling fans. Every exterior wall of a habitable room gets a window.
+
 ## The two control paths (advisor requirement)
 
 Both mutate the same store, so they never disagree:
 
-1. **Mouse** — click an item to select it, drag the gizmo to move it, or type exact positions in the panel.
+1. **Mouse** — select + drag furniture, draw/delete walls, add/remove from the panel.
 2. **Programmatic** — `window.airflow` (see `src/scene/sceneApi.ts`):
 
    ```js
    airflow.generate("two_bedroom")        // switch floor plan
    airflow.listRooms()                    // room hierarchy
    airflow.list()                         // movable items (furniture + HVAC)
-   airflow.find("bed")                    // first matching item
+   airflow.add("plant", [2, 0, 2])        // add an item at a floor point
+   airflow.remove("sofa-1")               // remove an item
+   airflow.addWall([1, 1], [3, 1])        // draw an axis-aligned wall
    airflow.translate("bed-1", [0.5,0,0])  // move it (= change a boundary condition)
    airflow.exportBoundaryConditions()     // full plan → solver JSON
    ```
