@@ -67,6 +67,14 @@ export const sceneApi = {
     useSceneStore.getState().rotateItem(id, deltaRad);
   },
 
+  undo(): void {
+    useSceneStore.getState().undo();
+  },
+
+  redo(): void {
+    useSceneStore.getState().redo();
+  },
+
   addWall(a: Vec2, b: Vec2): void {
     useSceneStore.getState().addWall(a, b);
   },

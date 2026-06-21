@@ -166,11 +166,12 @@ export function carveOpening(walls: WallSeg[], o: Opening): void {
 export interface WallPiece {
   center: Vec3;
   size: Vec3;
-  kind: "solid" | "pane";
 }
 
-/** Decompose a wall into solid boxes (and translucent window panes) around its
- *  openings, for rendering. Works in plan (un-centred) coordinates. */
+/** Decompose a wall into solid boxes around its openings, for rendering. Doors
+ *  keep a header (lintel) above them; windows keep a sill below and a header
+ *  above. The glass / door panel itself is drawn separately (OpeningLeaf), so no
+ *  void is left above a door. Works in plan (un-centred) coordinates. */
 export function wallPieces(w: WallSeg): WallPiece[] {
   const line = w.axis === "z" ? w.a[0] : w.a[1];
   const start = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
@@ -178,14 +179,14 @@ export function wallPieces(w: WallSeg): WallPiece[] {
   const t = w.thickness;
   const h = w.height;
 
-  const box = (s: number, e: number, y0: number, y1: number, kind: WallPiece["kind"]): WallPiece => {
+  const box = (s: number, e: number, y0: number, y1: number): WallPiece => {
     const along = (s + e) / 2;
     const len = e - s;
     const yc = (y0 + y1) / 2;
     const yh = y1 - y0;
     const center: Vec3 = w.axis === "z" ? [line, yc, along] : [along, yc, line];
     const size: Vec3 = w.axis === "z" ? [t, yh, len] : [len, yh, t];
-    return { center, size, kind };
+    return { center, size };
   };
 
   const openings = [...w.openings].sort((o1, o2) => openingSpan(o1).s - openingSpan(o2).s);
@@ -196,18 +197,13 @@ export function wallPieces(w: WallSeg): WallPiece[] {
     const sp = openingSpan(o);
     const s = Math.max(sp.s, start);
     const e = Math.min(sp.e, end);
-    if (s > cursor + EPS) pieces.push(box(cursor, s, 0, h, "solid")); // solid run before opening
-    if (o.kind === "door") {
-      // full-height gap: nothing
-    } else {
-      // window: sill below, header above, translucent pane in between
-      pieces.push(box(s, e, 0, o.sill, "solid"));
-      pieces.push(box(s, e, o.sill + o.height, h, "solid"));
-      pieces.push(box(s, e, o.sill, o.sill + o.height, "pane"));
-    }
+    if (s > cursor + EPS) pieces.push(box(cursor, s, 0, h)); // solid run before opening
+    const top = o.sill + o.height;
+    if (o.sill > EPS) pieces.push(box(s, e, 0, o.sill)); // sill below (windows)
+    if (top < h - EPS) pieces.push(box(s, e, top, h)); // header above (doors + windows)
     cursor = Math.max(cursor, e);
   }
-  if (cursor < end - EPS) pieces.push(box(cursor, end, 0, h, "solid"));
+  if (cursor < end - EPS) pieces.push(box(cursor, end, 0, h));
   return pieces;
 }
 
