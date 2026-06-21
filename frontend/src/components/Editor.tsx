@@ -119,6 +119,13 @@ export function Editor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelection, removeSelected, setMode]);
 
+  // Ensure the canvas measures its container once mounted (covers cases where
+  // the resize observer doesn't fire on the mount tick).
+  useEffect(() => {
+    const id = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   return (
     <Canvas shadows camera={{ position: [span * 0.7, span * 0.95, span * 0.95], fov: 45 }}>
       <color attach="background" args={["#0f1419"]} />

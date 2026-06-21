@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
-import { HOUSING_TYPES, TEMPLATES } from "../floorplan/templates";
 import type { PlacedItem } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
@@ -12,11 +11,10 @@ function pretty(t: string) {
 
 export function Panel() {
   const plan = useSceneStore((s) => s.plan);
-  const housingType = useSceneStore((s) => s.housingType);
   const mode = useSceneStore((s) => s.mode);
   const selectedId = useSceneStore((s) => s.selectedId);
   const selectedWallId = useSceneStore((s) => s.selectedWallId);
-  const generate = useSceneStore((s) => s.generate);
+  const openSetup = useSceneStore((s) => s.openSetup);
   const setMode = useSceneStore((s) => s.setMode);
   const selectItem = useSceneStore((s) => s.selectItem);
   const removeItem = useSceneStore((s) => s.removeItem);
@@ -41,11 +39,13 @@ export function Panel() {
     console.log("[airflow] boundary conditions", bc);
     navigator.clipboard?.writeText(JSON.stringify(bc, null, 2)).catch(() => {});
     alert(
-      `Saved "${bc.name}" airflow setup.\n` +
+      `Saved your home’s airflow setup.\n` +
         `${bc.rooms.length} rooms · ${bc.walls.length} walls · ${bc.doors.length} doors · ` +
         `${bc.windows.length} windows · ${bc.solids.length} furniture · ${bc.flows.length} vents`,
     );
   };
+
+  const { length, width, height } = plan.size;
 
   return (
     <aside className="panel">
@@ -53,28 +53,21 @@ export function Panel() {
       <p className="subtitle">design your home’s airflow — no expertise needed</p>
 
       <section>
-        <h2>1 · Choose your home</h2>
-        <div className="types">
-          {HOUSING_TYPES.map((t) => (
-            <button
-              key={t}
-              className={t === housingType ? "type selected" : "type"}
-              onClick={() => generate(t)}
-            >
-              {TEMPLATES[t].name}
-            </button>
-          ))}
+        <h2>Your home</h2>
+        <div className="home-size">
+          <span>
+            {length.toFixed(1)} × {width.toFixed(1)} × {height.toFixed(1)} m
+          </span>
+          <button className="ghost" onClick={openSetup}>
+            Change size
+          </button>
         </div>
-        <p className="muted-line">Switching homes starts a fresh layout.</p>
       </section>
 
       <section>
-        <h2>2 · Edit the space</h2>
+        <h2>Edit the space</h2>
         <div className="tools">
-          <button
-            className={mode === "select" ? "tool active" : "tool"}
-            onClick={() => setMode("select")}
-          >
+          <button className={mode === "select" ? "tool active" : "tool"} onClick={() => setMode("select")}>
             ✋ Move / select
           </button>
           <button
@@ -99,19 +92,16 @@ export function Panel() {
             <>
               <h2>Selected · {pretty(selected.type)}</h2>
               <p className="muted-line">
-                in {plan.rooms.find((r) => r.id === selected.roomId)?.name ?? "—"} · drag in the
-                view to move
+                in {plan.rooms.find((r) => r.id === selected.roomId)?.name ?? "—"} · drag in the view to move
               </p>
-              {selected.flow !== undefined && selected.type !== "fan" && (
+              {selected.flow !== undefined && selected.type !== "fan" && selected.type !== "heater" && (
                 <label className="field">
                   <span>airflow (m³/s)</span>
                   <input
                     type="number"
                     step={0.01}
                     value={Number(selected.flow.toFixed(2))}
-                    onChange={(e) =>
-                      updateItem(selected.id, { flow: parseFloat(e.target.value) || 0 })
-                    }
+                    onChange={(e) => updateItem(selected.id, { flow: parseFloat(e.target.value) || 0 })}
                   />
                 </label>
               )}
@@ -131,7 +121,7 @@ export function Panel() {
       )}
 
       <section>
-        <h2>3 · Add furniture &amp; vents</h2>
+        <h2>Add things</h2>
         {PALETTE.map((group) => (
           <div key={group.group} className="palette-group">
             <div className="palette-label">{group.group}</div>
@@ -149,9 +139,7 @@ export function Panel() {
       </section>
 
       <section>
-        <h2>
-          {plan.name} · {plan.bounds.w.toFixed(1)}×{plan.bounds.d.toFixed(1)} m
-        </h2>
+        <h2>Rooms &amp; objects</h2>
         <div className="rooms">
           {plan.rooms.map((room) => {
             const items = itemsByRoom.get(room.id) ?? [];
@@ -160,7 +148,6 @@ export function Panel() {
                 <div className="room-head">
                   <span className="dot" style={{ background: ROOM_COLOR[room.type] }} />
                   <span className="name">{room.name}</span>
-                  <span className="kind">{pretty(room.type)}</span>
                 </div>
                 <ul className="list">
                   {items.map((it) => (
@@ -170,8 +157,7 @@ export function Panel() {
                       onClick={() => selectItem(it.id)}
                     >
                       <span className="swatch" style={{ background: itemColor(it.type) }} />
-                      <span className="name">{pretty(it.type)}</span>
-                      <span className="kind">{it.category === "hvac" ? "HVAC" : ""}</span>
+                      <span className="name">{pretty(it.type === "supply" ? "vent" : it.type)}</span>
                       <button
                         className="x"
                         title="Remove"
