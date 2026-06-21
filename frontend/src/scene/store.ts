@@ -35,10 +35,14 @@ export interface SceneState {
   selectedOpeningId: string | null;
   draggingId: string | null;
   mode: EditMode;
+  past: FloorPlan[];
+  future: FloorPlan[];
 
   generate: (size: HomeSize) => void;
   openSetup: () => void;
   setMode: (mode: EditMode) => void;
+  undo: () => void;
+  redo: () => void;
 
   selectItem: (id: string | null) => void;
   selectWall: (id: string | null) => void;
@@ -64,6 +68,14 @@ export interface SceneState {
 }
 
 let customId = 0;
+const HISTORY = 50;
+let dragSnapshot: FloorPlan | null = null;
+
+/** History patch to prepend to a mutating `set`: pushes the current plan onto the
+ *  undo stack and clears the redo stack. */
+function snapshot(s: SceneState): { past: FloorPlan[]; future: FloorPlan[] } {
+  return { past: [...s.past, s.plan].slice(-HISTORY), future: [] };
+}
 
 function mapItems(plan: FloorPlan, fn: (it: PlacedItem) => PlacedItem): FloorPlan {
   return { ...plan, items: plan.items.map(fn) };
@@ -82,6 +94,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   selectedOpeningId: null,
   draggingId: null,
   mode: "select",
+  past: [],
+  future: [],
 
   generate: (size) =>
     set({
@@ -92,9 +106,39 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       selectedOpeningId: null,
       draggingId: null,
       mode: "select",
+      past: [],
+      future: [],
     }),
 
   openSetup: () => set({ started: false }),
+
+  undo: () =>
+    set((s) => {
+      if (!s.past.length) return {};
+      const prev = s.past[s.past.length - 1];
+      return {
+        plan: prev,
+        past: s.past.slice(0, -1),
+        future: [s.plan, ...s.future].slice(0, HISTORY),
+        selectedId: null,
+        selectedWallId: null,
+        selectedOpeningId: null,
+      };
+    }),
+
+  redo: () =>
+    set((s) => {
+      if (!s.future.length) return {};
+      const next = s.future[0];
+      return {
+        plan: next,
+        future: s.future.slice(1),
+        past: [...s.past, s.plan].slice(-HISTORY),
+        selectedId: null,
+        selectedWallId: null,
+        selectedOpeningId: null,
+      };
+    }),
 
   setMode: (mode) => set({ mode, selectedId: null, selectedWallId: null, selectedOpeningId: null }),
 
@@ -103,7 +147,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   selectOpening: (id) => set({ selectedOpeningId: id, selectedId: null, selectedWallId: null }),
   clearSelection: () => set({ selectedId: null, selectedWallId: null, selectedOpeningId: null }),
 
-  setDragging: (id) => set({ draggingId: id }),
+  setDragging: (id) => {
+    if (id) {
+      dragSnapshot = get().plan; // remember pre-drag plan for a single undo step
+    } else if (dragSnapshot) {
+      const moved = dragSnapshot !== get().plan;
+      const snap = dragSnapshot;
+      dragSnapshot = null;
+      if (moved) set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [] }));
+    }
+    set({ draggingId: id });
+  },
 
   setPosition: (id, position) =>
     set((s) => ({ plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, position } : it)) })),
@@ -118,10 +172,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     })),
 
   updateItem: (id, patch) =>
-    set((s) => ({ plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, ...patch } : it)) })),
+    set((s) => ({
+      ...snapshot(s),
+      plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, ...patch } : it)),
+    })),
 
   rotateItem: (id, deltaRad) =>
     set((s) => ({
+      ...snapshot(s),
       plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, rotationY: it.rotationY + deltaRad } : it)),
     })),
 
@@ -146,12 +204,18 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       flow: spec.flow,
       movable: true,
     };
-    set((s) => ({ plan: { ...s.plan, items: [...s.plan.items, item] }, selectedId: id, selectedWallId: null }));
+    set((s) => ({
+      ...snapshot(s),
+      plan: { ...s.plan, items: [...s.plan.items, item] },
+      selectedId: id,
+      selectedWallId: null,
+    }));
     return id;
   },
 
   removeItem: (id) =>
     set((s) => ({
+      ...snapshot(s),
       plan: { ...s.plan, items: s.plan.items.filter((it) => it.id !== id) },
       selectedId: s.selectedId === id ? null : s.selectedId,
     })),
@@ -185,7 +249,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             roomId: "custom",
             openings: [],
           };
-    set((s) => ({ plan: { ...s.plan, walls: [...s.plan.walls, wall] } }));
+    set((s) => ({ ...snapshot(s), plan: { ...s.plan, walls: [...s.plan.walls, wall] } }));
   },
 
   removeWall: (id) =>
@@ -205,7 +269,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const we = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
         return Math.min(tE, we) - Math.max(tS, ws) <= 0.01;
       });
-      return { plan: { ...s.plan, walls }, selectedWallId: null };
+      return { ...snapshot(s), plan: { ...s.plan, walls }, selectedWallId: null };
     }),
 
   addOpening: (wallId, kind) => {
@@ -268,13 +332,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         kind === "door"
           ? { ...base, doors: [...st.plan.doors, opening] }
           : { ...base, windows: [...st.plan.windows, opening] };
-      return { plan: next, selectedOpeningId: opening.id, selectedWallId: null, selectedId: null };
+      return { ...snapshot(st), plan: next, selectedOpeningId: opening.id, selectedWallId: null, selectedId: null };
     });
     return opening.id;
   },
 
   removeOpening: (id) =>
     set((s) => ({
+      ...snapshot(s),
       plan: {
         ...s.plan,
         walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.filter((o) => o.id !== id) })),
@@ -288,6 +353,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((s) => {
       const flip = (o: Opening) => (o.id === id ? { ...o, open: !o.open } : o);
       return {
+        ...snapshot(s),
         plan: {
           ...s.plan,
           walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.map(flip) })),

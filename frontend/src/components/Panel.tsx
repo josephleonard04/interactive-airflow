@@ -32,6 +32,10 @@ export function Panel() {
   const selectedOpeningId = useSceneStore((s) => s.selectedOpeningId);
   const openSetup = useSceneStore((s) => s.openSetup);
   const setMode = useSceneStore((s) => s.setMode);
+  const undo = useSceneStore((s) => s.undo);
+  const redo = useSceneStore((s) => s.redo);
+  const canUndo = useSceneStore((s) => s.past.length > 0);
+  const canRedo = useSceneStore((s) => s.future.length > 0);
   const selectItem = useSceneStore((s) => s.selectItem);
   const selectOpening = useSceneStore((s) => s.selectOpening);
   const removeItem = useSceneStore((s) => s.removeItem);
@@ -104,6 +108,14 @@ export function Panel() {
             onClick={() => setMode(mode === "draw-wall" ? "select" : "draw-wall")}
           >
             ➕ Add wall
+          </button>
+        </div>
+        <div className="tools" style={{ marginTop: 6 }}>
+          <button className="tool" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+            ↶ Undo
+          </button>
+          <button className="tool" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+            ↷ Redo
           </button>
         </div>
         {mode === "draw-wall" ? (

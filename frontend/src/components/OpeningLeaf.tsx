@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Edges } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { Opening } from "../floorplan/types";
@@ -15,6 +16,7 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
   const mode = useSceneStore((s) => s.mode);
   const selectOpening = useSceneStore((s) => s.selectOpening);
   const selected = useSceneStore((s) => s.selectedOpeningId) === opening.id;
+  const [hovered, setHovered] = useState(false);
 
   const { a, b, kind, sill, height, open } = opening;
   const vertical = Math.abs(a[0] - b[0]) < 1e-3;
@@ -41,7 +43,15 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
   };
 
   return (
-    <group onPointerDown={onDown}>
+    <group
+      onPointerDown={onDown}
+      onPointerOver={(e) => {
+        if (mode !== "select") return;
+        e.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
       {/* frame (static, in the wall plane) */}
       <group position={[cx, 0, cz]} rotation={[0, base, 0]}>
         <mesh position={[-width / 2 - FRAME / 2, sillY + height / 2, 0]}>
@@ -73,7 +83,9 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
           ) : (
             <meshStandardMaterial color="#bfe6ff" transparent opacity={0.4} roughness={0.1} metalness={0.1} />
           )}
-          {selected && <Edges scale={1.04} threshold={15} color="#22d3ee" />}
+          {(selected || hovered) && (
+            <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
+          )}
         </mesh>
         {isDoor && (
           <mesh position={[width * 0.86, height * 0.5, thickness / 2 + 0.02]}>

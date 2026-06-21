@@ -25,6 +25,8 @@ npm run dev        # http://localhost:5173
 
 ## Editing (drag-first, for non-experts)
 
+- **Undo / redo**: buttons in the panel, or **Ctrl/Cmd+Z** / **Ctrl+Shift+Z**. A
+  drag counts as a single undo step.
 - **Move**: click an item and **drag it across the floor**, drop to place.
 - **Rotate**: select an item and press **R** (or the Rotate 90° button).
 - **Add**: pick from the palette (furniture / heating-cooling-air); it drops in

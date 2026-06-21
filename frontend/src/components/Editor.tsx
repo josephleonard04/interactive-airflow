@@ -97,6 +97,8 @@ export function Editor() {
   const removeSelected = useSceneStore((s) => s.removeSelected);
   const rotateItem = useSceneStore((s) => s.rotateItem);
   const setMode = useSceneStore((s) => s.setMode);
+  const undo = useSceneStore((s) => s.undo);
+  const redo = useSceneStore((s) => s.redo);
 
   const { bounds, wallHeight } = plan;
   const offset: Vec3 = [-(bounds.x + bounds.w / 2), 0, -(bounds.z + bounds.d / 2)];
@@ -105,6 +107,21 @@ export function Editor() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      const meta = e.ctrlKey || e.metaKey;
+      if (meta && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (meta && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (typing) return;
       if (e.key === "Escape") {
         clearSelection();
         setMode("select");
@@ -116,7 +133,7 @@ export function Editor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, removeSelected, rotateItem, selectedId, setMode]);
+  }, [clearSelection, removeSelected, rotateItem, selectedId, setMode, undo, redo]);
 
   // Ensure the canvas measures its container once mounted (covers cases where
   // the resize observer doesn't fire on the mount tick).
