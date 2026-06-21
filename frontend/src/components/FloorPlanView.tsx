@@ -1,5 +1,6 @@
 import { ROOM_COLOR } from "../floorplan/palette";
 import type { FloorPlan } from "../floorplan/types";
+import { OpeningLeaf } from "./OpeningLeaf";
 import { WallMesh } from "./WallMesh";
 
 // Structural shell: a colour-coded floor per room (no on-floor text labels —
@@ -26,6 +27,10 @@ export function FloorPlanView({ plan }: { plan: FloorPlan }) {
 
       {plan.walls.map((wall) => (
         <WallMesh key={wall.id} wall={wall} />
+      ))}
+
+      {[...plan.doors, ...plan.windows].map((o) => (
+        <OpeningLeaf key={o.id} opening={o} />
       ))}
     </group>
   );

@@ -102,30 +102,31 @@ function placeEntrance(walls: WallSeg[], gen: IdGen, room: RoomDef, doors: Openi
   doors.push(door);
 }
 
-function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[], doors: Opening[]): Opening[] {
+/** One window per room, centred on the widest free run of its longest exterior wall. */
+function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[]): Opening[] {
   const windows: Opening[] = [];
-  void doors;
   for (const room of rooms) {
     const ext = walls.filter((w) => w.roomId === room.id && w.exterior && wallLen(w) >= WINDOW_WIDTH + 0.6);
+    let best: { wall: WallSeg; iv: [number, number] } | null = null;
     for (const wall of ext) {
-      let best: [number, number] | null = null;
       for (const iv of freeIntervals(wall)) {
-        if (iv[1] - iv[0] >= WINDOW_WIDTH + 0.4 && (!best || iv[1] - iv[0] > best[1] - best[0])) best = iv;
+        if (iv[1] - iv[0] >= WINDOW_WIDTH + 0.4 && (!best || iv[1] - iv[0] > best.iv[1] - best.iv[0]))
+          best = { wall, iv };
       }
-      if (!best) continue;
-      const mid = (best[0] + best[1]) / 2;
-      const win = makeOpening(
-        gen("window"),
-        "window",
-        wall.axis,
-        wallLine(wall),
-        mid - WINDOW_WIDTH / 2,
-        mid + WINDOW_WIDTH / 2,
-        [room.id, "outside"],
-      );
-      carveOpening(walls, win);
-      windows.push(win);
     }
+    if (!best) continue;
+    const mid = (best.iv[0] + best.iv[1]) / 2;
+    const win = makeOpening(
+      gen("window"),
+      "window",
+      best.wall.axis,
+      wallLine(best.wall),
+      mid - WINDOW_WIDTH / 2,
+      mid + WINDOW_WIDTH / 2,
+      [room.id, "outside"],
+    );
+    carveOpening(walls, win);
+    windows.push(win);
   }
   return windows;
 }
@@ -302,7 +303,7 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   placeDoor(walls, gen, byId("kitchen"), byId("bathroom"), doors);
   placeEntrance(walls, gen, byId("living"), doors);
 
-  const windows = placeWindows(walls, gen, rooms, doors);
+  const windows = placeWindows(walls, gen, rooms);
   const items = placeObjects(gen, rooms, doors, H);
   const grid = rasterize(rooms, bounds);
 

@@ -133,11 +133,12 @@ export function makeOpening(
     sill: kind === "door" ? 0 : WINDOW_SILL,
     height: kind === "door" ? DOOR_HEIGHT : WINDOW_HEIGHT,
     rooms,
+    open: false,
   };
 }
 
 /** Interval covered by an opening along its wall's primary axis. */
-function openingSpan(o: Opening): { axis: WallAxis; line: number; s: number; e: number } {
+export function openingSpan(o: Opening): { axis: WallAxis; line: number; s: number; e: number } {
   if (approx(o.a[0], o.b[0])) {
     // constant x → axis "z"
     return { axis: "z", line: o.a[0], s: Math.min(o.a[1], o.b[1]), e: Math.max(o.a[1], o.b[1]) };
