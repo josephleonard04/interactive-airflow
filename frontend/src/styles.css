@@ -369,6 +369,42 @@ button.ghost {
   background: transparent;
 }
 
+.btn-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.btn-row button {
+  flex: 1;
+}
+
+button.toggle {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
+button.toggle.on {
+  background: #11343b;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.op-ico {
+  flex: 0 0 auto;
+}
+
+.list li .toggle {
+  margin-left: auto;
+}
+
+.list li .op-ico + .name {
+  flex: 1;
+}
+
 /* setup screen */
 .setup {
   height: 100vh;

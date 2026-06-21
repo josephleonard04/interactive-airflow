@@ -52,6 +52,8 @@ export interface Opening {
   sill: number;
   height: number;
   rooms: [string, string | "outside"];
+  /** Whether the door/window is open (lets air through) or closed. */
+  open: boolean;
 }
 
 export type WallAxis = "x" | "z";

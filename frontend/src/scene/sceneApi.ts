@@ -63,12 +63,29 @@ export const sceneApi = {
     useSceneStore.getState().removeItem(id);
   },
 
+  rotate(id: string, deltaRad = Math.PI / 2): void {
+    useSceneStore.getState().rotateItem(id, deltaRad);
+  },
+
   addWall(a: Vec2, b: Vec2): void {
     useSceneStore.getState().addWall(a, b);
   },
 
   removeWall(id: string): void {
     useSceneStore.getState().removeWall(id);
+  },
+
+  /** Add a door/window to a wall by id; returns the opening id or null if no room. */
+  addOpening(wallId: string, kind: "door" | "window"): string | null {
+    return useSceneStore.getState().addOpening(wallId, kind);
+  },
+
+  toggleOpening(id: string): void {
+    useSceneStore.getState().toggleOpening(id);
+  },
+
+  removeOpening(id: string): void {
+    useSceneStore.getState().removeOpening(id);
   },
 
   select(id: string | null): void {

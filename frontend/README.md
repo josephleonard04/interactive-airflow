@@ -26,11 +26,16 @@ npm run dev        # http://localhost:5173
 ## Editing (drag-first, for non-experts)
 
 - **Move**: click an item and **drag it across the floor**, drop to place.
+- **Rotate**: select an item and press **R** (or the Rotate 90° button).
 - **Add**: pick from the palette (furniture / heating-cooling-air); it drops in
   the centre to drag where you want.
 - **Remove**: select + Delete, the ✕ in the list, or the "Remove" button.
 - **Walls**: "Add wall" mode → click two floor points to draw an axis-aligned
   wall; click an existing wall + Delete to open up a room.
+- **Doors & windows**: click a wall, then "Add door" / "Add window". Click a
+  door/window (in the view or the list) to **open/close** it or remove it. One
+  window per room by default. Open openings let air through; closed ones don't —
+  this is carried into the boundary-condition export.
 - **Resize**: "Change size" reopens the setup screen.
 
 ## Code map

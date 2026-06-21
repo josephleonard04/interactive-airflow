@@ -11,7 +11,7 @@ import { ItemMesh } from "./ItemMesh";
 // horizontal plane at the item's height and follow it. Camera orbit is disabled
 // during a drag so the two don't fight.
 function DragController({ offset }: { offset: Vec3 }) {
-  const { camera, gl, controls } = useThree();
+  const { camera, gl } = useThree();
   const plan = useSceneStore((s) => s.plan);
   const draggingId = useSceneStore((s) => s.draggingId);
   const setPosition = useSceneStore((s) => s.setPosition);
@@ -21,10 +21,6 @@ function DragController({ offset }: { offset: Vec3 }) {
     if (!draggingId) return;
     const item = plan.items.find((i) => i.id === draggingId);
     if (!item) return;
-
-    const anyControls = controls as unknown as { enabled?: boolean } | null;
-    const prevEnabled = anyControls?.enabled;
-    if (anyControls) anyControls.enabled = false;
 
     const worldY = item.position[1];
     const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldY);
@@ -54,9 +50,8 @@ function DragController({ offset }: { offset: Vec3 }) {
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      if (anyControls && prevEnabled !== undefined) anyControls.enabled = prevEnabled;
     };
-  }, [draggingId, camera, gl, controls, offset, plan.items, plan.bounds, setPosition, setDragging]);
+  }, [draggingId, camera, gl, offset, plan.items, plan.bounds, setPosition, setDragging]);
 
   return null;
 }
@@ -97,8 +92,10 @@ export function Editor() {
   const plan = useSceneStore((s) => s.plan);
   const mode = useSceneStore((s) => s.mode);
   const draggingId = useSceneStore((s) => s.draggingId);
+  const selectedId = useSceneStore((s) => s.selectedId);
   const clearSelection = useSceneStore((s) => s.clearSelection);
   const removeSelected = useSceneStore((s) => s.removeSelected);
+  const rotateItem = useSceneStore((s) => s.rotateItem);
   const setMode = useSceneStore((s) => s.setMode);
 
   const { bounds, wallHeight } = plan;
@@ -113,11 +110,13 @@ export function Editor() {
         setMode("select");
       } else if (e.key === "Delete" || e.key === "Backspace") {
         removeSelected();
+      } else if ((e.key === "r" || e.key === "R") && selectedId) {
+        rotateItem(selectedId, Math.PI / 2);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [clearSelection, removeSelected, setMode]);
+  }, [clearSelection, removeSelected, rotateItem, selectedId, setMode]);
 
   // Ensure the canvas measures its container once mounted (covers cases where
   // the resize observer doesn't fire on the mount tick).

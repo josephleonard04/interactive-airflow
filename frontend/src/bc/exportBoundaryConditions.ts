@@ -33,6 +33,7 @@ export interface OpeningBC {
   sill: number;
   height: number;
   rooms: [string, string];
+  open: boolean;
 }
 
 export interface BoundaryConditions {
@@ -91,6 +92,7 @@ export function exportBoundaryConditions(plan: FloorPlan): BoundaryConditions {
     sill: o.sill,
     height: o.height,
     rooms: o.rooms as [string, string],
+    open: o.open,
   });
 
   return {

@@ -1,8 +1,24 @@
 import { create } from "zustand";
 import { CATALOG } from "../floorplan/catalog";
-import { WALL_THICKNESS, rectContains } from "../floorplan/geometry";
+import {
+  DOOR_WIDTH,
+  WALL_THICKNESS,
+  WINDOW_WIDTH,
+  makeOpening,
+  openingSpan,
+  rectContains,
+} from "../floorplan/geometry";
 import { generateHome } from "../floorplan/home";
-import type { FloorPlan, HomeSize, PlacedItem, Vec2, Vec3, WallSeg } from "../floorplan/types";
+import type {
+  FloorPlan,
+  HomeSize,
+  Opening,
+  OpeningKind,
+  PlacedItem,
+  Vec2,
+  Vec3,
+  WallSeg,
+} from "../floorplan/types";
 
 // Single source of truth: the current home, selection, and edit mode. BOTH the
 // mouse (select + drag + draw) and the programmatic api mutate this store.
@@ -16,6 +32,7 @@ export interface SceneState {
   started: boolean;
   selectedId: string | null;
   selectedWallId: string | null;
+  selectedOpeningId: string | null;
   draggingId: string | null;
   mode: EditMode;
 
@@ -25,17 +42,24 @@ export interface SceneState {
 
   selectItem: (id: string | null) => void;
   selectWall: (id: string | null) => void;
+  selectOpening: (id: string | null) => void;
   clearSelection: () => void;
 
   setDragging: (id: string | null) => void;
   setPosition: (id: string, position: Vec3) => void;
   translate: (id: string, delta: Vec3) => void;
   updateItem: (id: string, patch: Partial<PlacedItem>) => void;
+  rotateItem: (id: string, deltaRad: number) => void;
 
   addItem: (type: string, position?: Vec3) => string | null;
   removeItem: (id: string) => void;
   addWall: (a: Vec2, b: Vec2) => void;
   removeWall: (id: string) => void;
+
+  addOpening: (wallId: string, kind: OpeningKind) => string | null;
+  removeOpening: (id: string) => void;
+  toggleOpening: (id: string) => void;
+
   removeSelected: () => void;
 }
 
@@ -55,6 +79,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   started: false,
   selectedId: null,
   selectedWallId: null,
+  selectedOpeningId: null,
   draggingId: null,
   mode: "select",
 
@@ -64,17 +89,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       started: true,
       selectedId: null,
       selectedWallId: null,
+      selectedOpeningId: null,
       draggingId: null,
       mode: "select",
     }),
 
   openSetup: () => set({ started: false }),
 
-  setMode: (mode) => set({ mode, selectedId: null, selectedWallId: null }),
+  setMode: (mode) => set({ mode, selectedId: null, selectedWallId: null, selectedOpeningId: null }),
 
-  selectItem: (id) => set({ selectedId: id, selectedWallId: null }),
-  selectWall: (id) => set({ selectedWallId: id, selectedId: null }),
-  clearSelection: () => set({ selectedId: null, selectedWallId: null }),
+  selectItem: (id) => set({ selectedId: id, selectedWallId: null, selectedOpeningId: null }),
+  selectWall: (id) => set({ selectedWallId: id, selectedId: null, selectedOpeningId: null }),
+  selectOpening: (id) => set({ selectedOpeningId: id, selectedId: null, selectedWallId: null }),
+  clearSelection: () => set({ selectedId: null, selectedWallId: null, selectedOpeningId: null }),
 
   setDragging: (id) => set({ draggingId: id }),
 
@@ -92,6 +119,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   updateItem: (id, patch) =>
     set((s) => ({ plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, ...patch } : it)) })),
+
+  rotateItem: (id, deltaRad) =>
+    set((s) => ({
+      plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, rotationY: it.rotationY + deltaRad } : it)),
+    })),
 
   addItem: (type, position) => {
     const spec = CATALOG[type];
@@ -176,9 +208,99 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       return { plan: { ...s.plan, walls }, selectedWallId: null };
     }),
 
+  addOpening: (wallId, kind) => {
+    const { plan } = get();
+    const wall = plan.walls.find((w) => w.id === wallId);
+    if (!wall) return null;
+    const axis = wall.axis;
+    const line = axis === "z" ? wall.a[0] : wall.a[1];
+    const start = axis === "z" ? Math.min(wall.a[1], wall.b[1]) : Math.min(wall.a[0], wall.b[0]);
+    const end = axis === "z" ? Math.max(wall.a[1], wall.b[1]) : Math.max(wall.a[0], wall.b[0]);
+
+    // widest free run on this wall
+    const taken = wall.openings
+      .map((o) => {
+        const sp = openingSpan(o);
+        return [sp.s, sp.e] as [number, number];
+      })
+      .sort((p, q) => p[0] - q[0]);
+    let cursor = start;
+    let best: [number, number] = [start, start];
+    const consider = (s: number, e: number) => {
+      if (e - s > best[1] - best[0]) best = [s, e];
+    };
+    for (const [s, e] of taken) {
+      if (s > cursor) consider(cursor, s);
+      cursor = Math.max(cursor, e);
+    }
+    if (cursor < end) consider(cursor, end);
+
+    const need = kind === "door" ? DOOR_WIDTH : WINDOW_WIDTH;
+    if (best[1] - best[0] < need + 0.2) return null;
+    const mid = (best[0] + best[1]) / 2;
+    const s = mid - need / 2;
+    const e = mid + need / 2;
+
+    // identify the room on the far side (for labelling / BC connectivity)
+    const probe = (sign: number): string | "outside" => {
+      const px = axis === "z" ? line + sign * 0.12 : mid;
+      const pz = axis === "z" ? mid : line + sign * 0.12;
+      const r = plan.rooms.find((rm) => rectContains(rm.rect, px, pz));
+      return r ? r.id : "outside";
+    };
+    const here = wall.roomId;
+    const other = probe(1) !== here ? probe(1) : probe(-1);
+
+    const opening = makeOpening(`${kind}-add${++customId}`, kind, axis, line, s, e, [here, other]);
+    const eq = (x: number, y: number) => Math.abs(x - y) < 1e-3;
+    const covers = (w: WallSeg) => {
+      if (w.axis !== axis) return false;
+      const wl = w.axis === "z" ? w.a[0] : w.a[1];
+      if (!eq(wl, line)) return false;
+      const ws = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
+      const we = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
+      return s >= ws - 1e-3 && e <= we + 1e-3;
+    };
+    const walls = plan.walls.map((w) => (covers(w) ? { ...w, openings: [...w.openings, opening] } : w));
+    set((st) => {
+      const base = { ...st.plan, walls };
+      const next =
+        kind === "door"
+          ? { ...base, doors: [...st.plan.doors, opening] }
+          : { ...base, windows: [...st.plan.windows, opening] };
+      return { plan: next, selectedOpeningId: opening.id, selectedWallId: null, selectedId: null };
+    });
+    return opening.id;
+  },
+
+  removeOpening: (id) =>
+    set((s) => ({
+      plan: {
+        ...s.plan,
+        walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.filter((o) => o.id !== id) })),
+        doors: s.plan.doors.filter((o) => o.id !== id),
+        windows: s.plan.windows.filter((o) => o.id !== id),
+      },
+      selectedOpeningId: s.selectedOpeningId === id ? null : s.selectedOpeningId,
+    })),
+
+  toggleOpening: (id) =>
+    set((s) => {
+      const flip = (o: Opening) => (o.id === id ? { ...o, open: !o.open } : o);
+      return {
+        plan: {
+          ...s.plan,
+          walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.map(flip) })),
+          doors: s.plan.doors.map(flip),
+          windows: s.plan.windows.map(flip),
+        },
+      };
+    }),
+
   removeSelected: () => {
-    const { selectedId, selectedWallId, removeItem, removeWall } = get();
+    const { selectedId, selectedWallId, selectedOpeningId, removeItem, removeWall, removeOpening } = get();
     if (selectedId) removeItem(selectedId);
     else if (selectedWallId) removeWall(selectedWallId);
+    else if (selectedOpeningId) removeOpening(selectedOpeningId);
   },
 }));
