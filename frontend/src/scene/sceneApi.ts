@@ -1,27 +1,23 @@
 import { exportBoundaryConditions } from "../bc/exportBoundaryConditions";
-import { HOUSING_TYPES } from "../floorplan/templates";
-import type { FloorPlan, HousingType, PlacedItem, RoomDef, Vec2, Vec3 } from "../floorplan/types";
+import type { FloorPlan, HomeSize, PlacedItem, RoomDef, Vec2, Vec3 } from "../floorplan/types";
 import { useSceneStore } from "./store";
 
 // Programmatic control surface — the second of the two control paths the advisor
-// asked for. The mouse moves items via the gizmo; this api moves them (and
-// switches floor plans) from scripts / the console / the future intent layer.
-// Both go through the same store, so they can never disagree.
+// asked for. The mouse moves/edits via the view; this api does the same from
+// scripts / the console / the future intent layer. Both go through one store.
 //
-//   airflow.generate("two_bedroom")
+//   airflow.generate({ length: 9, width: 7, height: 2.7 })
 //   airflow.list()
-//   airflow.find("Bed")                 // first item whose type/name matches
+//   airflow.find("bed")
 //   airflow.translate("bed-1", [0.5, 0, 0])
+//   airflow.add("plant", [2, 0, 2]); airflow.remove("tv-1")
+//   airflow.addWall([1, 1], [3, 1])
 //   airflow.exportBoundaryConditions()
 
 export const sceneApi = {
-  housingTypes(): HousingType[] {
-    return [...HOUSING_TYPES];
-  },
-
-  /** Generate (replace) the floor plan for a housing type. */
-  generate(type: HousingType): void {
-    useSceneStore.getState().generate(type);
+  /** Regenerate the home for the given dimensions (metres). */
+  generate(size: HomeSize): void {
+    useSceneStore.getState().generate(size);
   },
 
   getFloorPlan(): FloorPlan {
@@ -32,7 +28,6 @@ export const sceneApi = {
     return useSceneStore.getState().plan.rooms.map((r) => ({ ...r }));
   },
 
-  /** All movable items (furniture + HVAC). */
   list(): PlacedItem[] {
     return useSceneStore.getState().plan.items.map((it) => ({ ...it }));
   },
@@ -42,12 +37,9 @@ export const sceneApi = {
     return it ? { ...it } : undefined;
   },
 
-  /** First item matching by id, type, or (case-insensitive) — handy for scripting. */
   find(query: string): PlacedItem | undefined {
     const q = query.toLowerCase();
-    const it = useSceneStore
-      .getState()
-      .plan.items.find((x) => x.id === query || x.type.toLowerCase() === q);
+    const it = useSceneStore.getState().plan.items.find((x) => x.id === query || x.type.toLowerCase() === q);
     return it ? { ...it } : undefined;
   },
 
@@ -63,7 +55,6 @@ export const sceneApi = {
     useSceneStore.getState().updateItem(id, patch);
   },
 
-  /** Add an item (furniture or HVAC) by catalog type, optionally at a position. */
   add(type: string, position?: Vec3): string | null {
     return useSceneStore.getState().addItem(type, position);
   },
@@ -72,7 +63,6 @@ export const sceneApi = {
     useSceneStore.getState().removeItem(id);
   },
 
-  /** Add an axis-aligned wall between two floor points [x, z]. */
   addWall(a: Vec2, b: Vec2): void {
     useSceneStore.getState().addWall(a, b);
   },
@@ -85,7 +75,6 @@ export const sceneApi = {
     useSceneStore.getState().selectItem(id);
   },
 
-  /** Export the current plan as boundary conditions for the fluid solver. */
   exportBoundaryConditions() {
     return exportBoundaryConditions(useSceneStore.getState().plan);
   },

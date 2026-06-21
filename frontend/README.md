@@ -1,7 +1,8 @@
-# frontend — residential floor-plan generator + 3D editor
+# frontend — home airflow designer
 
-Generates realistic residential floor plans and renders them as an interactive
-3D "dollhouse" editor. Built with Vite + React + TypeScript +
+A homeowner-friendly 3D home designer: enter your home's size, get a furnished
+layout (living room, bedroom, kitchen, bathroom), then drag furniture, edit
+walls, and add/remove objects. Built with Vite + React + TypeScript +
 [react-three-fiber](https://docs.pmnd.rs/react-three-fiber) / Three.js, state in
 [zustand](https://github.com/pmndrs/zustand).
 
@@ -13,88 +14,77 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-## Housing types
+## Flow
 
-Pick from five curated layouts (top of the panel, or `airflow.generate(...)`):
+1. **Setup screen** — enter Length × Width × Height in **metres or feet**.
+2. The app generates **one home**: living room, bedroom, kitchen, bathroom, with
+   the entrance opening into the living room, plus windows on exterior walls.
+3. A **minimal, curated object set** is placed (door-aware, against walls):
+   bedroom — bed, desk, closet, fan; living — couch, TV, table, AC, heater,
+   supply vent; kitchen — fridge, sink; bathroom — sink.
 
-| id | layout |
-|----|--------|
-| `studio` | open living/kitchen/sleep space + bathroom + entry |
-| `one_bedroom` | living + kitchen/dining + bedroom + bath + entry |
-| `two_bedroom` | living + kitchen, hallway to two bedrooms + bath |
-| `small_family_house` | living/dining/kitchen, hallway to bedrooms, bath, laundry, entry |
-| `shared_student` | shared living + kitchen, hallway to three bedrooms + bath |
+## Editing (drag-first, for non-experts)
 
-## How generation works
+- **Move**: click an item and **drag it across the floor**, drop to place.
+- **Add**: pick from the palette (furniture / heating-cooling-air); it drops in
+  the centre to drag where you want.
+- **Remove**: select + Delete, the ✕ in the list, or the "Remove" button.
+- **Walls**: "Add wall" mode → click two floor points to draw an axis-aligned
+  wall; click an existing wall + Delete to open up a room.
+- **Resize**: "Change size" reopens the setup screen.
 
-Each housing type is a **curated room template** (a non-overlapping tiling of
-rectangles with room types + door connections). Everything else is *derived*:
-
-```
-template rooms ─▶ walls (from room adjacencies, exterior flags)
-               ─▶ doors (carved into shared walls / exterior for the entry)
-               ─▶ windows (on exterior walls of habitable rooms)
-               ─▶ furniture (per-room placement recipes, parametric to the rect)
-               ─▶ HVAC (supply per room, central return, wall AC, optional fans)
-               ─▶ occupancy grid (rasterised room labels for the simulator)
-```
-
-This gives realistic, deterministic layouts rather than random rectangles.
-
-`floorplan/` module:
+## Code map
 
 ```
-types.ts        FloorPlan, RoomDef, WallSeg, Opening, PlacedItem, OccupancyGrid
-templates.ts    the 5 housing templates (rooms + door connections)
-geometry.ts     walls from rooms, shared-edge detection, opening carving, wall render pieces
-furniture.ts    per-room furniture recipes (bed→wall, sofa↔tv, dining→kitchen, bath fixtures…)
-hvac.ts         supply/return/ac/fan placement rules
-raster.ts       rasterise rooms → labelled cell grid (the room hierarchy)
-generate.ts     generateFloorPlan(housingType) → FloorPlan (ties it all together)
-palette.ts      room / item colours
+floorplan/
+  types.ts      FloorPlan, RoomDef, WallSeg, Opening, PlacedItem, OccupancyGrid, HomeSize
+  home.ts       generateHome({length,width,height}) → the single 4-room home
+  geometry.ts   walls from rooms, shared-edge detection, opening carving, wall render pieces
+  raster.ts     rasterise rooms → labelled cell grid (room hierarchy for the solver)
+  catalog.ts    item specs + add-palette
+  palette.ts    room / item colours
+components/
+  SetupScreen.tsx   dimension entry (m / ft)
+  Editor.tsx        Canvas, OrbitControls, drag-to-move, wall-draw, delete keys
+  FloorPlanView.tsx colour-coded room floors (no on-floor labels) + walls
+  WallMesh.tsx      wall as boxes carved around doors/windows; selectable
+  ItemMesh.tsx      a placed item: model + click target + selection outline
+  models.tsx        composite furniture models (bed, desk, closet, couch, tv, …)
+  Panel.tsx         home size, edit tools, add palette, room/object browser, save
+scene/
+  store.ts      zustand store (plan, selection, drag, edit mode, edit actions)
+  sceneApi.ts   window.airflow programmatic control surface
+bc/
+  exportBoundaryConditions.ts   plan → solver-neutral JSON (room grid + geometry + flows)
 ```
-
-## Editing (for non-expert homeowners)
-
-The layout is a starting point — every home is editable:
-
-- **Move furniture**: click an item and **drag it across the floor**, drop to place. No typing.
-- **Add furniture / vents**: pick from the palette (furniture, kitchen & bath, HVAC); the new item drops in the centre to drag where you want.
-- **Remove**: select an item and press Delete (or use the ✕ / "Remove" button).
-- **Walls**: "Add wall" mode — click two floor points to draw an axis-aligned wall. Click an existing wall to select it, then Delete to open up a room.
-
-Furniture is placed minimally and **avoids blocking doorways** (placement skips door spans). HVAC is sensible: one ceiling supply per conditioned room, **one central return**, a wall AC unit, bathroom exhaust fans, and optional ceiling fans. Every exterior wall of a habitable room gets a window.
 
 ## The two control paths (advisor requirement)
 
 Both mutate the same store, so they never disagree:
 
 1. **Mouse** — select + drag furniture, draw/delete walls, add/remove from the panel.
-2. **Programmatic** — `window.airflow` (see `src/scene/sceneApi.ts`):
+2. **Programmatic** — `window.airflow`:
 
    ```js
-   airflow.generate("two_bedroom")        // switch floor plan
-   airflow.listRooms()                    // room hierarchy
-   airflow.list()                         // movable items (furniture + HVAC)
-   airflow.add("plant", [2, 0, 2])        // add an item at a floor point
-   airflow.remove("sofa-1")               // remove an item
-   airflow.addWall([1, 1], [3, 1])        // draw an axis-aligned wall
-   airflow.translate("bed-1", [0.5,0,0])  // move it (= change a boundary condition)
-   airflow.exportBoundaryConditions()     // full plan → solver JSON
+   airflow.generate({ length: 9, width: 7, height: 2.7 })
+   airflow.list(); airflow.find("bed")
+   airflow.add("couch", [2, 0, 2]); airflow.remove("tv-1")
+   airflow.addWall([1, 1], [3, 1])
+   airflow.translate("bed-1", [0.5, 0, 0])   // = change a boundary condition
+   airflow.exportBoundaryConditions()        // room grid + walls + openings + solids + flows
    ```
 
 ## The simulator seam
 
-`exportBoundaryConditions()` returns a solver-neutral description for LFM: the
-**room-label grid** (which cells belong to which room), wall/door/window
-geometry, furniture as solid AABBs, and HVAC supply/return as inlet/outlet flow
-patches. Moving an item re-derives it — that's the core interaction. The exact
-schema will be adapted to LFM once Yuchen confirms its boundary-condition API
-(see [`../docs/draft-reply-yuchen.md`](../docs/draft-reply-yuchen.md), Q4).
+`exportBoundaryConditions()` returns the room-label grid, wall/door/window
+geometry, furniture solids, and HVAC inlet/outlet flow patches (plus fans and
+heaters) for LFM. Moving an item re-derives it. The exact schema will be adapted
+to LFM once Yuchen confirms its boundary-condition API (see
+[`../docs/draft-reply-yuchen.md`](../docs/draft-reply-yuchen.md), Q4).
 
 ## Not done yet
 
-- Oriented (rotated) furniture / walls — geometry is axis-aligned (`rotationY` stored but ignored in BC).
-- Dense multi-program rooms (studio) use simple wall-slot placement; no overlap solver.
+- Furniture is axis-aligned in the BC export (`rotationY` is rendered but the BC
+  uses axis-aligned bounding boxes).
 - Live coupling to LFM (currently exports JSON; needs the GPU machine).
 - Flow-field visualization overlay.

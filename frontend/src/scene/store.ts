@@ -1,25 +1,26 @@
 import { create } from "zustand";
 import { CATALOG } from "../floorplan/catalog";
-import { generateFloorPlan } from "../floorplan/generate";
 import { WALL_THICKNESS, rectContains } from "../floorplan/geometry";
-import type { FloorPlan, HousingType, PlacedItem, Vec2, Vec3, WallSeg } from "../floorplan/types";
+import { generateHome } from "../floorplan/home";
+import type { FloorPlan, HomeSize, PlacedItem, Vec2, Vec3, WallSeg } from "../floorplan/types";
 
-// Single source of truth: the current floor plan, selection, and edit mode. BOTH
-// the mouse (select + drag + draw) and the programmatic api mutate this store.
+// Single source of truth: the current home, selection, and edit mode. BOTH the
+// mouse (select + drag + draw) and the programmatic api mutate this store.
 
-const DEFAULT_TYPE: HousingType = "one_bedroom";
+const DEFAULT_SIZE: HomeSize = { length: 9, width: 7, height: 2.7 };
 
 export type EditMode = "select" | "draw-wall";
 
 export interface SceneState {
   plan: FloorPlan;
-  housingType: HousingType;
-  selectedId: string | null; // selected item
-  selectedWallId: string | null; // selected wall
-  draggingId: string | null; // item being dragged on the floor
+  started: boolean;
+  selectedId: string | null;
+  selectedWallId: string | null;
+  draggingId: string | null;
   mode: EditMode;
 
-  generate: (type: HousingType) => void;
+  generate: (size: HomeSize) => void;
+  openSetup: () => void;
   setMode: (mode: EditMode) => void;
 
   selectItem: (id: string | null) => void;
@@ -50,22 +51,24 @@ function roomAt(plan: FloorPlan, x: number, z: number): string {
 }
 
 export const useSceneStore = create<SceneState>((set, get) => ({
-  plan: generateFloorPlan(DEFAULT_TYPE),
-  housingType: DEFAULT_TYPE,
+  plan: generateHome(DEFAULT_SIZE),
+  started: false,
   selectedId: null,
   selectedWallId: null,
   draggingId: null,
   mode: "select",
 
-  generate: (type) =>
+  generate: (size) =>
     set({
-      plan: generateFloorPlan(type),
-      housingType: type,
+      plan: generateHome(size),
+      started: true,
       selectedId: null,
       selectedWallId: null,
       draggingId: null,
       mode: "select",
     }),
+
+  openSetup: () => set({ started: false }),
 
   setMode: (mode) => set({ mode, selectedId: null, selectedWallId: null }),
 
@@ -125,7 +128,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const { plan } = get();
     const dx = Math.abs(b[0] - a[0]);
     const dz = Math.abs(b[1] - a[1]);
-    // snap to the dominant axis (axis-aligned walls only)
     const axis: WallSeg["axis"] = dx >= dz ? "x" : "z";
     const wall: WallSeg =
       axis === "x"
@@ -159,11 +161,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const target = s.plan.walls.find((w) => w.id === id);
       if (!target) return {};
       const line = target.axis === "z" ? target.a[0] : target.a[1];
-      const tStart = target.axis === "z" ? Math.min(target.a[1], target.b[1]) : Math.min(target.a[0], target.b[0]);
-      const tEnd = target.axis === "z" ? Math.max(target.a[1], target.b[1]) : Math.max(target.a[0], target.b[0]);
+      const tS = target.axis === "z" ? Math.min(target.a[1], target.b[1]) : Math.min(target.a[0], target.b[0]);
+      const tE = target.axis === "z" ? Math.max(target.a[1], target.b[1]) : Math.max(target.a[0], target.b[0]);
       const eq = (x: number, y: number) => Math.abs(x - y) < 1e-3;
-      // remove the wall plus any coincident duplicate (shared interior walls are
-      // emitted once per room) so the wall fully disappears.
       const walls = s.plan.walls.filter((w) => {
         if (w.id === id) return false;
         if (w.axis !== target.axis) return true;
@@ -171,8 +171,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (!eq(wl, line)) return true;
         const ws = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
         const we = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
-        const overlap = Math.min(tEnd, we) - Math.max(tStart, ws);
-        return overlap <= 0.01; // keep walls that don't overlap the target
+        return Math.min(tE, we) - Math.max(tS, ws) <= 0.01;
       });
       return { plan: { ...s.plan, walls }, selectedWallId: null };
     }),
