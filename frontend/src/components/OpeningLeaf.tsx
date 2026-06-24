@@ -32,7 +32,6 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
   const base = vertical ? -Math.PI / 2 : 0;
 
   const sillY = kind === "door" ? 0 : sill;
-  const openAngle = open ? (kind === "door" ? 1.4 : 0.8) : 0;
   const thickness = kind === "door" ? 0.045 : 0.03;
   const isDoor = kind === "door";
 
@@ -74,26 +73,39 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
         )}
       </group>
 
-      {/* hinged leaf */}
-      <group position={[hingeX, sillY, hingeZ]} rotation={[0, base + openAngle, 0]}>
-        <mesh position={[width / 2, height / 2, 0]} castShadow>
-          <boxGeometry args={[width, height, thickness]} />
-          {isDoor ? (
+      {isDoor ? (
+        /* door: a panel that swings open on a hinge */
+        <group position={[hingeX, sillY, hingeZ]} rotation={[0, base + (open ? 1.4 : 0), 0]}>
+          <mesh position={[width / 2, height / 2, 0]} castShadow>
+            <boxGeometry args={[width, height, thickness]} />
             <meshStandardMaterial color="#a07f57" roughness={0.7} />
-          ) : (
-            <meshStandardMaterial color="#bfe6ff" transparent opacity={0.4} roughness={0.1} metalness={0.1} />
-          )}
-          {(selected || hovered) && (
-            <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
-          )}
-        </mesh>
-        {isDoor && (
+            {(selected || hovered) && (
+              <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
+            )}
+          </mesh>
           <mesh position={[width * 0.86, height * 0.5, thickness / 2 + 0.02]}>
             <sphereGeometry args={[0.03, 8, 8]} />
             <meshStandardMaterial color="#d4af37" metalness={0.6} roughness={0.3} />
           </mesh>
-        )}
-      </group>
+        </group>
+      ) : (
+        /* window: glass when closed, clear (open passage) when open — no swing */
+        <group position={[cx, 0, cz]} rotation={[0, base, 0]}>
+          <mesh position={[0, sillY + height / 2, 0]}>
+            <boxGeometry args={[width, height, thickness]} />
+            <meshStandardMaterial
+              color="#bfe6ff"
+              transparent
+              opacity={open ? 0.05 : 0.42}
+              roughness={0.1}
+              metalness={0.1}
+            />
+            {(selected || hovered) && (
+              <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
+            )}
+          </mesh>
+        </group>
+      )}
     </group>
   );
 }

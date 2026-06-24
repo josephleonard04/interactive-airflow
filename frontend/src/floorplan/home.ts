@@ -135,11 +135,11 @@ function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[]): Opening[]
 
 type DoorsBySide = Record<Side, Array<[number, number]>>;
 
-function doorsForRoom(room: RoomDef, doors: Opening[]): DoorsBySide {
+function doorsForRoom(room: RoomDef, openings: Opening[]): DoorsBySide {
   const { x, z, w, d } = room.rect;
   const out: DoorsBySide = { north: [], south: [], east: [], west: [] };
   const eq = (a: number, b: number) => Math.abs(a - b) < 1e-3;
-  for (const o of doors) {
+  for (const o of openings) {
     const vertical = eq(o.a[0], o.b[0]);
     const [s, e] = openingAlong(o);
     if (vertical) {
@@ -243,30 +243,33 @@ function centre(gen: IdGen, room: RoomDef, type: string, size: Vec3, opts: Place
   };
 }
 
-function placeObjects(gen: IdGen, rooms: RoomDef[], doors: Opening[], H: number): PlacedItem[] {
+function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: number): PlacedItem[] {
   const byId = (id: string) => rooms.find((r) => r.id === id)!;
-  const ctx = (id: string) => doorsForRoom(byId(id), doors);
+  // furniture avoids BOTH doors and windows so it never blocks an opening
+  const ctx = (id: string) => doorsForRoom(byId(id), openings);
   const items: PlacedItem[] = [];
 
-  // Bedroom: bed, desk (under window, south), closet, ceiling fan.
+  // Bedroom: bed, desk, closet, and a standing floor fan in a corner.
   {
     const room = byId("bedroom");
     const c = ctx("bedroom");
     items.push(against(gen, room, c, "west", 0.45, "bed", [1.5, 0.5, 2.0]));
     items.push(against(gen, room, c, "south", 0.72, "desk", [1.2, 0.75, 0.6]));
     items.push(against(gen, room, c, "east", 0.3, "closet", [1.0, 2.0, 0.6]));
-    items.push(centre(gen, room, "fan", [0.9, 0.16, 0.9], { category: "hvac", mount: "ceiling", y: H - 0.28, flow: 0 }));
+    items.push(against(gen, room, c, "south", 0.16, "fan", [0.45, 1.3, 0.45], { category: "hvac", mount: "floor", flow: 0 }));
   }
 
-  // Living: couch (west) facing TV (east), table, AC, heater, supply vent.
+  // Living: couch (south) facing TV (north) across the room; table in the
+  // middle; AC on the east wall; heater + supply vent. Placement avoids the
+  // entrance and the window (which take the longer walls).
   {
     const room = byId("living");
     const c = ctx("living");
-    items.push(against(gen, room, c, "west", 0.5, "couch", [1.8, 0.8, 0.85]));
-    items.push(against(gen, room, c, "east", 0.4, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.1 }));
+    items.push(against(gen, room, c, "south", 0.22, "couch", [1.8, 0.8, 0.85]));
+    items.push(against(gen, room, c, "north", 0.22, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }));
     items.push(centre(gen, room, "table", [1.1, 0.45, 0.7]));
-    items.push(against(gen, room, c, "north", 0.5, "ac", [0.85, 0.32, 0.22], { category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25 }));
-    items.push(against(gen, room, c, "south", 0.78, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0 }));
+    items.push(against(gen, room, c, "east", 0.3, "ac", [0.85, 0.32, 0.22], { category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25 }));
+    items.push(against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0 }));
     items.push(centre(gen, room, "supply", [0.5, 0.14, 0.5], { category: "hvac", mount: "ceiling", y: H - 0.09, flow: 0.12 }));
   }
 
@@ -304,7 +307,7 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   placeEntrance(walls, gen, byId("living"), doors);
 
   const windows = placeWindows(walls, gen, rooms);
-  const items = placeObjects(gen, rooms, doors, H);
+  const items = placeObjects(gen, rooms, [...doors, ...windows], H);
   const grid = rasterize(rooms, bounds);
 
   return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid };

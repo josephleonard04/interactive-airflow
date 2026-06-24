@@ -162,17 +162,35 @@ function Heater([w, h, d]: V) {
   );
 }
 
-function Fan([w, h]: V) {
-  const blades = 4;
+// Standing floor fan, facing +z (it "blows" toward +z; rotationY aims it).
+function Fan([w, h, d]: V) {
+  const headY = h * 0.3; // head height relative to centre
+  const r = w * 0.46;
   return (
     <group>
-      <Cyl r={0.05} h={h * 0.6} position={[0, h * 0.2, 0]} color="#6b7280" metalness={0.4} />
-      <Cyl r={0.1} h={h} position={[0, 0, 0]} color="#8b95a1" metalness={0.4} />
-      {Array.from({ length: blades }, (_, i) => (
-        <group key={i} rotation={[0, (i * Math.PI * 2) / blades, 0]}>
-          <Box size={[w * 0.42, 0.02, 0.13]} position={[w * 0.22, 0, 0]} color="#b6bdc7" roughness={0.6} />
-        </group>
-      ))}
+      {/* base */}
+      <Cyl r={w * 0.42} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#697079" metalness={0.4} />
+      {/* pole */}
+      <Cyl r={0.025} h={h * 0.78} position={[0, -h * 0.08, 0]} color="#9aa3ad" metalness={0.5} />
+      {/* head */}
+      <group position={[0, headY, 0]}>
+        {/* motor housing (axis along z) */}
+        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -d * 0.15]}>
+          <cylinderGeometry args={[w * 0.18, w * 0.18, 0.14, 16]} />
+          <meshStandardMaterial color="#cbd2da" metalness={0.3} roughness={0.5} />
+        </mesh>
+        {/* blades */}
+        {[0, 1, 2].map((i) => (
+          <group key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]}>
+            <Box size={[w * 0.13, r * 0.85, 0.012]} position={[0, r * 0.4, d * 0.05]} color="#e2e7ec" roughness={0.5} />
+          </group>
+        ))}
+        {/* front cage ring */}
+        <mesh position={[0, 0, d * 0.14]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[r, 0.012, 8, 28]} />
+          <meshStandardMaterial color="#aeb6c0" metalness={0.4} roughness={0.4} />
+        </mesh>
+      </group>
     </group>
   );
 }

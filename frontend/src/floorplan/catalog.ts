@@ -23,7 +23,7 @@ export const CATALOG: Record<string, ItemSpec> = {
   sink: { size: [0.7, 0.9, 0.55], category: "furniture", mount: "floor", label: "Sink" },
   ac: { size: [0.85, 0.32, 0.22], category: "hvac", mount: "wall", flow: 0.25, label: "AC unit" },
   heater: { size: [0.8, 0.5, 0.18], category: "hvac", mount: "floor", flow: 0, label: "Heater" },
-  fan: { size: [0.9, 0.16, 0.9], category: "hvac", mount: "ceiling", flow: 0, label: "Fan" },
+  fan: { size: [0.45, 1.3, 0.45], category: "hvac", mount: "floor", flow: 0, label: "Fan" },
   supply: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Vent" },
 };
 
