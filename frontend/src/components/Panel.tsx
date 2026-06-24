@@ -95,6 +95,14 @@ export function Panel() {
             Change size
           </button>
         </div>
+        <div className="legend">
+          {plan.rooms.map((r) => (
+            <span key={r.id} className="leg">
+              <span className="dot" style={{ background: ROOM_COLOR[r.type] }} />
+              {r.name}
+            </span>
+          ))}
+        </div>
       </section>
 
       <section>
