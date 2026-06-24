@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Grid, OrbitControls } from "@react-three/drei";
+import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { useSceneStore } from "../scene/store";
 import type { Vec2, Vec3 } from "../floorplan/types";
@@ -143,18 +143,35 @@ export function Editor() {
   }, []);
 
   return (
-    <Canvas shadows camera={{ position: [span * 0.7, span * 0.95, span * 0.95], fov: 45 }}>
-      <color attach="background" args={["#0f1419"]} />
-      <ambientLight intensity={0.78} />
-      <directionalLight position={[span, span * 1.5, span]} intensity={1.1} castShadow />
-      <hemisphereLight intensity={0.3} />
+    <Canvas
+      dpr={[1, 2]}
+      gl={{ alpha: true, antialias: true }}
+      camera={{ position: [span * 0.85, span * 0.78, span * 1.05], fov: 40 }}
+    >
+      {/* soft studio lighting */}
+      <ambientLight intensity={0.55} />
+      <hemisphereLight args={["#dbe7ff", "#4b4336", 0.55]} />
+      <directionalLight position={[span, span * 1.7, span * 0.6]} intensity={1.45} />
+      <directionalLight position={[-span * 0.8, span, -span * 0.5]} intensity={0.4} />
 
       <Grid
-        args={[60, 60]}
-        cellColor="#2a3340"
-        sectionColor="#3a4a5a"
+        args={[80, 80]}
+        cellColor="#1d2530"
+        sectionColor="#28333f"
         infiniteGrid
-        fadeDistance={Math.max(40, span * 4)}
+        fadeStrength={2}
+        fadeDistance={Math.max(45, span * 5)}
+      />
+
+      {/* soft contact shadow grounds the whole home */}
+      <ContactShadows
+        position={[0, 0.015, 0]}
+        scale={span * 1.8}
+        far={span * 1.4}
+        blur={2.4}
+        opacity={0.45}
+        color="#060a0e"
+        resolution={1024}
       />
 
       <GroundPlane offset={offset} />
@@ -172,6 +189,8 @@ export function Editor() {
         ref={orbitRef}
         makeDefault
         enableDamping
+        minPolarAngle={0.1}
+        maxPolarAngle={Math.PI / 2 - 0.04}
         target={[0, wallHeight / 3, 0]}
         enabled={!draggingId && mode === "select"}
       />

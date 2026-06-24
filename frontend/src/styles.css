@@ -37,6 +37,7 @@ body {
 .viewport {
   position: relative;
   min-width: 0;
+  background: radial-gradient(circle at 50% 28%, #20303d 0%, #131c24 55%, #0c1116 100%);
 }
 
 .panel {
@@ -376,6 +377,21 @@ button.chip {
 button.ghost {
   font-size: 12px;
   background: transparent;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 10px;
+}
+
+.leg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .btn-row {
