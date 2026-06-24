@@ -25,6 +25,7 @@ const ITEM_COLOR: Record<string, string> = {
   tv: "#1b2430",
   fridge: "#e6ebf0",
   sink: "#dfe9ef",
+  kitchen_sink: "#c9d3da",
   toilet: "#eef3f6",
   bathtub: "#e4eef3",
   supply: "#3b82f6",

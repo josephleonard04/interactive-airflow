@@ -91,21 +91,34 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
           </mesh>
         </group>
       ) : (
-        /* window: glass when closed, clear (open passage) when open — no swing */
+        /* window: clearly glassed (with a mullion cross) when closed; an empty
+           opening when open — no swing. The difference is obvious on any backdrop. */
         <group position={[cx, 0, cz]} rotation={[0, base, 0]}>
+          {/* transparent hit target so the window is selectable in both states */}
           <mesh position={[0, sillY + height / 2, 0]}>
             <boxGeometry args={[width, height, thickness]} />
-            <meshStandardMaterial
-              color="#bfe6ff"
-              transparent
-              opacity={open ? 0.05 : 0.42}
-              roughness={0.1}
-              metalness={0.1}
-            />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             {(selected || hovered) && (
               <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
             )}
           </mesh>
+          {!open && (
+            <group>
+              <mesh position={[0, sillY + height / 2, 0]}>
+                <boxGeometry args={[width, height, thickness]} />
+                <meshStandardMaterial color="#cfeaff" transparent opacity={0.6} roughness={0.05} metalness={0.2} />
+              </mesh>
+              {/* mullion cross so a closed window clearly reads as glass */}
+              <mesh position={[0, sillY + height / 2, thickness]}>
+                <boxGeometry args={[0.04, height, 0.035]} />
+                <meshStandardMaterial color="#eef2f6" />
+              </mesh>
+              <mesh position={[0, sillY + height / 2, thickness]}>
+                <boxGeometry args={[width, 0.04, 0.035]} />
+                <meshStandardMaterial color="#eef2f6" />
+              </mesh>
+            </group>
+          )}
         </group>
       )}
     </group>

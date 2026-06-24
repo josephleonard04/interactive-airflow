@@ -190,33 +190,31 @@ function Heater([w, h, d]: V) {
   );
 }
 
-// Simple standing floor fan, facing +z (rotationY aims it).
+// Simple standing floor fan, facing +z (rotationY aims it). Just blades on a
+// hub — no cage ring.
 function Fan([w, h, d]: V) {
-  const r = w * 0.5;
+  const r = w * 0.55;
   return (
     <group>
       {/* round base + thin pole */}
       <Cyl r={w * 0.4} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#6b7480" metalness={0.4} />
       <Cyl r={0.022} h={h * 0.72} position={[0, -h * 0.06, 0]} color="#aab2bb" metalness={0.5} />
-      {/* round head facing +z */}
+      {/* blade assembly facing +z */}
       <group position={[0, h * 0.3, 0]}>
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <cylinderGeometry args={[r * 0.82, r * 0.82, 0.1, 24]} />
-          <meshStandardMaterial color="#d3d9e0" metalness={0.2} roughness={0.55} />
+        {/* hub */}
+        <mesh position={[0, 0, d * 0.04]}>
+          <sphereGeometry args={[w * 0.13, 16, 16]} />
+          <meshStandardMaterial color="#8a929c" metalness={0.5} roughness={0.4} />
         </mesh>
-        <mesh position={[0, 0, d * 0.1]}>
-          <sphereGeometry args={[w * 0.1, 12, 12]} />
-          <meshStandardMaterial color="#9aa3ad" metalness={0.4} />
-        </mesh>
-        {[0, 1, 2].map((i) => (
-          <group key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]}>
-            <Box size={[w * 0.16, r * 0.68, 0.01]} position={[0, r * 0.36, d * 0.09]} color="#eef2f6" />
+        {/* 4 angled blades, no surrounding ring */}
+        {[0, 1, 2, 3].map((i) => (
+          <group key={i} rotation={[0, 0, (i * Math.PI) / 2]}>
+            <mesh position={[0, r * 0.5, d * 0.02]} rotation={[0.3, 0, 0.12]}>
+              <boxGeometry args={[w * 0.34, r * 0.9, 0.012]} />
+              <meshStandardMaterial color="#e6ecf2" roughness={0.45} side={2} />
+            </mesh>
           </group>
         ))}
-        <mesh position={[0, 0, d * 0.13]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[r, 0.012, 8, 28]} />
-          <meshStandardMaterial color="#aeb6c0" metalness={0.4} />
-        </mesh>
       </group>
     </group>
   );
@@ -235,10 +233,25 @@ function Vent([w, h, d]: V) {
   );
 }
 
+// Kitchen sink: a cabinet + counter with a stainless basin and faucet.
+function KitchenSink([w, h, d]: V) {
+  return (
+    <group>
+      <Box size={[w, h * 0.82, d]} position={[0, -h * 0.09, 0]} color="#cbb89a" />
+      <Box size={[w, h * 0.1, d]} position={[0, h * 0.4, 0]} color="#eef2f5" roughness={0.4} />
+      <Box size={[w * 0.55, h * 0.16, d * 0.62]} position={[0, h * 0.34, 0]} color="#aab4bd" metalness={0.6} roughness={0.3} />
+      <Cyl r={0.02} h={0.18} position={[0, h * 0.55, -d * 0.28]} color="#9aa3ad" />
+      <Cyl r={0.016} h={0.14} position={[0, h * 0.62, -d * 0.22]} color="#9aa3ad" />
+    </group>
+  );
+}
+
 export function Model({ type, size }: { type: string; size: V }) {
   switch (type) {
     case "bed":
       return Bed(size);
+    case "kitchen_sink":
+      return KitchenSink(size);
     case "desk":
       return LegTable(size, 0.08);
     case "table":

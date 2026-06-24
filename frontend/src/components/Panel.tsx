@@ -4,6 +4,7 @@ import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
+import { RotationDial } from "./RotationDial";
 
 function pretty(t: string) {
   return t.replace(/_/g, " ");
@@ -155,19 +156,12 @@ export function Panel() {
               />
             </label>
           )}
-          <label className="field">
-            <span>rotation {Math.round((((selected.rotationY * 180) / Math.PI) % 360 + 360) % 360)}°</span>
-            <input
-              type="range"
-              min={0}
-              max={360}
-              step={5}
-              value={(((selected.rotationY * 180) / Math.PI) % 360 + 360) % 360}
-              onChange={(e) => setPosition(selected.id, selected.position, (parseFloat(e.target.value) * Math.PI) / 180)}
-            />
-          </label>
+          <RotationDial
+            valueRad={selected.rotationY}
+            onChange={(rad) => setPosition(selected.id, selected.position, rad)}
+          />
           <div className="btn-row">
-            <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ Rotate 90°</button>
+            <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ 90°</button>
             <button className="danger" onClick={() => removeItem(selected.id)}>
               🗑 Remove
             </button>
