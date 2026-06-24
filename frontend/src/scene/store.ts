@@ -50,7 +50,7 @@ export interface SceneState {
   clearSelection: () => void;
 
   setDragging: (id: string | null) => void;
-  setPosition: (id: string, position: Vec3) => void;
+  setPosition: (id: string, position: Vec3, rotationY?: number) => void;
   translate: (id: string, delta: Vec3) => void;
   updateItem: (id: string, patch: Partial<PlacedItem>) => void;
   rotateItem: (id: string, deltaRad: number) => void;
@@ -159,8 +159,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set({ draggingId: id });
   },
 
-  setPosition: (id, position) =>
-    set((s) => ({ plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, position } : it)) })),
+  setPosition: (id, position, rotationY) =>
+    set((s) => ({
+      plan: mapItems(s.plan, (it) =>
+        it.id === id ? { ...it, position, ...(rotationY !== undefined ? { rotationY } : {}) } : it,
+      ),
+    })),
 
   translate: (id, delta) =>
     set((s) => ({

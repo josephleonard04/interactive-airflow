@@ -2,14 +2,57 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
-import type { Vec2, Vec3 } from "../floorplan/types";
+import type { Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { ItemMesh } from "./ItemMesh";
 
+// Snap a wall-mounted item (TV, AC) to the nearest wall so it can never float in
+// mid-air: returns the position flush against the wall and the rotation that
+// faces it into the room the pointer is in.
+function snapToWall(
+  px: number,
+  pz: number,
+  walls: WallSeg[],
+  depth: number,
+  halfWidth: number,
+): { x: number; z: number; rot: number } | null {
+  let best: { w: WallSeg; line: number; lo: number; hi: number } | null = null;
+  let bestD = Infinity;
+  for (const w of walls) {
+    if (w.axis === "x") {
+      const line = w.a[1];
+      const lo = Math.min(w.a[0], w.b[0]);
+      const hi = Math.max(w.a[0], w.b[0]);
+      const cx = Math.min(hi, Math.max(lo, px));
+      const dd = Math.hypot(px - cx, pz - line);
+      if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
+    } else {
+      const line = w.a[0];
+      const lo = Math.min(w.a[1], w.b[1]);
+      const hi = Math.max(w.a[1], w.b[1]);
+      const cz = Math.min(hi, Math.max(lo, pz));
+      const dd = Math.hypot(px - line, pz - cz);
+      if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
+    }
+  }
+  if (!best) return null;
+  const off = WALL_THICKNESS / 2 + depth / 2;
+  if (best.w.axis === "x") {
+    const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, px));
+    const sign = pz >= best.line ? 1 : -1;
+    return { x: foot, z: best.line + sign * off, rot: sign > 0 ? 0 : Math.PI };
+  }
+  const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, pz));
+  const sign = px >= best.line ? 1 : -1;
+  return { x: best.line + sign * off, z: foot, rot: sign > 0 ? Math.PI / 2 : -Math.PI / 2 };
+}
+
 // Drag-to-move: while an item is being dragged we raycast the pointer onto a
-// horizontal plane at the item's height and follow it. Camera orbit is disabled
-// during a drag so the two don't fight.
+// horizontal plane at the item's height and follow it. Floor items snap to a
+// grid; wall items snap to the nearest wall (no floating). Camera orbit is
+// disabled during a drag so the two don't fight.
 function DragController({ offset }: { offset: Vec3 }) {
   const { camera, gl } = useThree();
   const plan = useSceneStore((s) => s.plan);
@@ -35,12 +78,24 @@ function DragController({ offset }: { offset: Vec3 }) {
       );
     };
 
+    const grid = (v: number) => Math.round(v / 0.1) * 0.1;
+
     const onMove = (e: PointerEvent) => {
       ray.setFromCamera(ndc(e), camera);
       const pt = new THREE.Vector3();
       if (!ray.ray.intersectPlane(dragPlane, pt)) return;
-      const px = Math.min(b.x + b.w, Math.max(b.x, pt.x - offset[0]));
-      const pz = Math.min(b.z + b.d, Math.max(b.z, pt.z - offset[2]));
+      const rawX = pt.x - offset[0];
+      const rawZ = pt.z - offset[2];
+
+      if (item.mount === "wall") {
+        const snapped = snapToWall(rawX, rawZ, plan.walls, item.size[2], item.size[0] / 2);
+        if (snapped) {
+          setPosition(draggingId, [snapped.x, worldY, snapped.z], snapped.rot);
+          return;
+        }
+      }
+      const px = Math.min(b.x + b.w, Math.max(b.x, grid(rawX)));
+      const pz = Math.min(b.z + b.d, Math.max(b.z, grid(rawZ)));
       setPosition(draggingId, [px, worldY, pz]);
     };
     const onUp = () => setDragging(null);
@@ -51,7 +106,7 @@ function DragController({ offset }: { offset: Vec3 }) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [draggingId, camera, gl, offset, plan.items, plan.bounds, setPosition, setDragging]);
+  }, [draggingId, camera, gl, offset, plan.items, plan.bounds, plan.walls, setPosition, setDragging]);
 
   return null;
 }
