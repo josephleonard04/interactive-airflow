@@ -92,6 +92,11 @@ export const sceneApi = {
     useSceneStore.getState().toggleOpening(id);
   },
 
+  /** Slide a door/window along its wall to the given centre coordinate. */
+  moveOpening(id: string, alongCenter: number): void {
+    useSceneStore.getState().moveOpeningAlong(id, alongCenter);
+  },
+
   removeOpening(id: string): void {
     useSceneStore.getState().removeOpening(id);
   },

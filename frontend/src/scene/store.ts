@@ -35,6 +35,7 @@ export interface SceneState {
   selectedWallId: string | null;
   selectedOpeningId: string | null;
   draggingId: string | null;
+  draggingOpeningId: string | null;
   mode: EditMode;
   past: FloorPlan[];
   future: FloorPlan[];
@@ -51,6 +52,8 @@ export interface SceneState {
   clearSelection: () => void;
 
   setDragging: (id: string | null) => void;
+  setDraggingOpening: (id: string | null) => void;
+  moveOpeningAlong: (id: string, alongCenter: number) => void;
   setPosition: (id: string, position: Vec3, rotationY?: number) => void;
   translate: (id: string, delta: Vec3) => void;
   updateItem: (id: string, patch: Partial<PlacedItem>) => void;
@@ -71,6 +74,7 @@ export interface SceneState {
 let customId = 0;
 const HISTORY = 50;
 let dragSnapshot: FloorPlan | null = null;
+let openingDragSnapshot: FloorPlan | null = null;
 
 /** History patch to prepend to a mutating `set`: pushes the current plan onto the
  *  undo stack and clears the redo stack. */
@@ -94,6 +98,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   selectedWallId: null,
   selectedOpeningId: null,
   draggingId: null,
+  draggingOpeningId: null,
   mode: "select",
   past: [],
   future: [],
@@ -106,6 +111,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       selectedWallId: null,
       selectedOpeningId: null,
       draggingId: null,
+      draggingOpeningId: null,
       mode: "select",
       past: [],
       future: [],
@@ -159,6 +165,58 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }
     set({ draggingId: id });
   },
+
+  setDraggingOpening: (id) => {
+    if (id) {
+      openingDragSnapshot = get().plan;
+    } else if (openingDragSnapshot) {
+      const moved = openingDragSnapshot !== get().plan;
+      const snap = openingDragSnapshot;
+      openingDragSnapshot = null;
+      if (moved) set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [] }));
+    }
+    set({ draggingOpeningId: id });
+  },
+
+  // Slide a door/window along its wall (it stays on the same wall line), clamped
+  // to the wall extent. Updates the opening in doors/windows and in the carved
+  // wall copies. No history here — handled by setDraggingOpening start/end.
+  moveOpeningAlong: (id, alongCenter) =>
+    set((s) => {
+      const o = [...s.plan.doors, ...s.plan.windows].find((x) => x.id === id);
+      if (!o) return {};
+      const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+      const line = vertical ? o.a[0] : o.a[1];
+      const width = o.width;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const w of s.plan.walls) {
+        const wl = w.axis === "z" ? w.a[0] : w.a[1];
+        if (vertical && w.axis === "z" && Math.abs(wl - line) < 1e-3) {
+          lo = Math.min(lo, Math.min(w.a[1], w.b[1]));
+          hi = Math.max(hi, Math.max(w.a[1], w.b[1]));
+        } else if (!vertical && w.axis === "x" && Math.abs(wl - line) < 1e-3) {
+          lo = Math.min(lo, Math.min(w.a[0], w.b[0]));
+          hi = Math.max(hi, Math.max(w.a[0], w.b[0]));
+        }
+      }
+      if (!Number.isFinite(lo)) return {};
+      const c = Math.min(hi - width / 2 - 0.05, Math.max(lo + width / 2 + 0.05, alongCenter));
+      const ns = c - width / 2;
+      const ne = c + width / 2;
+      const na: Vec2 = vertical ? [line, ns] : [ns, line];
+      const nb: Vec2 = vertical ? [line, ne] : [ne, line];
+      const upd = <T extends { id: string; a: Vec2; b: Vec2 }>(x: T): T =>
+        x.id === id ? { ...x, a: na, b: nb } : x;
+      return {
+        plan: {
+          ...s.plan,
+          doors: s.plan.doors.map(upd),
+          windows: s.plan.windows.map(upd),
+          walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.map(upd) })),
+        },
+      };
+    }),
 
   setPosition: (id, position, rotationY) =>
     set((s) => ({

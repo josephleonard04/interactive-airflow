@@ -56,6 +56,25 @@ function footHalf(size: Vec3, rotationY: number): [number, number] {
   return swapped ? [size[2] / 2, size[0] / 2] : [size[0] / 2, size[2] / 2];
 }
 
+// Would an item footprint centred at (gx,gz) overlap ANY wall (including walls
+// the user drew)? Used to stop furniture straddling a wall.
+function wallBlocked(gx: number, gz: number, fhx: number, fhz: number, walls: WallSeg[]): boolean {
+  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
+  const eps = 0.02;
+  for (const w of walls) {
+    const line = w.axis === "z" ? w.a[0] : w.a[1];
+    const lo = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
+    const hi = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
+    const t = w.thickness / 2;
+    const wx0 = w.axis === "z" ? line - t : lo;
+    const wx1 = w.axis === "z" ? line + t : hi;
+    const wz0 = w.axis === "z" ? lo : line - t;
+    const wz1 = w.axis === "z" ? hi : line + t;
+    if (ix1 > wx0 + eps && ix0 < wx1 - eps && iz1 > wz0 + eps && iz0 < wz1 - eps) return true;
+  }
+  return false;
+}
+
 // Drag-to-move with physical constraints:
 //  - floor items snap to the grid, stay inside ONE room (no straddling walls),
 //    and can't overlap other floor items;
@@ -138,12 +157,13 @@ function DragController({ offset }: { offset: Vec3 }) {
       gz = zlo <= zhi ? Math.min(zhi, Math.max(zlo, gz)) : room.rect.z + room.rect.d / 2;
 
       if (item.mount === "floor") {
-        const hit = plan.items.some((o) => {
+        const hitItem = plan.items.some((o) => {
           if (o.id === draggingId || o.mount !== "floor") return false;
           const [ohx, ohz] = footHalf(o.size, o.rotationY);
           return Math.abs(gx - o.position[0]) < fhx + ohx - 0.02 && Math.abs(gz - o.position[2]) < fhz + ohz - 0.02;
         });
-        if (hit) {
+        // also reject straddling any wall (including user-drawn walls)
+        if (hitItem || wallBlocked(gx, gz, fhx, fhz, plan.walls)) {
           setPosition(draggingId, lastValid);
           return;
         }
@@ -160,6 +180,48 @@ function DragController({ offset }: { offset: Vec3 }) {
       window.removeEventListener("pointerup", onUp);
     };
   }, [draggingId, camera, gl, offset, plan, setPosition, setDragging]);
+
+  return null;
+}
+
+// Drag a selected door/window along its wall (it stays on the same wall line).
+function OpeningDragController({ offset }: { offset: Vec3 }) {
+  const { camera, gl } = useThree();
+  const plan = useSceneStore((s) => s.plan);
+  const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
+  const moveOpeningAlong = useSceneStore((s) => s.moveOpeningAlong);
+  const setDraggingOpening = useSceneStore((s) => s.setDraggingOpening);
+
+  useEffect(() => {
+    if (!draggingOpeningId) return;
+    const o = [...plan.doors, ...plan.windows].find((x) => x.id === draggingOpeningId);
+    if (!o) return;
+    const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // wall runs along z
+    const ray = new THREE.Raycaster();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const snapG = (v: number) => Math.round(v / GRID) * GRID;
+    const ndc = (e: PointerEvent) => {
+      const rect = gl.domElement.getBoundingClientRect();
+      return new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+    };
+    const onMove = (e: PointerEvent) => {
+      ray.setFromCamera(ndc(e), camera);
+      const pt = new THREE.Vector3();
+      if (!ray.ray.intersectPlane(plane, pt)) return;
+      const along = vertical ? snapG(pt.z - offset[2]) : snapG(pt.x - offset[0]);
+      moveOpeningAlong(draggingOpeningId, along);
+    };
+    const onUp = () => setDraggingOpening(null);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [draggingOpeningId, camera, gl, offset, plan, moveOpeningAlong, setDraggingOpening]);
 
   return null;
 }
@@ -188,12 +250,11 @@ function FloorInteractor({ offset }: { offset: Vec3 }) {
     return [snap(pt.x - offset[0]), snap(pt.z - offset[2])];
   };
 
+  // grid dots span exactly the home footprint (no overflow)
   const dots = useMemo(() => {
-    const pad = 0.5;
     const arr: number[] = [];
-    for (let x = Math.floor((bounds.x - pad) / GRID) * GRID; x <= bounds.x + bounds.w + pad + 1e-6; x += GRID)
-      for (let z = Math.floor((bounds.z - pad) / GRID) * GRID; z <= bounds.z + bounds.d + pad + 1e-6; z += GRID)
-        arr.push(x, 0.03, z);
+    for (let x = bounds.x; x <= bounds.x + bounds.w + 1e-6; x += GRID)
+      for (let z = bounds.z; z <= bounds.z + bounds.d + 1e-6; z += GRID) arr.push(x, 0.03, z);
     return new Float32Array(arr);
   }, [bounds]);
 
@@ -281,6 +342,7 @@ export function Editor() {
   const plan = useSceneStore((s) => s.plan);
   const mode = useSceneStore((s) => s.mode);
   const draggingId = useSceneStore((s) => s.draggingId);
+  const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
   const selectedId = useSceneStore((s) => s.selectedId);
   const clearSelection = useSceneStore((s) => s.clearSelection);
   const removeSelected = useSceneStore((s) => s.removeSelected);
@@ -343,15 +405,14 @@ export function Editor() {
       <directionalLight position={[span, span * 1.7, span * 0.6]} intensity={1.35} />
       <directionalLight position={[-span * 0.8, span, -span * 0.5]} intensity={0.4} />
 
+      {/* floor grid sized exactly to the home footprint */}
       <Grid
-        args={[80, 80]}
+        position={[0, 0.005, 0]}
+        args={[bounds.w, bounds.d]}
         cellSize={GRID}
         cellColor="#8aa0ad"
         sectionColor="#6b8392"
         sectionSize={GRID * 4}
-        infiniteGrid
-        fadeStrength={2}
-        fadeDistance={Math.max(45, span * 5)}
       />
 
       {/* soft contact shadow grounds the whole home */}
@@ -374,6 +435,7 @@ export function Editor() {
       </group>
 
       <DragController offset={offset} />
+      <OpeningDragController offset={offset} />
 
       <OrbitControls
         ref={orbitRef}
@@ -382,7 +444,7 @@ export function Editor() {
         minPolarAngle={0.1}
         maxPolarAngle={Math.PI / 2 - 0.04}
         target={[0, wallHeight / 3, 0]}
-        enabled={!draggingId && mode === "select"}
+        enabled={!draggingId && !draggingOpeningId && mode === "select"}
       />
     </Canvas>
   );
