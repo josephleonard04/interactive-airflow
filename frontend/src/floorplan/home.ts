@@ -281,11 +281,13 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     items.push(against(gen, room, c, "north", 0.35, "sink", [0.7, 0.9, 0.55]));
   }
 
-  // Bathroom: sink.
+  // Bathroom: bathtub, toilet, sink.
   {
     const room = byId("bathroom");
     const c = ctx("bathroom");
-    items.push(against(gen, room, c, "south", 0.3, "sink", [0.6, 0.85, 0.45]));
+    items.push(against(gen, room, c, "east", 0.5, "bathtub", [1.6, 0.6, 0.75]));
+    items.push(against(gen, room, c, "west", 0.25, "toilet", [0.55, 0.75, 0.7]));
+    items.push(against(gen, room, c, "west", 0.72, "sink", [0.7, 0.9, 0.55]));
   }
 
   return items;
@@ -311,4 +313,20 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   const grid = rasterize(rooms, bounds);
 
   return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid };
+}
+
+/** "Start from scratch": just the outer walls + an entrance. One open room so
+ *  placement/confinement works; the user adds interior walls and furniture. */
+export function generateEmpty(rawSize: HomeSize): FloorPlan {
+  const size = clampSize(rawSize);
+  const { length: L, width: W, height: H } = size;
+  const gen = idGen();
+  const room: RoomDef = { id: "home", type: "living", name: "Home", rect: { x: 0, z: 0, w: L, d: W } };
+  const rooms = [room];
+  const bounds = boundsOf(rooms);
+  const walls = buildWalls(rooms, H);
+  const doors: Opening[] = [];
+  placeEntrance(walls, gen, room, doors);
+  const grid = rasterize(rooms, bounds);
+  return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows: [], items: [], grid };
 }

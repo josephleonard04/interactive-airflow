@@ -37,7 +37,7 @@ body {
 .viewport {
   position: relative;
   min-width: 0;
-  background: radial-gradient(circle at 50% 28%, #20303d 0%, #131c24 55%, #0c1116 100%);
+  background: radial-gradient(circle at 50% 22%, #aebfcb 0%, #7e93a3 45%, #5b6f7e 100%);
 }
 
 .panel {
@@ -459,6 +459,43 @@ button.toggle.on {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.55;
+}
+
+.mode-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+button.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+button.mode-card.on {
+  border-color: var(--accent);
+  background: #11343b;
+}
+
+.mode-emoji {
+  font-size: 22px;
+}
+
+button.mode-card strong {
+  font-size: 13px;
+}
+
+button.mode-card small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .unit-toggle {

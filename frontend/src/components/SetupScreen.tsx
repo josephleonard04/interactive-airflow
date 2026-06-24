@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { MIN_HEIGHT, MIN_LENGTH, MIN_WIDTH } from "../floorplan/home";
+import type { StartMode } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
 
 // First screen: the homeowner enters their home's footprint (length × width ×
@@ -49,6 +50,7 @@ function Field({
 
 export function SetupScreen() {
   const generate = useSceneStore((s) => s.generate);
+  const [mode, setMode] = useState<StartMode>("example");
   const [unit, setUnit] = useState<Unit>("m");
   const [l, setL] = useState(DEFAULTS.m.l);
   const [w, setW] = useState(DEFAULTS.m.w);
@@ -68,16 +70,26 @@ export function SetupScreen() {
   const minW = unit === "ft" ? MIN_WIDTH / FT : MIN_WIDTH;
   const minH = unit === "ft" ? MIN_HEIGHT / FT : MIN_HEIGHT;
 
-  const create = () => generate({ length: toM(l), width: toM(w), height: toM(h) });
+  const create = () => generate({ length: toM(l), width: toM(w), height: toM(h) }, mode);
 
   return (
     <div className="setup">
       <div className="setup-card">
         <h1>🏠 Design your home’s airflow</h1>
-        <p className="setup-sub">
-          Start by entering your home’s size. We’ll lay out a living room, bedroom,
-          kitchen, and bathroom — then you can move things around freely.
-        </p>
+        <p className="setup-sub">Pick how you’d like to start, then set your home’s size.</p>
+
+        <div className="mode-cards">
+          <button className={mode === "example" ? "mode-card on" : "mode-card"} onClick={() => setMode("example")}>
+            <span className="mode-emoji">🛋️</span>
+            <strong>Example layout</strong>
+            <small>A furnished living room, bedroom, kitchen &amp; bathroom to tweak.</small>
+          </button>
+          <button className={mode === "blank" ? "mode-card on" : "mode-card"} onClick={() => setMode("blank")}>
+            <span className="mode-emoji">📐</span>
+            <strong>Start from scratch</strong>
+            <small>Just the outer walls — add rooms &amp; furniture yourself.</small>
+          </button>
+        </div>
 
         <div className="unit-toggle">
           <button className={unit === "m" ? "on" : ""} onClick={() => switchUnit("m")}>Meters</button>
@@ -91,7 +103,7 @@ export function SetupScreen() {
         </div>
 
         <button className="setup-go" onClick={create}>
-          Create my home →
+          {mode === "blank" ? "Start designing →" : "Create my home →"}
         </button>
         <p className="setup-foot">You can change the size later, or edit walls and furniture anytime.</p>
       </div>

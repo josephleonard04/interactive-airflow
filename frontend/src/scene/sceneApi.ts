@@ -1,5 +1,5 @@
 import { exportBoundaryConditions } from "../bc/exportBoundaryConditions";
-import type { FloorPlan, HomeSize, PlacedItem, RoomDef, Vec2, Vec3 } from "../floorplan/types";
+import type { FloorPlan, HomeSize, PlacedItem, RoomDef, StartMode, Vec2, Vec3 } from "../floorplan/types";
 import { useSceneStore } from "./store";
 
 // Programmatic control surface — the second of the two control paths the advisor
@@ -16,8 +16,8 @@ import { useSceneStore } from "./store";
 
 export const sceneApi = {
   /** Regenerate the home for the given dimensions (metres). */
-  generate(size: HomeSize): void {
-    useSceneStore.getState().generate(size);
+  generate(size: HomeSize, mode: StartMode = "example"): void {
+    useSceneStore.getState().generate(size, mode);
   },
 
   getFloorPlan(): FloorPlan {
