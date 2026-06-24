@@ -16,29 +16,37 @@ npm run dev        # http://localhost:5173
 
 ## Flow
 
-1. **Setup screen** — enter Length × Width × Height in **metres or feet**.
-2. The app generates **one home**: living room, bedroom, kitchen, bathroom, with
-   the entrance opening into the living room, plus windows on exterior walls.
-3. A **minimal, curated object set** is placed (door-aware, against walls):
-   bedroom — bed, desk, closet, fan; living — couch, TV, table, AC, heater,
-   supply vent; kitchen — fridge, sink; bathroom — sink.
+1. **Setup screen** — pick a start mode, then enter Length × Width × Height in
+   **metres or feet**:
+   - **Example layout** — a fully furnished living room / bedroom / kitchen /
+     bathroom (with the entrance into the living room and windows on exterior
+     walls), placed door- and window-aware so nothing blocks an opening.
+   - **Start from scratch** — just the outer walls + an entry door; you add the
+     interior walls and furniture yourself.
+2. The bathroom comes with sink, toilet, and bathtub; the bedroom has a standing
+   floor fan; the living room has a wall AC, heater, and ceiling supply vent.
 
 ## Editing (drag-first, for non-experts)
 
-- **Undo / redo**: buttons in the panel, or **Ctrl/Cmd+Z** / **Ctrl+Shift+Z**. A
-  drag counts as a single undo step.
-- **Move**: click an item and **drag it across the floor**, drop to place.
-- **Rotate**: select an item and press **R** (or the Rotate 90° button).
-- **Add**: pick from the palette (furniture / heating-cooling-air); it drops in
-  the centre to drag where you want.
-- **Remove**: select + Delete, the ✕ in the list, or the "Remove" button.
-- **Walls**: "Add wall" mode → click two floor points to draw an axis-aligned
-  wall; click an existing wall + Delete to open up a room.
-- **Doors & windows**: click a wall, then "Add door" / "Add window". Click a
-  door/window (in the view or the list) to **open/close** it or remove it. One
-  window per room by default. Open openings let air through; closed ones don't —
-  this is carried into the boundary-condition export.
-- **Resize**: "Change size" reopens the setup screen.
+Everything is on a **0.25 m grid** so things line up easily.
+
+- **Undo / redo**: panel buttons, or **Ctrl/Cmd+Z** / **Ctrl+Shift+Z**. A drag is
+  a single undo step.
+- **Move**: click an item and **drag it across the floor**. Floor items stay on a
+  grid and **inside one room** (can't straddle a wall) and **can't overlap** each
+  other; **wall items (TV/AC) stay on the wall** and can slide sideways *and* up/
+  down — they never float in mid-air.
+- **Rotate**: the inspector has a **free 0–360° slider** (good for aiming the
+  fan), plus **R** / a 90° button for quick turns.
+- **Add / remove**: palette to add (furniture, bathroom, heating/cooling/air);
+  select + Delete / ✕ / "Remove" to remove.
+- **Walls**: "Add wall" shows the **grid as dots** — click a **start** dot, then
+  an **end** dot, with a live preview between them. Click an existing wall +
+  Delete to open up a room.
+- **Doors & windows**: click a wall, then "Add door" / "Add window". Click one to
+  **open/close** or remove it. Doors swing open; windows just go **clear** when
+  open (glass when closed). Open openings let air through in the BC export.
+- **Resize / restart**: "Change size" reopens the setup screen.
 
 ## Code map
 
