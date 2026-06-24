@@ -21,6 +21,7 @@ export const CATALOG: Record<string, ItemSpec> = {
   tv: { size: [1.4, 0.8, 0.1], category: "furniture", mount: "wall", label: "TV" },
   fridge: { size: [0.7, 1.8, 0.7], category: "furniture", mount: "floor", label: "Fridge" },
   sink: { size: [0.7, 0.9, 0.55], category: "furniture", mount: "floor", label: "Sink" },
+  kitchen_sink: { size: [1.0, 0.9, 0.6], category: "furniture", mount: "floor", label: "Kitchen sink" },
   toilet: { size: [0.55, 0.75, 0.7], category: "furniture", mount: "floor", label: "Toilet" },
   bathtub: { size: [1.6, 0.6, 0.75], category: "furniture", mount: "floor", label: "Bathtub" },
   ac: { size: [0.85, 0.32, 0.22], category: "hvac", mount: "wall", flow: 0.25, label: "AC unit" },
@@ -31,7 +32,8 @@ export const CATALOG: Record<string, ItemSpec> = {
 
 /** Items offered in the "add" palette, grouped. */
 export const PALETTE: Array<{ group: string; types: string[] }> = [
-  { group: "Furniture", types: ["bed", "desk", "closet", "table", "couch", "tv", "fridge"] },
+  { group: "Furniture", types: ["bed", "desk", "closet", "table", "couch", "tv"] },
+  { group: "Kitchen", types: ["fridge", "kitchen_sink"] },
   { group: "Bathroom", types: ["sink", "toilet", "bathtub"] },
   { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply"] },
 ];
