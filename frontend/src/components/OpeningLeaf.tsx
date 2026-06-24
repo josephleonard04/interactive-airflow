@@ -15,6 +15,7 @@ const FRAME_DEPTH = 0.13;
 export function OpeningLeaf({ opening }: { opening: Opening }) {
   const mode = useSceneStore((s) => s.mode);
   const selectOpening = useSceneStore((s) => s.selectOpening);
+  const setDraggingOpening = useSceneStore((s) => s.setDraggingOpening);
   const selected = useSceneStore((s) => s.selectedOpeningId) === opening.id;
   const [hovered, setHovered] = useState(false);
 
@@ -39,6 +40,7 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
     if (mode !== "select") return;
     e.stopPropagation();
     selectOpening(opening.id);
+    setDraggingOpening(opening.id);
   };
 
   return (
