@@ -8,13 +8,14 @@ import {
   openingSpan,
   rectContains,
 } from "../floorplan/geometry";
-import { generateHome } from "../floorplan/home";
+import { generateEmpty, generateHome } from "../floorplan/home";
 import type {
   FloorPlan,
   HomeSize,
   Opening,
   OpeningKind,
   PlacedItem,
+  StartMode,
   Vec2,
   Vec3,
   WallSeg,
@@ -38,7 +39,7 @@ export interface SceneState {
   past: FloorPlan[];
   future: FloorPlan[];
 
-  generate: (size: HomeSize) => void;
+  generate: (size: HomeSize, mode: StartMode) => void;
   openSetup: () => void;
   setMode: (mode: EditMode) => void;
   undo: () => void;
@@ -97,9 +98,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   past: [],
   future: [],
 
-  generate: (size) =>
+  generate: (size, mode) =>
     set({
-      plan: generateHome(size),
+      plan: mode === "blank" ? generateEmpty(size) : generateHome(size),
       started: true,
       selectedId: null,
       selectedWallId: null,

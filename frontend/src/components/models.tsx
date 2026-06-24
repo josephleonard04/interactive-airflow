@@ -138,6 +138,34 @@ function Sink([w, h, d]: V) {
   );
 }
 
+function Toilet([w, h, d]: V) {
+  return (
+    <group>
+      {/* tank against the back (−z) */}
+      <Box size={[w * 0.85, h * 0.6, d * 0.28]} position={[0, h * 0.1, -d / 2 + d * 0.14]} color="#eef3f6" />
+      {/* bowl */}
+      <mesh position={[0, -h * 0.05, d * 0.08]} castShadow>
+        <cylinderGeometry args={[w * 0.42, w * 0.34, h * 0.5, 18]} />
+        <meshStandardMaterial color="#f3f7fa" roughness={0.4} />
+      </mesh>
+      {/* seat / lid */}
+      <Box size={[w * 0.8, h * 0.07, d * 0.55]} position={[0, h * 0.22, d * 0.08]} color="#fbfdff" />
+    </group>
+  );
+}
+
+function Bathtub([w, h, d]: V) {
+  return (
+    <group>
+      <Box size={[w, h, d]} position={[0, 0, 0]} color={itemColor("bathtub")} roughness={0.35} />
+      {/* recessed basin */}
+      <Box size={[w * 0.86, h * 0.7, d * 0.78]} position={[0, h * 0.22, 0]} color="#cfdde6" roughness={0.25} />
+      {/* faucet */}
+      <Cyl r={0.02} h={0.16} position={[-w / 2 + 0.12, h * 0.55, -d / 2 + 0.12]} color={METAL} />
+    </group>
+  );
+}
+
 function Ac([w, h, d]: V) {
   return (
     <group>
@@ -226,6 +254,10 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Fridge(size);
     case "sink":
       return Sink(size);
+    case "toilet":
+      return Toilet(size);
+    case "bathtub":
+      return Bathtub(size);
     case "ac":
       return Ac(size);
     case "heater":

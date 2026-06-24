@@ -9,6 +9,8 @@ import type {
 } from "./types";
 
 export const WALL_THICKNESS = 0.1;
+/** Placement grid (metres): furniture and wall endpoints snap to this. */
+export const GRID = 0.25;
 export const DOOR_WIDTH = 0.9;
 export const DOOR_HEIGHT = 2.05;
 export const WINDOW_WIDTH = 1.2;

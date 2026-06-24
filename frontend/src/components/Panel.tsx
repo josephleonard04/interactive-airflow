@@ -42,6 +42,7 @@ export function Panel() {
   const removeSelected = useSceneStore((s) => s.removeSelected);
   const updateItem = useSceneStore((s) => s.updateItem);
   const rotateItem = useSceneStore((s) => s.rotateItem);
+  const setPosition = useSceneStore((s) => s.setPosition);
   const addItem = useSceneStore((s) => s.addItem);
   const addOpening = useSceneStore((s) => s.addOpening);
   const removeOpening = useSceneStore((s) => s.removeOpening);
@@ -154,6 +155,17 @@ export function Panel() {
               />
             </label>
           )}
+          <label className="field">
+            <span>rotation {Math.round((((selected.rotationY * 180) / Math.PI) % 360 + 360) % 360)}°</span>
+            <input
+              type="range"
+              min={0}
+              max={360}
+              step={5}
+              value={(((selected.rotationY * 180) / Math.PI) % 360 + 360) % 360}
+              onChange={(e) => setPosition(selected.id, selected.position, (parseFloat(e.target.value) * Math.PI) / 180)}
+            />
+          </label>
           <div className="btn-row">
             <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ Rotate 90°</button>
             <button className="danger" onClick={() => removeItem(selected.id)}>

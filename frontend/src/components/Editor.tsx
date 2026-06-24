@@ -2,22 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { WALL_THICKNESS } from "../floorplan/geometry";
+import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
 import type { Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { ItemMesh } from "./ItemMesh";
 
-// Snap a wall-mounted item (TV, AC) to the nearest wall so it can never float in
-// mid-air: returns the position flush against the wall and the rotation that
-// faces it into the room the pointer is in.
-function snapToWall(
-  px: number,
-  pz: number,
-  walls: WallSeg[],
-  depth: number,
-  halfWidth: number,
-): { x: number; z: number; rot: number } | null {
+interface WallHit {
+  x: number;
+  z: number;
+  rot: number;
+  axis: "x" | "z";
+  line: number;
+  lo: number;
+  hi: number;
+  sign: number;
+}
+
+// Find the nearest wall to a point, returning the flush position + facing.
+function nearestWall(px: number, pz: number, walls: WallSeg[], depth: number, halfWidth: number): WallHit | null {
   let best: { w: WallSeg; line: number; lo: number; hi: number } | null = null;
   let bestD = Infinity;
   for (const w of walls) {
@@ -25,15 +28,13 @@ function snapToWall(
       const line = w.a[1];
       const lo = Math.min(w.a[0], w.b[0]);
       const hi = Math.max(w.a[0], w.b[0]);
-      const cx = Math.min(hi, Math.max(lo, px));
-      const dd = Math.hypot(px - cx, pz - line);
+      const dd = Math.hypot(px - Math.min(hi, Math.max(lo, px)), pz - line);
       if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
     } else {
       const line = w.a[0];
       const lo = Math.min(w.a[1], w.b[1]);
       const hi = Math.max(w.a[1], w.b[1]);
-      const cz = Math.min(hi, Math.max(lo, pz));
-      const dd = Math.hypot(px - line, pz - cz);
+      const dd = Math.hypot(px - line, pz - Math.min(hi, Math.max(lo, pz)));
       if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
     }
   }
@@ -42,17 +43,24 @@ function snapToWall(
   if (best.w.axis === "x") {
     const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, px));
     const sign = pz >= best.line ? 1 : -1;
-    return { x: foot, z: best.line + sign * off, rot: sign > 0 ? 0 : Math.PI };
+    return { x: foot, z: best.line + sign * off, rot: sign > 0 ? 0 : Math.PI, axis: "x", line: best.line, lo: best.lo, hi: best.hi, sign };
   }
   const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, pz));
   const sign = px >= best.line ? 1 : -1;
-  return { x: best.line + sign * off, z: foot, rot: sign > 0 ? Math.PI / 2 : -Math.PI / 2 };
+  return { x: best.line + sign * off, z: foot, rot: sign > 0 ? Math.PI / 2 : -Math.PI / 2, axis: "z", line: best.line, lo: best.lo, hi: best.hi, sign };
 }
 
-// Drag-to-move: while an item is being dragged we raycast the pointer onto a
-// horizontal plane at the item's height and follow it. Floor items snap to a
-// grid; wall items snap to the nearest wall (no floating). Camera orbit is
-// disabled during a drag so the two don't fight.
+// Rotation-aware footprint half-extents (a 90°/270° rotation swaps w/d).
+function footHalf(size: Vec3, rotationY: number): [number, number] {
+  const swapped = Math.abs(Math.round(rotationY / (Math.PI / 2))) % 2 === 1;
+  return swapped ? [size[2] / 2, size[0] / 2] : [size[0] / 2, size[2] / 2];
+}
+
+// Drag-to-move with physical constraints:
+//  - floor items snap to the grid, stay inside ONE room (no straddling walls),
+//    and can't overlap other floor items;
+//  - wall items (TV/AC) slide along their wall AND move up/down on it;
+//  - camera orbit is disabled during a drag.
 function DragController({ offset }: { offset: Vec3 }) {
   const { camera, gl } = useThree();
   const plan = useSceneStore((s) => s.plan);
@@ -65,10 +73,15 @@ function DragController({ offset }: { offset: Vec3 }) {
     const item = plan.items.find((i) => i.id === draggingId);
     if (!item) return;
 
-    const worldY = item.position[1];
-    const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldY);
     const ray = new THREE.Raycaster();
-    const b = plan.bounds;
+    const worldY0 = item.position[1];
+    const depth = item.size[2];
+    const halfW = item.size[0] / 2;
+    const halfH = item.size[1] / 2;
+    const off = WALL_THICKNESS / 2 + depth / 2;
+    const [fhx, fhz] = footHalf(item.size, item.rotationY);
+    const lockedWall = item.mount === "wall" ? nearestWall(item.position[0], item.position[2], plan.walls, depth, halfW) : null;
+    let lastValid: Vec3 = [item.position[0], item.position[1], item.position[2]];
 
     const ndc = (e: PointerEvent) => {
       const rect = gl.domElement.getBoundingClientRect();
@@ -77,26 +90,66 @@ function DragController({ offset }: { offset: Vec3 }) {
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
     };
-
-    const grid = (v: number) => Math.round(v / 0.1) * 0.1;
+    const snapG = (v: number) => Math.round(v / GRID) * GRID;
 
     const onMove = (e: PointerEvent) => {
       ray.setFromCamera(ndc(e), camera);
       const pt = new THREE.Vector3();
-      if (!ray.ray.intersectPlane(dragPlane, pt)) return;
-      const rawX = pt.x - offset[0];
-      const rawZ = pt.z - offset[2];
 
-      if (item.mount === "wall") {
-        const snapped = snapToWall(rawX, rawZ, plan.walls, item.size[2], item.size[0] / 2);
-        if (snapped) {
-          setPosition(draggingId, [snapped.x, worldY, snapped.z], snapped.rot);
+      // wall items: slide along the wall + move vertically on its plane
+      if (lockedWall) {
+        const lw = lockedWall;
+        const plane =
+          lw.axis === "x"
+            ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lw.line + offset[2]))
+            : new THREE.Plane(new THREE.Vector3(1, 0, 0), -(lw.line + offset[0]));
+        if (!ray.ray.intersectPlane(plane, pt)) return;
+        let along = lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2];
+        along = Math.min(lw.hi - halfW, Math.max(lw.lo + halfW, along));
+        const y = Math.min(plan.wallHeight - halfH, Math.max(halfH, pt.y));
+        const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + lw.sign * off] : [lw.line + lw.sign * off, y, along];
+        setPosition(draggingId, pos, lw.rot);
+        return;
+      }
+
+      // floor / ceiling items: horizontal plane → grid → confine to a room → no overlap
+      const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldY0);
+      if (!ray.ray.intersectPlane(dragPlane, pt)) return;
+      let gx = snapG(pt.x - offset[0]);
+      let gz = snapG(pt.z - offset[2]);
+
+      let room = plan.rooms.find(
+        (r) => gx > r.rect.x && gx < r.rect.x + r.rect.w && gz > r.rect.z && gz < r.rect.z + r.rect.d,
+      );
+      if (!room) {
+        let bd = Infinity;
+        for (const r of plan.rooms) {
+          const dc = Math.hypot(gx - (r.rect.x + r.rect.w / 2), gz - (r.rect.z + r.rect.d / 2));
+          if (dc < bd) ((bd = dc), (room = r));
+        }
+      }
+      if (!room) return;
+      const m = WALL_THICKNESS / 2 + 0.03;
+      const xlo = room.rect.x + m + fhx;
+      const xhi = room.rect.x + room.rect.w - m - fhx;
+      const zlo = room.rect.z + m + fhz;
+      const zhi = room.rect.z + room.rect.d - m - fhz;
+      gx = xlo <= xhi ? Math.min(xhi, Math.max(xlo, gx)) : room.rect.x + room.rect.w / 2;
+      gz = zlo <= zhi ? Math.min(zhi, Math.max(zlo, gz)) : room.rect.z + room.rect.d / 2;
+
+      if (item.mount === "floor") {
+        const hit = plan.items.some((o) => {
+          if (o.id === draggingId || o.mount !== "floor") return false;
+          const [ohx, ohz] = footHalf(o.size, o.rotationY);
+          return Math.abs(gx - o.position[0]) < fhx + ohx - 0.02 && Math.abs(gz - o.position[2]) < fhz + ohz - 0.02;
+        });
+        if (hit) {
+          setPosition(draggingId, lastValid);
           return;
         }
       }
-      const px = Math.min(b.x + b.w, Math.max(b.x, grid(rawX)));
-      const pz = Math.min(b.z + b.d, Math.max(b.z, grid(rawZ)));
-      setPosition(draggingId, [px, worldY, pz]);
+      lastValid = [gx, worldY0, gz];
+      setPosition(draggingId, lastValid);
     };
     const onUp = () => setDragging(null);
 
@@ -106,7 +159,7 @@ function DragController({ offset }: { offset: Vec3 }) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [draggingId, camera, gl, offset, plan.items, plan.bounds, plan.walls, setPosition, setDragging]);
+  }, [draggingId, camera, gl, offset, plan, setPosition, setDragging]);
 
   return null;
 }
@@ -119,7 +172,7 @@ function GroundPlane({ offset }: { offset: Vec3 }) {
   const clearSelection = useSceneStore((s) => s.clearSelection);
   const [pending, setPending] = useState<Vec2 | null>(null);
 
-  const snap = (v: number) => Math.round(v / 0.1) * 0.1;
+  const snap = (v: number) => Math.round(v / GRID) * GRID;
 
   const onDown = (e: ThreeEvent<PointerEvent>) => {
     const px = snap(e.point.x - offset[0]);
@@ -204,15 +257,17 @@ export function Editor() {
       camera={{ position: [span * 0.85, span * 0.78, span * 1.05], fov: 40 }}
     >
       {/* soft studio lighting */}
-      <ambientLight intensity={0.55} />
-      <hemisphereLight args={["#dbe7ff", "#4b4336", 0.55]} />
-      <directionalLight position={[span, span * 1.7, span * 0.6]} intensity={1.45} />
+      <ambientLight intensity={0.7} />
+      <hemisphereLight args={["#ffffff", "#8a8475", 0.6]} />
+      <directionalLight position={[span, span * 1.7, span * 0.6]} intensity={1.35} />
       <directionalLight position={[-span * 0.8, span, -span * 0.5]} intensity={0.4} />
 
       <Grid
         args={[80, 80]}
-        cellColor="#1d2530"
-        sectionColor="#28333f"
+        cellSize={GRID}
+        cellColor="#8aa0ad"
+        sectionColor="#6b8392"
+        sectionSize={GRID * 4}
         infiniteGrid
         fadeStrength={2}
         fadeDistance={Math.max(45, span * 5)}

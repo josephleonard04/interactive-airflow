@@ -86,6 +86,9 @@ export interface HomeSize {
   height: number;
 }
 
+/** Start mode: a furnished example layout, or an empty shell to design. */
+export type StartMode = "example" | "blank";
+
 export interface FloorPlan {
   name: string;
   size: HomeSize;
