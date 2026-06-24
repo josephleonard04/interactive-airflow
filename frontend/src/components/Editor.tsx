@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -164,35 +164,116 @@ function DragController({ offset }: { offset: Vec3 }) {
   return null;
 }
 
-// Invisible ground plane: used to add wall points in draw-wall mode, and to
-// clear the selection when clicking empty floor in select mode.
-function GroundPlane({ offset }: { offset: Vec3 }) {
+const FLOOR_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+// Floor interaction layer (rendered inside the centred group, so its dots line
+// up with the building). In select mode, clicking empty floor clears the
+// selection. In add-wall mode, it shows the placement GRID as dots, marks the
+// chosen start point, previews the wall to the cursor, and builds it on the
+// second click. Uses the pointer ray (not the hit object) so clicks read the
+// floor even when the cursor is over furniture.
+function FloorInteractor({ offset }: { offset: Vec3 }) {
   const mode = useSceneStore((s) => s.mode);
   const addWall = useSceneStore((s) => s.addWall);
   const clearSelection = useSceneStore((s) => s.clearSelection);
-  const [pending, setPending] = useState<Vec2 | null>(null);
+  const bounds = useSceneStore((s) => s.plan.bounds);
+  const wallHeight = useSceneStore((s) => s.plan.wallHeight);
+  const [start, setStart] = useState<Vec2 | null>(null);
+  const [hover, setHover] = useState<Vec2 | null>(null);
 
   const snap = (v: number) => Math.round(v / GRID) * GRID;
-
-  const onDown = (e: ThreeEvent<PointerEvent>) => {
-    const px = snap(e.point.x - offset[0]);
-    const pz = snap(e.point.z - offset[2]);
-    if (mode === "draw-wall") {
-      e.stopPropagation();
-      if (!pending) setPending([px, pz]);
-      else {
-        addWall(pending, [px, pz]);
-        setPending(null);
-      }
-    } else {
-      clearSelection();
-    }
+  const floorPoint = (e: ThreeEvent<PointerEvent>): Vec2 | null => {
+    const pt = new THREE.Vector3();
+    if (!e.ray.intersectPlane(FLOOR_PLANE, pt)) return null;
+    return [snap(pt.x - offset[0]), snap(pt.z - offset[2])];
   };
 
+  const dots = useMemo(() => {
+    const pad = 0.5;
+    const arr: number[] = [];
+    for (let x = Math.floor((bounds.x - pad) / GRID) * GRID; x <= bounds.x + bounds.w + pad + 1e-6; x += GRID)
+      for (let z = Math.floor((bounds.z - pad) / GRID) * GRID; z <= bounds.z + bounds.d + pad + 1e-6; z += GRID)
+        arr.push(x, 0.03, z);
+    return new Float32Array(arr);
+  }, [bounds]);
+
+  const onDown = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "draw-wall") {
+      clearSelection();
+      return;
+    }
+    e.stopPropagation();
+    const p = floorPoint(e);
+    if (!p) return;
+    if (!start) setStart(p);
+    else {
+      if (p[0] !== start[0] || p[1] !== start[1]) addWall(start, p);
+      setStart(null);
+    }
+  };
+  const onMove = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "draw-wall") return;
+    const p = floorPoint(e);
+    if (p) setHover(p);
+  };
+
+  // axis-aligned preview from start → hover (matches addWall's snapping)
+  let preview: { pos: Vec3; size: Vec3 } | null = null;
+  if (start && hover) {
+    const dx = Math.abs(hover[0] - start[0]);
+    const dz = Math.abs(hover[1] - start[1]);
+    if (dx >= dz) {
+      const x0 = Math.min(start[0], hover[0]);
+      const x1 = Math.max(start[0], hover[0]);
+      preview = { pos: [(x0 + x1) / 2, wallHeight / 2, start[1]], size: [Math.max(x1 - x0, 0.05), wallHeight, WALL_THICKNESS] };
+    } else {
+      const z0 = Math.min(start[1], hover[1]);
+      const z1 = Math.max(start[1], hover[1]);
+      preview = { pos: [start[0], wallHeight / 2, (z0 + z1) / 2], size: [WALL_THICKNESS, wallHeight, Math.max(z1 - z0, 0.05)] };
+    }
+  }
+
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} onPointerDown={onDown} visible={false}>
-      <planeGeometry args={[200, 200]} />
-    </mesh>
+    <group>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[bounds.x + bounds.w / 2, 0.015, bounds.z + bounds.d / 2]}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+      >
+        <planeGeometry args={[400, 400]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+
+      {mode === "draw-wall" && (
+        <group>
+          <points>
+            <bufferGeometry>
+              <bufferAttribute attach="attributes-position" args={[dots, 3]} />
+            </bufferGeometry>
+            <pointsMaterial size={0.1} color="#0b3a44" sizeAttenuation />
+          </points>
+          {hover && (
+            <mesh position={[hover[0], 0.05, hover[1]]}>
+              <sphereGeometry args={[0.09, 14, 14]} />
+              <meshBasicMaterial color="#0e7c8c" />
+            </mesh>
+          )}
+          {start && (
+            <mesh position={[start[0], 0.06, start[1]]}>
+              <sphereGeometry args={[0.13, 14, 14]} />
+              <meshBasicMaterial color="#22d3ee" />
+            </mesh>
+          )}
+          {preview && (
+            <mesh position={preview.pos}>
+              <boxGeometry args={preview.size} />
+              <meshStandardMaterial color="#22d3ee" transparent opacity={0.35} />
+            </mesh>
+          )}
+        </group>
+      )}
+    </group>
   );
 }
 
@@ -284,9 +365,8 @@ export function Editor() {
         resolution={1024}
       />
 
-      <GroundPlane offset={offset} />
-
       <group position={offset}>
+        <FloorInteractor offset={offset} />
         <FloorPlanView plan={plan} />
         {plan.items.map((it) => (
           <ItemMesh key={it.id} item={it} />

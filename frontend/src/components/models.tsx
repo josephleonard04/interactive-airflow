@@ -190,33 +190,32 @@ function Heater([w, h, d]: V) {
   );
 }
 
-// Standing floor fan, facing +z (it "blows" toward +z; rotationY aims it).
+// Simple standing floor fan, facing +z (rotationY aims it).
 function Fan([w, h, d]: V) {
-  const headY = h * 0.3; // head height relative to centre
-  const r = w * 0.46;
+  const r = w * 0.5;
   return (
     <group>
-      {/* base */}
-      <Cyl r={w * 0.42} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#697079" metalness={0.4} />
-      {/* pole */}
-      <Cyl r={0.025} h={h * 0.78} position={[0, -h * 0.08, 0]} color="#9aa3ad" metalness={0.5} />
-      {/* head */}
-      <group position={[0, headY, 0]}>
-        {/* motor housing (axis along z) */}
-        <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -d * 0.15]}>
-          <cylinderGeometry args={[w * 0.18, w * 0.18, 0.14, 16]} />
-          <meshStandardMaterial color="#cbd2da" metalness={0.3} roughness={0.5} />
+      {/* round base + thin pole */}
+      <Cyl r={w * 0.4} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#6b7480" metalness={0.4} />
+      <Cyl r={0.022} h={h * 0.72} position={[0, -h * 0.06, 0]} color="#aab2bb" metalness={0.5} />
+      {/* round head facing +z */}
+      <group position={[0, h * 0.3, 0]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[r * 0.82, r * 0.82, 0.1, 24]} />
+          <meshStandardMaterial color="#d3d9e0" metalness={0.2} roughness={0.55} />
         </mesh>
-        {/* blades */}
+        <mesh position={[0, 0, d * 0.1]}>
+          <sphereGeometry args={[w * 0.1, 12, 12]} />
+          <meshStandardMaterial color="#9aa3ad" metalness={0.4} />
+        </mesh>
         {[0, 1, 2].map((i) => (
           <group key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]}>
-            <Box size={[w * 0.13, r * 0.85, 0.012]} position={[0, r * 0.4, d * 0.05]} color="#e2e7ec" roughness={0.5} />
+            <Box size={[w * 0.16, r * 0.68, 0.01]} position={[0, r * 0.36, d * 0.09]} color="#eef2f6" />
           </group>
         ))}
-        {/* front cage ring */}
-        <mesh position={[0, 0, d * 0.14]} rotation={[Math.PI / 2, 0, 0]}>
+        <mesh position={[0, 0, d * 0.13]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[r, 0.012, 8, 28]} />
-          <meshStandardMaterial color="#aeb6c0" metalness={0.4} roughness={0.4} />
+          <meshStandardMaterial color="#aeb6c0" metalness={0.4} />
         </mesh>
       </group>
     </group>
