@@ -85,8 +85,13 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
               <Edges scale={1.06} threshold={15} color={selected ? "#22d3ee" : "#67e8f9"} />
             )}
           </mesh>
+          {/* handles on both faces of the door */}
           <mesh position={[width * 0.86, height * 0.5, thickness / 2 + 0.02]}>
-            <sphereGeometry args={[0.03, 8, 8]} />
+            <sphereGeometry args={[0.03, 10, 10]} />
+            <meshStandardMaterial color="#d4af37" metalness={0.6} roughness={0.3} />
+          </mesh>
+          <mesh position={[width * 0.86, height * 0.5, -thickness / 2 - 0.02]}>
+            <sphereGeometry args={[0.03, 10, 10]} />
             <meshStandardMaterial color="#d4af37" metalness={0.6} roughness={0.3} />
           </mesh>
         </group>
