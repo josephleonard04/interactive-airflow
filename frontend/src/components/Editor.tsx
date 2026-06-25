@@ -4,7 +4,7 @@ import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
-import type { Vec2, Vec3, WallSeg } from "../floorplan/types";
+import type { Opening, Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { ItemMesh } from "./ItemMesh";
 
@@ -75,6 +75,26 @@ function wallBlocked(gx: number, gz: number, fhx: number, fhz: number, walls: Wa
   return false;
 }
 
+// Would an item footprint block a doorway (the opening plus a clearance in front
+// of it on both sides)? Keeps furniture out of doorways.
+function doorBlocked(gx: number, gz: number, fhx: number, fhz: number, doors: Opening[]): boolean {
+  const clear = 0.45;
+  const m = 0.05;
+  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
+  for (const o of doors) {
+    const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+    const line = vertical ? o.a[0] : o.a[1];
+    const s = vertical ? Math.min(o.a[1], o.b[1]) : Math.min(o.a[0], o.b[0]);
+    const e = vertical ? Math.max(o.a[1], o.b[1]) : Math.max(o.a[0], o.b[0]);
+    const rx0 = vertical ? line - clear : s - m;
+    const rx1 = vertical ? line + clear : e + m;
+    const rz0 = vertical ? s - m : line - clear;
+    const rz1 = vertical ? e + m : line + clear;
+    if (ix1 > rx0 && ix0 < rx1 && iz1 > rz0 && iz0 < rz1) return true;
+  }
+  return false;
+}
+
 // Drag-to-move with physical constraints:
 //  - floor items snap to the grid, stay inside ONE room (no straddling walls),
 //    and can't overlap other floor items;
@@ -136,8 +156,23 @@ function DragController({ offset }: { offset: Vec3 }) {
           along = snapG(lw.axis === "x" ? fp.x - offset[0] : fp.z - offset[2]);
         }
         along = Math.min(lw.hi - halfW, Math.max(lw.lo + halfW, along));
-        const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + lw.sign * off] : [lw.line + lw.sign * off, y, along];
-        setPosition(draggingId, pos, lw.rot);
+        // place on the INTERIOR side of the wall (inside a room, never outside
+        // the house). On an interior wall (rooms on both sides) use the cursor side.
+        const eps = WALL_THICKNESS / 2 + 0.06;
+        const inRoom = (x: number, z: number) =>
+          plan.rooms.some(
+            (r) => x > r.rect.x && x < r.rect.x + r.rect.w && z > r.rect.z && z < r.rect.z + r.rect.d,
+          );
+        const sidePt = (sgn: number): [number, number] =>
+          lw.axis === "x" ? [along, lw.line + sgn * eps] : [lw.line + sgn * eps, along];
+        const posIn = inRoom(...sidePt(1));
+        const negIn = inRoom(...sidePt(-1));
+        const cursorSign =
+          lw.axis === "x" ? (fp.z - offset[2] >= lw.line ? 1 : -1) : (fp.x - offset[0] >= lw.line ? 1 : -1);
+        const sign = posIn && !negIn ? 1 : negIn && !posIn ? -1 : cursorSign;
+        const rot = lw.axis === "x" ? (sign > 0 ? 0 : Math.PI) : sign > 0 ? Math.PI / 2 : -Math.PI / 2;
+        const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + sign * off] : [lw.line + sign * off, y, along];
+        setPosition(draggingId, pos, rot);
         return;
       }
 
@@ -172,8 +207,12 @@ function DragController({ offset }: { offset: Vec3 }) {
           const [ohx, ohz] = footHalf(o.size, o.rotationY);
           return Math.abs(gx - o.position[0]) < fhx + ohx - 0.02 && Math.abs(gz - o.position[2]) < fhz + ohz - 0.02;
         });
-        // also reject straddling any wall (including user-drawn walls)
-        if (hitItem || wallBlocked(gx, gz, fhx, fhz, plan.walls)) {
+        // reject straddling a wall (incl. user-drawn) or blocking a doorway
+        if (
+          hitItem ||
+          wallBlocked(gx, gz, fhx, fhz, plan.walls) ||
+          doorBlocked(gx, gz, fhx, fhz, plan.doors)
+        ) {
           setPosition(draggingId, lastValid);
           return;
         }
