@@ -4,60 +4,31 @@ import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
-import type { Opening, Vec2, Vec3, WallSeg } from "../floorplan/types";
+import type { Opening, Rect, Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { ItemMesh } from "./ItemMesh";
 
-interface WallHit {
-  x: number;
-  z: number;
-  rot: number;
-  axis: "x" | "z";
-  line: number;
-  lo: number;
-  hi: number;
-  sign: number;
+type Side = "north" | "south" | "east" | "west";
+interface RoomEdge {
+  side: Side;
+  dist: number; // perpendicular distance from the cursor to this edge
+  axis: "x" | "z"; // wall runs along this axis
+  line: number; // constant coordinate of the wall line
+  sign: number; // +1/-1: which way the interior (room) is from the line
+  rot: number; // yaw so the item faces into the room
 }
 
-// Find the nearest wall to a point, returning the flush position + facing.
-function nearestWall(px: number, pz: number, walls: WallSeg[], depth: number, halfWidth: number): WallHit | null {
-  let best: { w: WallSeg; line: number; lo: number; hi: number } | null = null;
-  let bestD = Infinity;
-  for (const w of walls) {
-    if (w.axis === "x") {
-      const line = w.a[1];
-      const lo = Math.min(w.a[0], w.b[0]);
-      const hi = Math.max(w.a[0], w.b[0]);
-      const dd = Math.hypot(px - Math.min(hi, Math.max(lo, px)), pz - line);
-      if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
-    } else {
-      const line = w.a[0];
-      const lo = Math.min(w.a[1], w.b[1]);
-      const hi = Math.max(w.a[1], w.b[1]);
-      const dd = Math.hypot(px - line, pz - Math.min(hi, Math.max(lo, pz)));
-      if (dd < bestD) ((bestD = dd), (best = { w, line, lo, hi }));
-    }
-  }
-  if (!best) return null;
-  const off = WALL_THICKNESS / 2 + depth / 2;
-  if (best.w.axis === "x") {
-    const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, px));
-    const sign = pz >= best.line ? 1 : -1;
-    return { x: foot, z: best.line + sign * off, rot: sign > 0 ? 0 : Math.PI, axis: "x", line: best.line, lo: best.lo, hi: best.hi, sign };
-  }
-  const foot = Math.min(best.hi - halfWidth, Math.max(best.lo + halfWidth, pz));
-  const sign = px >= best.line ? 1 : -1;
-  return { x: best.line + sign * off, z: foot, rot: sign > 0 ? Math.PI / 2 : -Math.PI / 2, axis: "z", line: best.line, lo: best.lo, hi: best.hi, sign };
-}
-
-// Distance from a floor point to a wall hit's segment.
-function hitDist(h: { axis: "x" | "z"; line: number; lo: number; hi: number }, px: number, pz: number): number {
-  if (h.axis === "x") {
-    const cx = Math.min(h.hi, Math.max(h.lo, px));
-    return Math.hypot(px - cx, pz - h.line);
-  }
-  const cz = Math.min(h.hi, Math.max(h.lo, pz));
-  return Math.hypot(px - h.line, pz - cz);
+// The four edges of a room, with the cursor's perpendicular distance to each.
+// A wall item attaches to the nearest edge, on the interior side, facing in —
+// which is exactly "stick to this side of this room's wall".
+function roomEdges(rect: Rect, px: number, pz: number): RoomEdge[] {
+  const { x, z, w, d } = rect;
+  return [
+    { side: "south", dist: Math.abs(pz - z), axis: "x", line: z, sign: 1, rot: 0 },
+    { side: "north", dist: Math.abs(z + d - pz), axis: "x", line: z + d, sign: -1, rot: Math.PI },
+    { side: "west", dist: Math.abs(px - x), axis: "z", line: x, sign: 1, rot: Math.PI / 2 },
+    { side: "east", dist: Math.abs(x + w - px), axis: "z", line: x + w, sign: -1, rot: -Math.PI / 2 },
+  ];
 }
 
 // Rotation-aware footprint half-extents (a 90°/270° rotation swaps w/d).
@@ -126,13 +97,19 @@ function DragController({ offset }: { offset: Vec3 }) {
     const worldY0 = item.position[1];
     const depth = item.size[2];
     const halfW = item.size[0] / 2;
-    const halfH = item.size[1] / 2;
     const off = WALL_THICKNESS / 2 + depth / 2;
     const [fhx, fhz] = footHalf(item.size, item.rotationY);
     const isWallItem = item.mount === "wall";
-    // remembered wall for hysteresis (stops corner flip-flop)
-    let lockedHit = isWallItem
-      ? nearestWall(item.position[0], item.position[2], plan.walls, depth, halfW)
+    // remembered room + edge for the wall-item drag (hysteresis near corners)
+    const inset = 0.25;
+    const roomAtPt = (px: number, pz: number, pad: number) =>
+      plan.rooms.find(
+        (r) => px > r.rect.x + pad && px < r.rect.x + r.rect.w - pad && pz > r.rect.z + pad && pz < r.rect.z + r.rect.d - pad,
+      );
+    const startRoom = roomAtPt(item.position[0], item.position[2], -0.2);
+    let lastRoomId: string | null = startRoom?.id ?? null;
+    let lastSide: Side | null = startRoom
+      ? roomEdges(startRoom.rect, item.position[0], item.position[2]).sort((a, b) => a.dist - b.dist)[0].side
       : null;
     let lastValid: Vec3 = [item.position[0], item.position[1], item.position[2]];
 
@@ -149,54 +126,56 @@ function DragController({ offset }: { offset: Vec3 }) {
       ray.setFromCamera(ndc(e), camera);
       const pt = new THREE.Vector3();
 
-      // wall items: pick the wall nearest the cursor each frame (so the item can
-      // hop to another wall), then slide along it + move up/down on it.
+      // wall items (TV/AC): attach to the nearest edge of the room the cursor is
+      // in, on the interior side, facing in. Sliding around that side keeps the
+      // same wall; crossing to another edge re-orients; entering another room
+      // sticks to that room's wall.
       if (isWallItem) {
         const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const fp = new THREE.Vector3();
         if (!ray.ray.intersectPlane(floor, fp)) return;
         const px = fp.x - offset[0];
         const pz = fp.z - offset[2];
-        const cand = nearestWall(px, pz, plan.walls, depth, halfW);
-        if (!cand) return;
-        // hysteresis: keep the current wall near a corner unless the cursor is
-        // clearly closer to another wall — stops the flip-flop.
-        let lw = cand;
-        if (lockedHit) {
-          const same = lockedHit.axis === cand.axis && Math.abs(lockedHit.line - cand.line) < 1e-3;
-          if (!same && hitDist(cand, px, pz) + 0.3 >= hitDist(lockedHit, px, pz)) lw = lockedHit;
-        }
-        lockedHit = lw;
-        const plane =
-          lw.axis === "x"
-            ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lw.line + offset[2]))
-            : new THREE.Plane(new THREE.Vector3(1, 0, 0), -(lw.line + offset[0]));
-        let along: number;
-        let y = worldY0;
-        if (ray.ray.intersectPlane(plane, pt)) {
-          along = snapG(lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2]);
-          y = Math.min(plan.wallHeight - halfH, Math.max(halfH, snapG(pt.y)));
-        } else {
-          along = snapG(lw.axis === "x" ? fp.x - offset[0] : fp.z - offset[2]);
-        }
-        along = Math.min(lw.hi - halfW, Math.max(lw.lo + halfW, along));
-        // place on the INTERIOR side of the wall (inside a room, never outside
-        // the house). On an interior wall (rooms on both sides) use the cursor side.
-        const eps = WALL_THICKNESS / 2 + 0.06;
-        const inRoom = (x: number, z: number) =>
-          plan.rooms.some(
-            (r) => x > r.rect.x && x < r.rect.x + r.rect.w && z > r.rect.z && z < r.rect.z + r.rect.d,
+
+        // which room is the cursor in? Require it a bit inside (inset) so small
+        // overshoots past a shared wall don't flip rooms; fall back to the last
+        // room, then the nearest room centre.
+        let room =
+          roomAtPt(px, pz, inset) ??
+          plan.rooms.find((r) => r.id === lastRoomId) ??
+          plan.rooms.reduce<typeof plan.rooms[number] | null>(
+            (b, r) => {
+              const dc = Math.hypot(px - (r.rect.x + r.rect.w / 2), pz - (r.rect.z + r.rect.d / 2));
+              return !b || dc < Math.hypot(px - (b.rect.x + b.rect.w / 2), pz - (b.rect.z + b.rect.d / 2)) ? r : b;
+            },
+            null,
           );
-        const sidePt = (sgn: number): [number, number] =>
-          lw.axis === "x" ? [along, lw.line + sgn * eps] : [lw.line + sgn * eps, along];
-        const posIn = inRoom(...sidePt(1));
-        const negIn = inRoom(...sidePt(-1));
-        const cursorSign =
-          lw.axis === "x" ? (fp.z - offset[2] >= lw.line ? 1 : -1) : (fp.x - offset[0] >= lw.line ? 1 : -1);
-        const sign = posIn && !negIn ? 1 : negIn && !posIn ? -1 : cursorSign;
-        const rot = lw.axis === "x" ? (sign > 0 ? 0 : Math.PI) : sign > 0 ? Math.PI / 2 : -Math.PI / 2;
-        const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + sign * off] : [lw.line + sign * off, y, along];
-        setPosition(draggingId, pos, rot);
+        if (!room) return;
+
+        const edges = roomEdges(room.rect, px, pz).sort((a, b) => a.dist - b.dist);
+        let edge = edges[0];
+        // hysteresis: keep the current side unless clearly closer to another
+        if (lastSide && lastRoomId === room.id) {
+          const le = edges.find((e) => e.side === lastSide);
+          if (le && le.side !== edge.side && edge.dist + 0.3 >= le.dist) edge = le;
+        }
+        lastRoomId = room.id;
+        lastSide = edge.side;
+
+        const { x, z, w, d } = room.rect;
+        const m = WALL_THICKNESS / 2 + 0.02;
+        let cx: number;
+        let cz: number;
+        if (edge.axis === "x") {
+          const along = Math.min(x + w - halfW - m, Math.max(x + halfW + m, snapG(px)));
+          cx = along;
+          cz = edge.line + edge.sign * off;
+        } else {
+          const along = Math.min(z + d - halfW - m, Math.max(z + halfW + m, snapG(pz)));
+          cx = edge.line + edge.sign * off;
+          cz = along;
+        }
+        setPosition(draggingId, [cx, worldY0, cz], edge.rot);
         return;
       }
 
