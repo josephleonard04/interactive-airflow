@@ -192,29 +192,41 @@ function Heater([w, h, d]: V) {
 
 // Simple standing floor fan, facing +z (rotationY aims it). Just blades on a
 // hub — no cage ring.
+// Pedestal fan: wide overlapping paddle blades on a motor housing, on a
+// pole + weighted base. Faces +z; no cage ring.
 function Fan([w, h, d]: V) {
-  const r = w * 0.55;
+  const r = w * 0.6;
+  const blades = 5;
   return (
     <group>
-      {/* round base + thin pole */}
-      <Cyl r={w * 0.4} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#6b7480" metalness={0.4} />
-      <Cyl r={0.022} h={h * 0.72} position={[0, -h * 0.06, 0]} color="#aab2bb" metalness={0.5} />
-      {/* blade assembly facing +z */}
-      <group position={[0, h * 0.3, 0]}>
-        {/* hub */}
-        <mesh position={[0, 0, d * 0.04]}>
-          <sphereGeometry args={[w * 0.13, 16, 16]} />
-          <meshStandardMaterial color="#8a929c" metalness={0.5} roughness={0.4} />
+      {/* weighted base (disc + slight dome) + pole + neck */}
+      <Cyl r={w * 0.44} h={0.05} position={[0, -h / 2 + 0.025, 0]} color="#5c6671" metalness={0.5} />
+      <mesh position={[0, -h / 2 + 0.07, 0]}>
+        <sphereGeometry args={[w * 0.22, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color="#6b7480" metalness={0.45} roughness={0.45} />
+      </mesh>
+      <Cyl r={0.024} h={h * 0.66} position={[0, -h * 0.08, 0]} color="#c2c8cf" metalness={0.55} />
+      {/* head */}
+      <group position={[0, h * 0.32, 0]}>
+        {/* motor housing behind the blades */}
+        <mesh position={[0, 0, -d * 0.1]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[w * 0.17, w * 0.21, d * 0.26, 22]} />
+          <meshStandardMaterial color="#7a828c" metalness={0.55} roughness={0.4} />
         </mesh>
-        {/* 4 angled blades, no surrounding ring */}
-        {[0, 1, 2, 3].map((i) => (
-          <group key={i} rotation={[0, 0, (i * Math.PI) / 2]}>
-            <mesh position={[0, r * 0.5, d * 0.02]} rotation={[0.3, 0, 0.12]}>
-              <boxGeometry args={[w * 0.34, r * 0.9, 0.012]} />
-              <meshStandardMaterial color="#e6ecf2" roughness={0.45} side={2} />
+        {/* overlapping paddle blades */}
+        {Array.from({ length: blades }, (_, i) => (
+          <group key={i} rotation={[0, 0, (i * Math.PI * 2) / blades]}>
+            <mesh position={[0, r * 0.5, d * 0.02]} rotation={[0.42, 0, 0]}>
+              <boxGeometry args={[r * 0.62, r * 0.98, 0.012]} />
+              <meshStandardMaterial color="#eef3f8" roughness={0.4} metalness={0.05} side={2} />
             </mesh>
           </group>
         ))}
+        {/* hub cap */}
+        <mesh position={[0, 0, d * 0.05]}>
+          <sphereGeometry args={[w * 0.12, 16, 16]} />
+          <meshStandardMaterial color="#5c6671" metalness={0.6} roughness={0.35} />
+        </mesh>
       </group>
     </group>
   );
@@ -233,15 +245,33 @@ function Vent([w, h, d]: V) {
   );
 }
 
-// Kitchen sink: a cabinet + counter with a stainless basin and faucet.
+// Kitchen unit: a counter combining a sink (left) and a stove cooktop with four
+// burners + an oven (right). Clearly distinct from the small bathroom sink.
 function KitchenSink([w, h, d]: V) {
+  const burner = (x: number, z: number) => (
+    <mesh position={[x, h * 0.46, z]} rotation={[Math.PI / 2, 0, 0]}>
+      <cylinderGeometry args={[w * 0.08, w * 0.08, 0.02, 20]} />
+      <meshStandardMaterial color="#3a3f47" metalness={0.3} roughness={0.6} />
+    </mesh>
+  );
   return (
     <group>
-      <Box size={[w, h * 0.82, d]} position={[0, -h * 0.09, 0]} color="#cbb89a" />
-      <Box size={[w, h * 0.1, d]} position={[0, h * 0.4, 0]} color="#eef2f5" roughness={0.4} />
-      <Box size={[w * 0.55, h * 0.16, d * 0.62]} position={[0, h * 0.34, 0]} color="#aab4bd" metalness={0.6} roughness={0.3} />
-      <Cyl r={0.02} h={0.18} position={[0, h * 0.55, -d * 0.28]} color="#9aa3ad" />
-      <Cyl r={0.016} h={0.14} position={[0, h * 0.62, -d * 0.22]} color="#9aa3ad" />
+      {/* cabinet base + counter top */}
+      <Box size={[w, h * 0.8, d]} position={[0, -h * 0.1, 0]} color="#d8c6a6" />
+      <Box size={[w, h * 0.1, d]} position={[0, h * 0.4, 0]} color="#eef1f4" roughness={0.4} />
+      {/* oven door on the stove (right) front */}
+      <Box size={[w * 0.44, h * 0.5, 0.03]} position={[w * 0.24, -h * 0.08, d / 2]} color="#7d8893" metalness={0.4} roughness={0.4} />
+      <Box size={[w * 0.34, 0.035, 0.04]} position={[w * 0.24, h * 0.12, d / 2 + 0.01]} color="#aab4bd" metalness={0.6} />
+      {/* sink basin (left) */}
+      <Box size={[w * 0.38, h * 0.16, d * 0.6]} position={[-w * 0.26, h * 0.36, 0]} color="#aab4bd" metalness={0.6} roughness={0.3} />
+      <Cyl r={0.02} h={0.2} position={[-w * 0.26, h * 0.55, -d * 0.28]} color="#9aa3ad" />
+      <Cyl r={0.016} h={0.14} position={[-w * 0.26, h * 0.63, -d * 0.22]} color="#9aa3ad" />
+      {/* stove cooktop (right) with four burners */}
+      <Box size={[w * 0.46, 0.04, d * 0.86]} position={[w * 0.24, h * 0.47, 0]} color="#2b2f36" roughness={0.5} />
+      {burner(w * 0.13, -d * 0.2)}
+      {burner(w * 0.35, -d * 0.2)}
+      {burner(w * 0.13, d * 0.2)}
+      {burner(w * 0.35, d * 0.2)}
     </group>
   );
 }
