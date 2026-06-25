@@ -50,6 +50,16 @@ function nearestWall(px: number, pz: number, walls: WallSeg[], depth: number, ha
   return { x: best.line + sign * off, z: foot, rot: sign > 0 ? Math.PI / 2 : -Math.PI / 2, axis: "z", line: best.line, lo: best.lo, hi: best.hi, sign };
 }
 
+// Distance from a floor point to a wall hit's segment.
+function hitDist(h: { axis: "x" | "z"; line: number; lo: number; hi: number }, px: number, pz: number): number {
+  if (h.axis === "x") {
+    const cx = Math.min(h.hi, Math.max(h.lo, px));
+    return Math.hypot(px - cx, pz - h.line);
+  }
+  const cz = Math.min(h.hi, Math.max(h.lo, pz));
+  return Math.hypot(px - h.line, pz - cz);
+}
+
 // Rotation-aware footprint half-extents (a 90°/270° rotation swaps w/d).
 function footHalf(size: Vec3, rotationY: number): [number, number] {
   const swapped = Math.abs(Math.round(rotationY / (Math.PI / 2))) % 2 === 1;
@@ -120,6 +130,10 @@ function DragController({ offset }: { offset: Vec3 }) {
     const off = WALL_THICKNESS / 2 + depth / 2;
     const [fhx, fhz] = footHalf(item.size, item.rotationY);
     const isWallItem = item.mount === "wall";
+    // remembered wall for hysteresis (stops corner flip-flop)
+    let lockedHit = isWallItem
+      ? nearestWall(item.position[0], item.position[2], plan.walls, depth, halfW)
+      : null;
     let lastValid: Vec3 = [item.position[0], item.position[1], item.position[2]];
 
     const ndc = (e: PointerEvent) => {
@@ -141,8 +155,18 @@ function DragController({ offset }: { offset: Vec3 }) {
         const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const fp = new THREE.Vector3();
         if (!ray.ray.intersectPlane(floor, fp)) return;
-        const lw = nearestWall(fp.x - offset[0], fp.z - offset[2], plan.walls, depth, halfW);
-        if (!lw) return;
+        const px = fp.x - offset[0];
+        const pz = fp.z - offset[2];
+        const cand = nearestWall(px, pz, plan.walls, depth, halfW);
+        if (!cand) return;
+        // hysteresis: keep the current wall near a corner unless the cursor is
+        // clearly closer to another wall — stops the flip-flop.
+        let lw = cand;
+        if (lockedHit) {
+          const same = lockedHit.axis === cand.axis && Math.abs(lockedHit.line - cand.line) < 1e-3;
+          if (!same && hitDist(cand, px, pz) + 0.3 >= hitDist(lockedHit, px, pz)) lw = lockedHit;
+        }
+        lockedHit = lw;
         const plane =
           lw.axis === "x"
             ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lw.line + offset[2]))
