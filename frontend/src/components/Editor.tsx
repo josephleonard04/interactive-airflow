@@ -123,9 +123,10 @@ function DragController({ offset }: { offset: Vec3 }) {
             ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lw.line + offset[2]))
             : new THREE.Plane(new THREE.Vector3(1, 0, 0), -(lw.line + offset[0]));
         if (!ray.ray.intersectPlane(plane, pt)) return;
-        let along = lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2];
+        // snap both the slide-along-wall and the up/down height to the grid
+        let along = snapG(lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2]);
         along = Math.min(lw.hi - halfW, Math.max(lw.lo + halfW, along));
-        const y = Math.min(plan.wallHeight - halfH, Math.max(halfH, pt.y));
+        const y = Math.min(plan.wallHeight - halfH, Math.max(halfH, snapG(pt.y)));
         const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + lw.sign * off] : [lw.line + lw.sign * off, y, along];
         setPosition(draggingId, pos, lw.rot);
         return;
