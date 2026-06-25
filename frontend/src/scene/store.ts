@@ -188,20 +188,64 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
       const line = vertical ? o.a[0] : o.a[1];
       const width = o.width;
-      let lo = Infinity;
-      let hi = -Infinity;
+      const M = 0.06; // clearance from wall ends and from neighbouring openings
+      const span = (p: Vec2, q: Vec2): [number, number] =>
+        vertical ? [Math.min(p[1], q[1]), Math.max(p[1], q[1])] : [Math.min(p[0], q[0]), Math.max(p[0], q[0])];
+      const curCenter = (() => {
+        const [s0, e0] = span(o.a, o.b);
+        return (s0 + e0) / 2;
+      })();
+
+      // contiguous wall runs on this line (so an opening can't drift into a gap
+      // between walls or onto a corner)
+      const segs: Array<[number, number]> = [];
       for (const w of s.plan.walls) {
         const wl = w.axis === "z" ? w.a[0] : w.a[1];
-        if (vertical && w.axis === "z" && Math.abs(wl - line) < 1e-3) {
-          lo = Math.min(lo, Math.min(w.a[1], w.b[1]));
-          hi = Math.max(hi, Math.max(w.a[1], w.b[1]));
-        } else if (!vertical && w.axis === "x" && Math.abs(wl - line) < 1e-3) {
-          lo = Math.min(lo, Math.min(w.a[0], w.b[0]));
-          hi = Math.max(hi, Math.max(w.a[0], w.b[0]));
-        }
+        const matches = (vertical && w.axis === "z") || (!vertical && w.axis === "x");
+        if (matches && Math.abs(wl - line) < 1e-3) segs.push(span(w.a, w.b));
       }
-      if (!Number.isFinite(lo)) return {};
-      const c = Math.min(hi - width / 2 - 0.05, Math.max(lo + width / 2 + 0.05, alongCenter));
+      if (!segs.length) return {};
+      segs.sort((p, q) => p[0] - q[0]);
+      const runs: Array<[number, number]> = [];
+      for (const sg of segs) {
+        const last = runs[runs.length - 1];
+        if (last && sg[0] <= last[1] + 1e-3) last[1] = Math.max(last[1], sg[1]);
+        else runs.push([sg[0], sg[1]]);
+      }
+      let run = runs.find((r) => curCenter >= r[0] - 1e-3 && curCenter <= r[1] + 1e-3);
+      if (!run) run = runs.reduce((b, r) => (Math.abs((r[0] + r[1]) / 2 - curCenter) < Math.abs((b[0] + b[1]) / 2 - curCenter) ? r : b), runs[0]);
+
+      // occupied intervals from OTHER openings on the same line (so they can't share space)
+      const occ: Array<[number, number]> = [];
+      for (const op of [...s.plan.doors, ...s.plan.windows]) {
+        if (op.id === id) continue;
+        const ov = Math.abs(op.a[0] - op.b[0]) < 1e-3;
+        const ol = ov ? op.a[0] : op.a[1];
+        if (ov !== vertical || Math.abs(ol - line) >= 1e-3) continue;
+        const [os, oe] = span(op.a, op.b);
+        occ.push([os - M, oe + M]);
+      }
+      occ.sort((p, q) => p[0] - q[0]);
+
+      // free sub-intervals within the run, then pick the one holding the opening
+      const free: Array<[number, number]> = [];
+      let cursor = run[0] + M;
+      for (const [os, oe] of occ) {
+        if (os > cursor) free.push([cursor, Math.min(os, run[1] - M)]);
+        cursor = Math.max(cursor, oe);
+      }
+      if (cursor < run[1] - M) free.push([cursor, run[1] - M]);
+      const fits = free.filter((f) => f[1] - f[0] >= width);
+      let target: [number, number] | null =
+        fits.find((f) => curCenter >= f[0] - 1e-3 && curCenter <= f[1] + 1e-3) ?? null;
+      if (!target)
+        target = fits.reduce<[number, number] | null>(
+          (b, f) => (!b || Math.abs((f[0] + f[1]) / 2 - curCenter) < Math.abs((b[0] + b[1]) / 2 - curCenter) ? f : b),
+          null,
+        );
+      if (!target) return {}; // nowhere valid to move — leave it put
+
+      const c = Math.min(target[1] - width / 2, Math.max(target[0] + width / 2, alongCenter));
       const ns = c - width / 2;
       const ne = c + width / 2;
       const na: Vec2 = vertical ? [line, ns] : [ns, line];
