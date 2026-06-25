@@ -99,7 +99,7 @@ function DragController({ offset }: { offset: Vec3 }) {
     const halfH = item.size[1] / 2;
     const off = WALL_THICKNESS / 2 + depth / 2;
     const [fhx, fhz] = footHalf(item.size, item.rotationY);
-    const lockedWall = item.mount === "wall" ? nearestWall(item.position[0], item.position[2], plan.walls, depth, halfW) : null;
+    const isWallItem = item.mount === "wall";
     let lastValid: Vec3 = [item.position[0], item.position[1], item.position[2]];
 
     const ndc = (e: PointerEvent) => {
@@ -115,18 +115,27 @@ function DragController({ offset }: { offset: Vec3 }) {
       ray.setFromCamera(ndc(e), camera);
       const pt = new THREE.Vector3();
 
-      // wall items: slide along the wall + move vertically on its plane
-      if (lockedWall) {
-        const lw = lockedWall;
+      // wall items: pick the wall nearest the cursor each frame (so the item can
+      // hop to another wall), then slide along it + move up/down on it.
+      if (isWallItem) {
+        const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const fp = new THREE.Vector3();
+        if (!ray.ray.intersectPlane(floor, fp)) return;
+        const lw = nearestWall(fp.x - offset[0], fp.z - offset[2], plan.walls, depth, halfW);
+        if (!lw) return;
         const plane =
           lw.axis === "x"
             ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -(lw.line + offset[2]))
             : new THREE.Plane(new THREE.Vector3(1, 0, 0), -(lw.line + offset[0]));
-        if (!ray.ray.intersectPlane(plane, pt)) return;
-        // snap both the slide-along-wall and the up/down height to the grid
-        let along = snapG(lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2]);
+        let along: number;
+        let y = worldY0;
+        if (ray.ray.intersectPlane(plane, pt)) {
+          along = snapG(lw.axis === "x" ? pt.x - offset[0] : pt.z - offset[2]);
+          y = Math.min(plan.wallHeight - halfH, Math.max(halfH, snapG(pt.y)));
+        } else {
+          along = snapG(lw.axis === "x" ? fp.x - offset[0] : fp.z - offset[2]);
+        }
         along = Math.min(lw.hi - halfW, Math.max(lw.lo + halfW, along));
-        const y = Math.min(plan.wallHeight - halfH, Math.max(halfH, snapG(pt.y)));
         const pos: Vec3 = lw.axis === "x" ? [along, y, lw.line + lw.sign * off] : [lw.line + lw.sign * off, y, along];
         setPosition(draggingId, pos, lw.rot);
         return;
