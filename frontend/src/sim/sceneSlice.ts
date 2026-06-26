@@ -121,16 +121,33 @@ export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
       const [dxh, dzh] = horizDir(it.rotationY);
       const speed = (isAC ? clampf((it.flow ?? 0) / 0.3, 0.4, 1.5) : 1.0) * mult;
       for (const [i, j] of cells) {
-        if (sim.solid[sim.cIdx(i, j)]) sim.solid[sim.cIdx(i, j)] = 0; // a vent isn't a wall
-        // momentum jet, net-zero mass: set both faces along the flow axis
-        if (dxh !== 0) {
-          const val = dxh * speed;
-          sim.uFixed[sim.uIdx(i, j)] = 1; sim.uVal[sim.uIdx(i, j)] = val;
-          sim.uFixed[sim.uIdx(i + 1, j)] = 1; sim.uVal[sim.uIdx(i + 1, j)] = val;
+        const c = sim.cIdx(i, j);
+        if (sim.solid[c]) sim.solid[c] = 0; // a vent isn't a wall
+        if (isAC) {
+          // An AC/supply vent is a *ducted inflow boundary*: fresh air enters here
+          // from outside the room, directed by the jet face. Marking the cell free
+          // (like an open window) lets that mass enter without a stuck local
+          // divergence; the open window elsewhere is the outflow. Mass balances
+          // between the two, giving clean room-to-room flow.
+          sim.open[c] = 1;
+          if (dxh !== 0) {
+            const f = dxh > 0 ? sim.uIdx(i + 1, j) : sim.uIdx(i, j);
+            sim.uFixed[f] = 1; sim.uVal[f] = dxh * speed;
+          } else {
+            const f = dzh > 0 ? sim.vIdx(i, j + 1) : sim.vIdx(i, j);
+            sim.vFixed[f] = 1; sim.vVal[f] = dzh * speed;
+          }
         } else {
-          const val = dzh * speed;
-          sim.vFixed[sim.vIdx(i, j)] = 1; sim.vVal[sim.vIdx(i, j)] = val;
-          sim.vFixed[sim.vIdx(i, j + 1)] = 1; sim.vVal[sim.vIdx(i, j + 1)] = val;
+          // A fan recirculates indoor air (no net mass): two-sided momentum jet.
+          if (dxh !== 0) {
+            const v = dxh * speed;
+            sim.uFixed[sim.uIdx(i, j)] = 1; sim.uVal[sim.uIdx(i, j)] = v;
+            sim.uFixed[sim.uIdx(i + 1, j)] = 1; sim.uVal[sim.uIdx(i + 1, j)] = v;
+          } else {
+            const v = dzh * speed;
+            sim.vFixed[sim.vIdx(i, j)] = 1; sim.vVal[sim.vIdx(i, j)] = v;
+            sim.vFixed[sim.vIdx(i, j + 1)] = 1; sim.vVal[sim.vIdx(i, j + 1)] = v;
+          }
         }
       }
     }

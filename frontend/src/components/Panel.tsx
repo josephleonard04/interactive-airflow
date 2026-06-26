@@ -150,17 +150,6 @@ export function Panel() {
           <p className="muted-line">
             in {roomName(selected.roomId, plan.rooms)} · drag in the view to move
           </p>
-          {selected.flow !== undefined && selected.type !== "fan" && selected.type !== "heater" && (
-            <label className="field">
-              <span>airflow (m³/s)</span>
-              <input
-                type="number"
-                step={0.01}
-                value={Number(selected.flow.toFixed(2))}
-                onChange={(e) => updateItem(selected.id, { flow: parseFloat(e.target.value) || 0 })}
-              />
-            </label>
-          )}
           {["ac", "fan", "heater"].includes(selected.type) && (
             <>
               <div className="field">
