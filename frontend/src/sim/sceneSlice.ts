@@ -39,6 +39,7 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 
 const HEATER_T = 12; // K above ambient
 const AC_T = -8; // K below ambient (AC cools)
+const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 }; // low / med / high
 
 export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
   const scene = compileLfmScene(plan);
@@ -103,44 +104,45 @@ export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
     return ([[0, 1], [1, 0], [0, -1], [-1, 0]] as [number, number][])[q]; // (dx, dz)
   };
 
+  // HVAC devices are projected onto the slice regardless of mount height (their
+  // effect applies to the room plane). Each honours on/off + power level.
   let hasTemperature = false;
   for (const it of plan.items) {
     const isAC = it.type === "ac";
     const isFan = it.type === "fan";
-    if (!isAC && !isFan) continue;
+    const isHeater = it.type === "heater";
+    if (!isAC && !isFan && !isHeater) continue;
+    if (it.on === false) continue; // turned off
+    const mult = POWER[it.power ?? 2] ?? 1;
     const box = itemAabb(it);
-    const [dxh, dzh] = horizDir(it.rotationY);
-    const speed = isAC ? clampf((it.flow ?? 0) / 0.3, 0.4, 1.5) : 1.0;
-    for (const [i, j] of footprint(box)) {
-      const c = sim.cIdx(i, j);
-      if (sim.solid[c]) sim.solid[c] = 0; // a vent isn't a wall
-      // momentum jet, net-zero mass: set both faces along the flow axis
-      if (dxh !== 0) {
-        const val = dxh * speed;
-        sim.uFixed[sim.uIdx(i, j)] = 1; sim.uVal[sim.uIdx(i, j)] = val;
-        sim.uFixed[sim.uIdx(i + 1, j)] = 1; sim.uVal[sim.uIdx(i + 1, j)] = val;
-      } else {
-        const val = dzh * speed;
-        sim.vFixed[sim.vIdx(i, j)] = 1; sim.vVal[sim.vIdx(i, j)] = val;
-        sim.vFixed[sim.vIdx(i, j + 1)] = 1; sim.vVal[sim.vIdx(i, j + 1)] = val;
-      }
-      if (isAC) {
-        sim.tempFixed[c] = 1;
-        sim.tempVal[c] = AC_T;
-        hasTemperature = true;
+    const cells = footprint(box);
+
+    if (isAC || isFan) {
+      const [dxh, dzh] = horizDir(it.rotationY);
+      const speed = (isAC ? clampf((it.flow ?? 0) / 0.3, 0.4, 1.5) : 1.0) * mult;
+      for (const [i, j] of cells) {
+        if (sim.solid[sim.cIdx(i, j)]) sim.solid[sim.cIdx(i, j)] = 0; // a vent isn't a wall
+        // momentum jet, net-zero mass: set both faces along the flow axis
+        if (dxh !== 0) {
+          const val = dxh * speed;
+          sim.uFixed[sim.uIdx(i, j)] = 1; sim.uVal[sim.uIdx(i, j)] = val;
+          sim.uFixed[sim.uIdx(i + 1, j)] = 1; sim.uVal[sim.uIdx(i + 1, j)] = val;
+        } else {
+          const val = dzh * speed;
+          sim.vFixed[sim.vIdx(i, j)] = 1; sim.vVal[sim.vIdx(i, j)] = val;
+          sim.vFixed[sim.vIdx(i, j + 1)] = 1; sim.vVal[sim.vIdx(i, j + 1)] = val;
+        }
       }
     }
-  }
-
-  // heat sources (heater): temperature only (buoyancy is vertical -> 3D)
-  for (const h of scene.heatSources) {
-    if (!spansSlice(h.world)) continue;
-    for (const [i, j] of footprint(h.world)) {
-      const c = sim.cIdx(i, j);
-      if (sim.solid[c]) continue;
-      sim.tempFixed[c] = 1;
-      sim.tempVal[c] = HEATER_T;
-      hasTemperature = true;
+    if (isAC || isHeater) {
+      const dT = (isAC ? AC_T : HEATER_T) * mult;
+      for (const [i, j] of cells) {
+        const c = sim.cIdx(i, j);
+        if (sim.solid[c]) continue;
+        sim.tempFixed[c] = 1;
+        sim.tempVal[c] = dT;
+        hasTemperature = true;
+      }
     }
   }
 

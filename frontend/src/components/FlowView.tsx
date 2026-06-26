@@ -54,6 +54,15 @@ export function FlowView() {
     const sx = DISPLAY_W / nx;
     const sy = H / ny;
 
+    // fixed arrow grid + temporal smoothing so arrows show direction steadily
+    const di = Math.max(2, Math.round(22 / sx));
+    const samples: Array<[number, number]> = [];
+    for (let j = di >> 1; j < ny; j += di) for (let i = di >> 1; i < nx; i += di) samples.push([i, j]);
+    const emaU = new Float32Array(samples.length);
+    const emaV = new Float32Array(samples.length);
+    let emaMax = 0.5;
+    const aLen = di * sx * 0.55; // constant arrow length (direction only)
+
     let raf = 0;
     const draw = () => {
       if (running) for (let k = 0; k < 2; k++) sim.step(0.05);
@@ -92,25 +101,33 @@ export function FlowView() {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(off, 0, 0, DISPLAY_W, H);
 
-      // flow arrows
-      const stepPx = 20;
-      const di = Math.max(2, Math.round(stepPx / sx));
-      for (let j = (di >> 1); j < ny; j += di) {
-        for (let i = (di >> 1); i < nx; i += di) {
-          if (sim.solid[sim.cIdx(i, j)] || sim.open[sim.cIdx(i, j)]) continue;
-          const [uc, vc] = sim.velocityAt(i, j);
-          const m = Math.hypot(uc, vc);
-          if (m < smax * 0.06) continue;
-          const t = Math.min(1, m / smax);
-          const len = stepPx * (0.45 + 0.5 * t);
-          const cx = (i + 0.5) * sx;
-          const cy = (j + 0.5) * sy;
-          const col =
-            mode === "airflow"
-              ? `rgb(${lerp(150, 30, t) | 0},${lerp(170, 90, t) | 0},${lerp(190, 160, t) | 0})`
-              : "rgba(60,50,40,0.55)";
-          arrow(ctx, cx, cy, (uc / m) * len, (vc / m) * len, col);
-        }
+      // flow arrows: fixed length + EMA-smoothed direction → steady, no jitter
+      let curMax = 1e-6;
+      for (let k = 0; k < samples.length; k++) {
+        const [i, j] = samples[k];
+        const [uc, vc] = sim.velocityAt(i, j);
+        emaU[k] += 0.06 * (uc - emaU[k]);
+        emaV[k] += 0.06 * (vc - emaV[k]);
+        const m = Math.hypot(emaU[k], emaV[k]);
+        if (m > curMax) curMax = m;
+      }
+      emaMax += 0.05 * (curMax - emaMax);
+      for (let k = 0; k < samples.length; k++) {
+        const [i, j] = samples[k];
+        const c = sim.cIdx(i, j);
+        if (sim.solid[c] || sim.open[c]) continue;
+        const eu = emaU[k];
+        const ev = emaV[k];
+        const m = Math.hypot(eu, ev);
+        if (m < emaMax * 0.08) continue;
+        const t = Math.min(1, m / (emaMax + 1e-6));
+        const cx = (i + 0.5) * sx;
+        const cy = (j + 0.5) * sy;
+        const col =
+          mode === "airflow"
+            ? `rgb(${lerp(150, 30, t) | 0},${lerp(170, 90, t) | 0},${lerp(190, 160, t) | 0})`
+            : "rgba(60,50,40,0.6)";
+        arrow(ctx, cx, cy, (eu / m) * aLen, (ev / m) * aLen, col);
       }
       raf = requestAnimationFrame(draw);
     };
