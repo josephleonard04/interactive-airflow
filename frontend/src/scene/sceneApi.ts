@@ -1,4 +1,5 @@
 import { exportBoundaryConditions } from "../bc/exportBoundaryConditions";
+import { compileLfmScene } from "../bc/lfm";
 import type { FloorPlan, HomeSize, PlacedItem, RoomDef, StartMode, Vec2, Vec3 } from "../floorplan/types";
 import { useSceneStore } from "./store";
 
@@ -12,7 +13,8 @@ import { useSceneStore } from "./store";
 //   airflow.translate("bed-1", [0.5, 0, 0])
 //   airflow.add("plant", [2, 0, 2]); airflow.remove("tv-1")
 //   airflow.addWall([1, 1], [3, 1])
-//   airflow.exportBoundaryConditions()
+//   airflow.exportBoundaryConditions()   // solver-neutral geometry
+//   airflow.exportLfm()                  // LFM-ready scene + flux balance
 
 export const sceneApi = {
   /** Regenerate the home for the given dimensions (metres). */
@@ -107,6 +109,12 @@ export const sceneApi = {
 
   exportBoundaryConditions() {
     return exportBoundaryConditions(useSceneStore.getState().plan);
+  },
+
+  /** Compile the home into an LFM-ready scene (domain + solids + flux-balanced
+   *  inlets/outlets). Feed the JSON to bridge/lfm_bridge.py on the GPU machine. */
+  exportLfm() {
+    return compileLfmScene(useSceneStore.getState().plan);
   },
 };
 

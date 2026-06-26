@@ -71,6 +71,7 @@ scene/
   sceneApi.ts   window.airflow programmatic control surface
 bc/
   exportBoundaryConditions.ts   plan → solver-neutral JSON (room grid + geometry + flows)
+  lfm.ts                        plan → LFM-ready scene (grid domain + solids + flux-balanced inlets/outlets)
 ```
 
 ## The two control paths (advisor requirement)
@@ -86,16 +87,27 @@ Both mutate the same store, so they never disagree:
    airflow.add("couch", [2, 0, 2]); airflow.remove("tv-1")
    airflow.addWall([1, 1], [3, 1])
    airflow.translate("bed-1", [0.5, 0, 0])   // = change a boundary condition
-   airflow.exportBoundaryConditions()        // room grid + walls + openings + solids + flows
+   airflow.exportBoundaryConditions()        // solver-neutral geometry
+   airflow.exportLfm()                       // LFM-ready scene + flux balance
    ```
 
 ## The simulator seam
 
-`exportBoundaryConditions()` returns the room-label grid, wall/door/window
-geometry, furniture solids, and HVAC inlet/outlet flow patches (plus fans and
-heaters) for LFM. Moving an item re-derives it. The exact schema will be adapted
-to LFM once Yuchen confirms its boundary-condition API (see
-[`../docs/draft-reply-yuchen.md`](../docs/draft-reply-yuchen.md), Q4).
+Two exports off the same plan:
+
+- `exportBoundaryConditions()` — solver-neutral geometry (room-label grid,
+  wall/door/window geometry, furniture solids, HVAC flow patches). Stable seam.
+- `exportLfm()` — compiles the home into an **LFM-ready scene** ([`bc/lfm.ts`](src/bc/lfm.ts)):
+  maps the metric room onto LFM's grid (`tile_dim`×8 cells, `dx = len_y/(8·tile_dim.y)`),
+  turns walls + closed openings + furniture into solid boxes, and turns vents/AC +
+  open exterior windows/doors into **flux-balanced** inlet/outlet velocity patches
+  (total inflow = total outflow, since LFM is incompressible). Moving an item
+  re-derives all of it.
+
+Feed the `exportLfm()` JSON to [`../bridge/lfm_bridge.py`](../bridge/README.md)
+on the GPU machine to produce the `config.json`, `solid_sdf.npy`, and initial
+fields LFM ingests. Confirmed APIs with Yuchen Sun (2026-06); the multi-patch
+boundary conditions need the solver extension he described.
 
 ## Not done yet
 
