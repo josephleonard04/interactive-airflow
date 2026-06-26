@@ -1,7 +1,7 @@
 import { Editor } from "./components/Editor";
-import { FlowView } from "./components/FlowView";
 import { Panel } from "./components/Panel";
 import { SetupScreen } from "./components/SetupScreen";
+import { SimPanel } from "./components/SimPanel";
 import { useSceneStore } from "./scene/store";
 
 export function App() {
@@ -14,7 +14,7 @@ export function App() {
       <Panel />
       <main className="viewport">
         <Editor />
-        <FlowView />
+        <SimPanel />
       </main>
     </div>
   );
