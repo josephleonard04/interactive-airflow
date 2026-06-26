@@ -69,7 +69,19 @@ export interface SceneState {
   toggleOpening: (id: string) => void;
 
   removeSelected: () => void;
+
+  // airflow simulation overlay (runs in the 3D scene)
+  simActive: boolean;
+  simMode: SimMode;
+  simPaused: boolean;
+  simSourceRoomId: string | null;
+  toggleSim: () => void;
+  setSimMode: (m: SimMode) => void;
+  toggleSimPause: () => void;
+  setSimSource: (id: string | null) => void;
 }
+
+export type SimMode = "airflow" | "temperature" | "contamination";
 
 let customId = 0;
 const HISTORY = 50;
@@ -102,6 +114,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   mode: "select",
   past: [],
   future: [],
+  simActive: false,
+  simMode: "airflow",
+  simPaused: false,
+  simSourceRoomId: null,
+
+  toggleSim: () => set((s) => ({ simActive: !s.simActive })),
+  setSimMode: (m) => set({ simMode: m }),
+  toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
+  setSimSource: (id) => set({ simSourceRoomId: id }),
 
   generate: (size, mode) =>
     set({

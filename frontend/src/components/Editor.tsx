@@ -6,6 +6,7 @@ import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
 import type { Opening, Rect, Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
+import { FlowField3D } from "./FlowField3D";
 import { ItemMesh } from "./ItemMesh";
 
 type Side = "north" | "south" | "east" | "west";
@@ -395,6 +396,7 @@ export function Editor() {
   const mode = useSceneStore((s) => s.mode);
   const draggingId = useSceneStore((s) => s.draggingId);
   const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
+  const simActive = useSceneStore((s) => s.simActive);
   const selectedId = useSceneStore((s) => s.selectedId);
   const clearSelection = useSceneStore((s) => s.clearSelection);
   const removeSelected = useSceneStore((s) => s.removeSelected);
@@ -484,6 +486,7 @@ export function Editor() {
         {plan.items.map((it) => (
           <ItemMesh key={it.id} item={it} />
         ))}
+        {simActive && <FlowField3D />}
       </group>
 
       <DragController offset={offset} />
