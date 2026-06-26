@@ -69,15 +69,20 @@ export function Panel() {
   };
 
   const exportBC = () => {
-    const bc = sceneApi.exportBoundaryConditions();
+    const scene = sceneApi.exportLfm();
     // eslint-disable-next-line no-console
-    console.log("[airflow] boundary conditions", bc);
-    navigator.clipboard?.writeText(JSON.stringify(bc, null, 2)).catch(() => {});
-    alert(
-      `Saved your home’s airflow setup.\n` +
-        `${bc.rooms.length} rooms · ${bc.doors.length} doors · ${bc.windows.length} windows · ` +
-        `${bc.solids.length} furniture · ${bc.flows.length} vents`,
-    );
+    console.log("[airflow] LFM scene", scene);
+    navigator.clipboard?.writeText(JSON.stringify(scene, null, 2)).catch(() => {});
+    const { domain, inlets, outlets, solids, balance } = scene;
+    const grid = `${domain.gridDim[0]}×${domain.gridDim[1]}×${domain.gridDim[2]}`;
+    const summary =
+      `Saved your home’s airflow setup (copied as LFM scene JSON).\n` +
+      `Grid ${grid} cells @ ${domain.dx.toFixed(3)} m · ` +
+      `${solids.length} solids · ${inlets.length} inlets · ${outlets.length} outlets`;
+    const flow = balance.balanced
+      ? `\n\nAir balance OK: ${balance.inflow.toFixed(3)} m³/s in = ${balance.outflow.toFixed(3)} m³/s out.`
+      : `\n\n⚠ ${balance.note}`;
+    alert(summary + (balance.note && balance.balanced ? `\n\n${balance.note}` : flow));
   };
 
   const { length, width, height } = plan.size;
