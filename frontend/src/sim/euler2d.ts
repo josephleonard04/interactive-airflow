@@ -36,6 +36,7 @@ export class Euler2D {
   private s0: Float32Array;
 
   solid: Uint8Array; // nx*ny, 1 = obstacle
+  divTarget: Float32Array; // nx*ny, prescribed net divergence: +source (inlet) / -sink (outlet)
   uFixed: Uint8Array; // (nx+1)*ny, 1 = velocity prescribed (inlet/outlet)
   uVal: Float32Array; // (nx+1)*ny
   vFixed: Uint8Array; // nx*(ny+1)
@@ -59,6 +60,7 @@ export class Euler2D {
     this.s = new Float32Array(c);
     this.s0 = new Float32Array(c);
     this.solid = new Uint8Array(c);
+    this.divTarget = new Float32Array(c);
     this.uFixed = new Uint8Array(this.u.length);
     this.uVal = new Float32Array(this.u.length);
     this.vFixed = new Uint8Array(this.v.length);
@@ -228,7 +230,8 @@ export class Euler2D {
           if (denom === 0) continue;
           const div =
             this.u[this.uIdx(i + 1, j)] - this.u[this.uIdx(i, j)] +
-            this.v[this.vIdx(i, j + 1)] - this.v[this.vIdx(i, j)];
+            this.v[this.vIdx(i, j + 1)] - this.v[this.vIdx(i, j)] -
+            this.divTarget[this.cIdx(i, j)];
           let pNew =
             (sL * this.pAt(i - 1, j) + sR * this.pAt(i + 1, j) + sD * this.pAt(i, j - 1) + sU * this.pAt(i, j + 1) - div) /
             denom;
@@ -290,7 +293,8 @@ export class Euler2D {
         if (this.solid[this.cIdx(i, j)]) continue;
         const div =
           this.u[this.uIdx(i + 1, j)] - this.u[this.uIdx(i, j)] +
-          this.v[this.vIdx(i, j + 1)] - this.v[this.vIdx(i, j)];
+          this.v[this.vIdx(i, j + 1)] - this.v[this.vIdx(i, j)] -
+          this.divTarget[this.cIdx(i, j)];
         m = Math.max(m, Math.abs(div));
       }
     }
