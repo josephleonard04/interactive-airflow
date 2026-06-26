@@ -1,40 +1,49 @@
 import { compileLfmScene, type Box } from "../bc/lfm";
-import type { FloorPlan, Rect } from "../floorplan/types";
+import type { FloorPlan, PlacedItem, Rect } from "../floorplan/types";
 import { Euler2D } from "./euler2d";
 
 // Project the editor's home onto a top-down (x–z) slice and configure a 2D Euler
-// solver from it: walls + furniture become solids, vents/AC become divergence
-// sources, open exterior windows/doors become sinks (mass-balanced), and a chosen
-// room can emit a contaminant tracer. The source/sink model sidesteps imposing
-// per-face velocities — the flow field emerges from the pressure solve, which is
-// the robust thing for interactive HVAC-style inflow/outflow.
+// solver from it:
+//   - walls + furniture crossing the slice  -> solids
+//   - AC / fan                              -> directed momentum jets (they push air)
+//   - open exterior windows / doors         -> free boundary cells (air leaves/enters here)
+//   - open interior doors                   -> fluid gaps (air passes between rooms)
+//   - heater (hot) / AC (cold)              -> temperature sources
+//   - a chosen room                         -> contaminant source
+//
+// The jets + open boundaries (instead of forced per-window sinks) are what make the
+// flow physical: air routes between rooms through open doors, and recirculates
+// rather than running straight to the nearest window.
 
 export interface SliceOptions {
-  sliceY?: number; // height of the horizontal slice (m)
-  targetCells?: number; // coarsen the grid to about this many cells for real-time 2D
+  sliceY?: number;
+  targetCells?: number;
   iterations?: number;
 }
 
 export interface Slice {
   sim: Euler2D;
   nx: number;
-  ny: number; // along world z
+  ny: number;
   dx: number;
   originX: number;
   originZ: number;
   bounds: Rect;
   worldToCell: (wx: number, wz: number) => [number, number];
-  /** Set (or clear) the contaminant source to a room's footprint. */
   setSource: (rect: Rect | null) => void;
+  hasTemperature: boolean;
 }
 
 const clampi = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+const HEATER_T = 12; // K above ambient
+const AC_T = -8; // K below ambient (AC cools)
 
 export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
   const scene = compileLfmScene(plan);
   const { gridDim, dx: dx0, gridOrigin } = scene.domain;
 
-  // top-down uses world x (gridDim[0]) and world z (gridDim[2])
   let nx = gridDim[0];
   let ny = gridDim[2];
   let dx = dx0;
@@ -56,8 +65,6 @@ export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
     clampi(Math.floor((wz - originZ) / dx), 0, ny - 1),
   ];
   const spansSlice = (b: Box) => b.min[1] <= sliceY && b.max[1] >= sliceY;
-
-  // cells covered by a world box's x–z footprint
   const footprint = (b: Box): Array<[number, number]> => {
     const [i0, j0] = worldToCell(b.min[0], b.min[2]);
     const [i1, j1] = worldToCell(b.max[0], b.max[2]);
@@ -66,38 +73,75 @@ export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
     return cells;
   };
 
-  // solids (only those crossing the slice height)
+  // solids
   for (const s of scene.solids) {
     if (!spansSlice(s.world)) continue;
     for (const [i, j] of footprint(s.world)) sim.solid[sim.cIdx(i, j)] = 1;
   }
 
-  // inlets -> divergence sources (skip those whose footprint fell entirely on solid)
-  const inletCells: Array<[number, number]> = [];
-  let sourceTotal = 0;
-  for (const p of scene.inlets) {
-    if (!spansSlice(p.world) && Math.abs(p.normal[1]) < 0.5) continue; // out-of-slice in-plane vent
-    for (const [i, j] of footprint(p.world)) {
-      const c = sim.cIdx(i, j);
-      if (sim.solid[c]) sim.solid[c] = 0; // a vent is an opening, not a wall
-      sim.divTarget[c] += p.speed;
-      sourceTotal += p.speed;
-      inletCells.push([i, j]);
-    }
-  }
-
-  // outlets -> divergence sinks, sharing the total so Σ divTarget = 0
-  const outletCells: Array<[number, number]> = [];
+  // open boundaries: open exterior windows/doors (scene.outlets are exactly those)
   for (const p of scene.outlets) {
     for (const [i, j] of footprint(p.world)) {
       const c = sim.cIdx(i, j);
-      if (sim.solid[c]) sim.solid[c] = 0;
-      outletCells.push([i, j]);
+      sim.solid[c] = 0;
+      sim.open[c] = 1;
     }
   }
-  if (outletCells.length > 0 && sourceTotal > 0) {
-    const per = -sourceTotal / outletCells.length;
-    for (const [i, j] of outletCells) sim.divTarget[sim.cIdx(i, j)] += per;
+
+  // directed jets from AC + fans (horizontal facing from yaw); ceiling supply is
+  // out-of-plane in a top-down slice, so it's skipped here (shown in 3D).
+  const itemAabb = (it: PlacedItem): Box => {
+    const [cx, cy, cz] = it.position;
+    const [sw, sh, sd] = it.size;
+    const q = ((Math.round(it.rotationY / (Math.PI / 2)) % 4) + 4) % 4;
+    const ex = q === 1 || q === 3 ? sd : sw;
+    const ez = q === 1 || q === 3 ? sw : sd;
+    return { min: [cx - ex / 2, cy - sh / 2, cz - ez / 2], max: [cx + ex / 2, cy + sh / 2, cz + ez / 2] };
+  };
+  const horizDir = (rotY: number): [number, number] => {
+    const q = ((Math.round(rotY / (Math.PI / 2)) % 4) + 4) % 4;
+    return ([[0, 1], [1, 0], [0, -1], [-1, 0]] as [number, number][])[q]; // (dx, dz)
+  };
+
+  let hasTemperature = false;
+  for (const it of plan.items) {
+    const isAC = it.type === "ac";
+    const isFan = it.type === "fan";
+    if (!isAC && !isFan) continue;
+    const box = itemAabb(it);
+    const [dxh, dzh] = horizDir(it.rotationY);
+    const speed = isAC ? clampf((it.flow ?? 0) / 0.3, 0.4, 1.5) : 1.0;
+    for (const [i, j] of footprint(box)) {
+      const c = sim.cIdx(i, j);
+      if (sim.solid[c]) sim.solid[c] = 0; // a vent isn't a wall
+      // momentum jet, net-zero mass: set both faces along the flow axis
+      if (dxh !== 0) {
+        const val = dxh * speed;
+        sim.uFixed[sim.uIdx(i, j)] = 1; sim.uVal[sim.uIdx(i, j)] = val;
+        sim.uFixed[sim.uIdx(i + 1, j)] = 1; sim.uVal[sim.uIdx(i + 1, j)] = val;
+      } else {
+        const val = dzh * speed;
+        sim.vFixed[sim.vIdx(i, j)] = 1; sim.vVal[sim.vIdx(i, j)] = val;
+        sim.vFixed[sim.vIdx(i, j + 1)] = 1; sim.vVal[sim.vIdx(i, j + 1)] = val;
+      }
+      if (isAC) {
+        sim.tempFixed[c] = 1;
+        sim.tempVal[c] = AC_T;
+        hasTemperature = true;
+      }
+    }
+  }
+
+  // heat sources (heater): temperature only (buoyancy is vertical -> 3D)
+  for (const h of scene.heatSources) {
+    if (!spansSlice(h.world)) continue;
+    for (const [i, j] of footprint(h.world)) {
+      const c = sim.cIdx(i, j);
+      if (sim.solid[c]) continue;
+      sim.tempFixed[c] = 1;
+      sim.tempVal[c] = HEATER_T;
+      hasTemperature = true;
+    }
   }
 
   const setSource = (rect: Rect | null) => {
@@ -109,11 +153,11 @@ export function buildSlice(plan: FloorPlan, opts: SliceOptions = {}): Slice {
     for (let j = j0; j <= j1; j++)
       for (let i = i0; i <= i1; i++) {
         const c = sim.cIdx(i, j);
-        if (sim.solid[c]) continue;
+        if (sim.solid[c] || sim.open[c]) continue;
         sim.sFixed[c] = 1;
         sim.sVal[c] = 1;
       }
   };
 
-  return { sim, nx, ny, dx, originX, originZ, bounds: plan.bounds, worldToCell, setSource };
+  return { sim, nx, ny, dx, originX, originZ, bounds: plan.bounds, worldToCell, setSource, hasTemperature };
 }

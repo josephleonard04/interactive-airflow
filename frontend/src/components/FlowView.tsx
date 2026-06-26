@@ -3,17 +3,20 @@ import { buildSlice } from "../sim/sceneSlice";
 import { useSceneStore } from "../scene/store";
 
 // A self-contained top-down "airflow" panel overlaid on the viewport. Builds a 2D
-// Euler slice from the current home and animates it: contaminant (red) advected by
-// the vent-driven flow, arrows for direction, solids in brown. The marquee demo —
-// pick the kitchen as the smell source, open a window, watch where the air carries
-// it. Runs in the browser, no GPU.
+// Euler slice from the current home and animates it in one of three modes:
+//   - airflow      : flow-direction arrows coloured by speed
+//   - temperature  : hot (red) vs cold (blue), driven by heater / AC
+//   - contamination: a tracer (violet) from a chosen room — does the smell spread?
+// Runs in the browser, no GPU.
 
 const DISPLAY_W = 340;
+type Mode = "airflow" | "temperature" | "contamination";
 
 export function FlowView() {
   const plan = useSceneStore((s) => s.plan);
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(true);
+  const [mode, setMode] = useState<Mode>("airflow");
   const [sourceRoom, setSourceRoom] = useState<string | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -21,7 +24,6 @@ export function FlowView() {
 
   const slice = useMemo(() => (open ? buildSlice(plan) : null), [plan, open, resetKey]);
 
-  // default the contaminant source to the kitchen if present
   useEffect(() => {
     if (!slice) return;
     const def = plan.rooms.find((r) => r.type === "kitchen") ?? plan.rooms[0];
@@ -49,6 +51,8 @@ export function FlowView() {
     const octx = off.getContext("2d")!;
     const img = octx.createImageData(nx, ny);
     const data = img.data;
+    const sx = DISPLAY_W / nx;
+    const sy = H / ny;
 
     let raf = 0;
     const draw = () => {
@@ -59,49 +63,60 @@ export function FlowView() {
 
       for (let c = 0; c < nx * ny; c++) {
         const o = c * 4;
+        data[o + 3] = 255;
         if (sim.solid[c]) {
-          data[o] = 90; data[o + 1] = 74; data[o + 2] = 54; data[o + 3] = 255;
+          data[o] = 90; data[o + 1] = 74; data[o + 2] = 54;
           continue;
         }
-        const s = Math.min(1, sim.s[c]); // contaminant 0..1
-        const sp = spd[c] / smax; // normalized speed 0..1
-        // lerp warm panel (250,248,240) -> contaminant red (217,83,79), brighten faintly by speed
-        data[o] = clamp255(lerp(250, 217, s) + sp * 5);
-        data[o + 1] = clamp255(lerp(248, 83, s) - sp * 8);
-        data[o + 2] = clamp255(lerp(240, 79, s) - sp * 4);
-        data[o + 3] = 255;
+        if (sim.open[c]) {
+          data[o] = 198; data[o + 1] = 224; data[o + 2] = 240; // openings: faint sky
+          continue;
+        }
+        if (mode === "temperature") {
+          const t = clamp(sim.temp[c] / 12, -1, 1); // ±12 K scale
+          if (t >= 0) {
+            data[o] = lerp(245, 217, t); data[o + 1] = lerp(242, 83, t); data[o + 2] = lerp(235, 79, t);
+          } else {
+            const a = -t;
+            data[o] = lerp(245, 59, a); data[o + 1] = lerp(242, 130, a); data[o + 2] = lerp(235, 246, a);
+          }
+        } else if (mode === "contamination") {
+          const s = Math.min(1, sim.s[c]); // violet tracer (not red)
+          data[o] = lerp(250, 124, s); data[o + 1] = lerp(248, 58, s); data[o + 2] = lerp(240, 237, s);
+        } else {
+          const sp = spd[c] / smax; // airflow: faint speed wash
+          data[o] = lerp(250, 196, sp); data[o + 1] = lerp(248, 222, sp); data[o + 2] = lerp(240, 244, sp);
+        }
       }
       octx.putImageData(img, 0, 0);
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(off, 0, 0, DISPLAY_W, H);
 
       // flow arrows
-      const step = Math.max(2, Math.floor(nx / 22));
-      const sx = DISPLAY_W / nx;
-      const sy = H / ny;
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(74,63,51,0.5)";
-      for (let j = step >> 1; j < ny; j += step) {
-        for (let i = step >> 1; i < nx; i += step) {
-          if (sim.solid[sim.cIdx(i, j)]) continue;
-          const uc = 0.5 * (sim.u[sim.uIdx(i, j)] + sim.u[sim.uIdx(i + 1, j)]);
-          const vc = 0.5 * (sim.v[sim.vIdx(i, j)] + sim.v[sim.vIdx(i, j + 1)]);
+      const stepPx = 20;
+      const di = Math.max(2, Math.round(stepPx / sx));
+      for (let j = (di >> 1); j < ny; j += di) {
+        for (let i = (di >> 1); i < nx; i += di) {
+          if (sim.solid[sim.cIdx(i, j)] || sim.open[sim.cIdx(i, j)]) continue;
+          const [uc, vc] = sim.velocityAt(i, j);
           const m = Math.hypot(uc, vc);
-          if (m < smax * 0.04) continue;
-          const f = (step * 0.45) * Math.min(1, m / smax);
+          if (m < smax * 0.06) continue;
+          const t = Math.min(1, m / smax);
+          const len = stepPx * (0.45 + 0.5 * t);
           const cx = (i + 0.5) * sx;
           const cy = (j + 0.5) * sy;
-          ctx.beginPath();
-          ctx.moveTo(cx - (uc / m) * f * sx, cy - (vc / m) * f * sy);
-          ctx.lineTo(cx + (uc / m) * f * sx, cy + (vc / m) * f * sy);
-          ctx.stroke();
+          const col =
+            mode === "airflow"
+              ? `rgb(${lerp(150, 30, t) | 0},${lerp(170, 90, t) | 0},${lerp(190, 160, t) | 0})`
+              : "rgba(60,50,40,0.55)";
+          arrow(ctx, cx, cy, (uc / m) * len, (vc / m) * len, col);
         }
       }
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [slice, open, running]);
+  }, [slice, open, running, mode]);
 
   if (!open) {
     return (
@@ -111,47 +126,84 @@ export function FlowView() {
     );
   }
 
+  const noTemp = mode === "temperature" && slice && !slice.hasTemperature;
+
   return (
     <div style={overlayPanel}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <strong style={{ fontSize: 13 }}>Airflow (top-down)</strong>
         <button className="ghost" onClick={() => setOpen(false)}>✕</button>
       </div>
-      <canvas ref={canvasRef} style={{ width: DISPLAY_W, borderRadius: 10, border: "1px solid var(--line)", display: "block" }} />
-      <div className="field" style={{ marginTop: 8 }}>
-        <span>Smell source</span>
-        <select value={sourceRoom ?? ""} onChange={(e) => setSourceRoom(e.target.value || null)} style={{ maxWidth: 150 }}>
-          <option value="">(none)</option>
-          {plan.rooms.map((r) => (
-            <option key={r.id} value={r.id}>{r.name}</option>
-          ))}
-        </select>
+
+      <div className="tools" style={{ marginBottom: 8 }}>
+        {(["airflow", "temperature", "contamination"] as Mode[]).map((m) => (
+          <button key={m} className={mode === m ? "tool active" : "tool"} onClick={() => setMode(m)}>
+            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : "Smell"}
+          </button>
+        ))}
       </div>
+
+      <canvas ref={canvasRef} style={{ width: DISPLAY_W, borderRadius: 10, border: "1px solid var(--line)", display: "block" }} />
+
+      {mode === "contamination" && (
+        <div className="field" style={{ marginTop: 8 }}>
+          <span>Smell source</span>
+          <select value={sourceRoom ?? ""} onChange={(e) => setSourceRoom(e.target.value || null)} style={{ maxWidth: 150 }}>
+            <option value="">(none)</option>
+            {plan.rooms.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="btn-row">
         <button className={running ? "tool active" : "tool"} onClick={() => setRunning((r) => !r)}>
           {running ? "Pause" : "Play"}
         </button>
         <button className="tool" onClick={() => setResetKey((k) => k + 1)}>Reset</button>
       </div>
-      <p className="muted-line">Red = contaminant · arrows = airflow. Open a window so the air can leave.</p>
+
+      <p className="muted-line">{legend(mode, !!noTemp)}</p>
     </div>
   );
 }
 
-function clamp255(x: number): number {
-  return x < 0 ? 0 : x > 255 ? 255 : x | 0;
+function legend(mode: Mode, noTemp: boolean): string {
+  if (mode === "temperature")
+    return noTemp ? "Add a heater or AC to see hot/cold." : "Blue = cold · red = warm. Arrows = airflow.";
+  if (mode === "contamination") return "Violet = the tracer. Open a window/door so it can move out.";
+  return "Arrows show airflow — AC & fans push air; open windows/doors let it leave.";
+}
+
+function arrow(ctx: CanvasRenderingContext2D, x: number, y: number, dx: number, dy: number, color: string): void {
+  const hx = x + dx / 2;
+  const hy = y + dy / 2;
+  const a = Math.atan2(dy, dx);
+  const hl = 4;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(x - dx / 2, y - dy / 2);
+  ctx.lineTo(hx, hy);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(hx, hy);
+  ctx.lineTo(hx - hl * Math.cos(a - 0.5), hy - hl * Math.sin(a - 0.5));
+  ctx.lineTo(hx - hl * Math.cos(a + 0.5), hy - hl * Math.sin(a + 0.5));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function clamp(x: number, lo: number, hi: number): number {
+  return x < lo ? lo : x > hi ? hi : x;
 }
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-const overlayBtn: React.CSSProperties = {
-  position: "absolute",
-  top: 14,
-  right: 14,
-  zIndex: 10,
-};
-
+const overlayBtn: React.CSSProperties = { position: "absolute", top: 14, right: 14, zIndex: 10 };
 const overlayPanel: React.CSSProperties = {
   position: "absolute",
   top: 14,
