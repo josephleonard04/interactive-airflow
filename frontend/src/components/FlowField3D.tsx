@@ -4,14 +4,32 @@ import * as THREE from "three";
 import { buildSim3D } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
 
-// The airflow simulation, rendered live inside the 3D house (it sits in the
-// editor's centred group, so it lines up with the rooms). Voxel cloud shows
-// temperature (blue↔red) or contaminant (violet); instanced darts show airflow
-// direction. Steps a 3D Euler solver each frame — buoyancy makes warm air rise.
+// The airflow simulation rendered as an easy-to-read "fluid" field inside the 3D
+// house (it sits in the editor's centred group, so it lines up with the rooms):
+//   - airflow       → particles that stream along with the air (like smoke in a
+//                     wind tunnel) — far clearer for non-experts than arrows
+//   - temperature   → a soft blue↔red haze (cool vs warm)
+//   - contamination → a soft violet haze spreading like smoke
+// Soft round sprites overlap into a smooth volume instead of blocky voxels.
 
-const MAX_CLOUD = 9000;
-const MAX_ARROWS = 2200;
-const UP = new THREE.Vector3(0, 1, 0);
+const MAX_HAZE = 8000;
+const NUM_PARTICLES = 1600;
+
+// soft radial sprite so points blend into a smooth haze / glow
+function makeSoftTexture(): THREE.Texture {
+  const s = 64;
+  const c = document.createElement("canvas");
+  c.width = c.height = s;
+  const g = c.getContext("2d")!;
+  const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grd.addColorStop(0, "rgba(255,255,255,1)");
+  grd.addColorStop(0.45, "rgba(255,255,255,0.55)");
+  grd.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  return t;
+}
 
 export function FlowField3D() {
   const plan = useSceneStore((s) => s.plan);
@@ -20,129 +38,161 @@ export function FlowField3D() {
   const sourceRoomId = useSceneStore((s) => s.simSourceRoomId);
 
   const built = useMemo(() => buildSim3D(plan), [plan]);
-  const cloudRef = useRef<THREE.InstancedMesh>(null);
-  const arrowRef = useRef<THREE.InstancedMesh>(null);
+  const soft = useMemo(makeSoftTexture, []);
+
+  // haze buffers (temperature / contamination)
+  const hazePos = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
+  const hazeCol = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
+  const hazeRef = useRef<THREE.Points>(null);
+
+  // particle buffers (airflow tracers)
+  const partPos = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
+  const partCol = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
+  const partAge = useMemo(() => new Float32Array(NUM_PARTICLES), []);
+  const partRef = useRef<THREE.Points>(null);
 
   useEffect(() => {
     const room = plan.rooms.find((r) => r.id === sourceRoomId) ?? null;
     built.setSource(room ? room.rect : null);
   }, [built, sourceRoomId, plan.rooms]);
 
-  // start with nothing rendered until the first frame fills the instances
+  // (re)seed particles into random open air whenever the sim is rebuilt
+  const randomAir = useMemo(() => {
+    const { sim, nx, ny, nz, cellCenter } = built;
+    return (): [number, number, number] => {
+      for (let tries = 0; tries < 30; tries++) {
+        const i = (Math.random() * nx) | 0;
+        const j = (Math.random() * ny) | 0;
+        const k = (Math.random() * nz) | 0;
+        const c = sim.cIdx(i, j, k);
+        if (!sim.solid[c] && !sim.open[c]) {
+          const [x, y, z] = cellCenter(i, j, k);
+          return [x + (Math.random() - 0.5) * built.dx, y + (Math.random() - 0.5) * built.dx, z + (Math.random() - 0.5) * built.dx];
+        }
+      }
+      return cellCenter(nx >> 1, ny >> 1, nz >> 1);
+    };
+  }, [built]);
+
   useEffect(() => {
-    if (cloudRef.current) cloudRef.current.count = 0;
-    if (arrowRef.current) arrowRef.current.count = 0;
-  }, [built]);
+    for (let p = 0; p < NUM_PARTICLES; p++) {
+      const [x, y, z] = randomAir();
+      partPos[p * 3] = x; partPos[p * 3 + 1] = y; partPos[p * 3 + 2] = z;
+      partAge[p] = Math.random() * 2;
+    }
+    if (partRef.current) partRef.current.geometry.attributes.position.needsUpdate = true;
+  }, [randomAir, partPos, partAge]);
 
-  const samples = useMemo(() => {
-    const { nx, ny, nz } = built;
-    const step = Math.max(1, Math.round(Math.cbrt((nx * ny * nz) / MAX_ARROWS)));
-    const arr: Array<[number, number, number]> = [];
-    for (let k = step >> 1; k < nz; k += step)
-      for (let j = step >> 1; j < ny; j += step)
-        for (let i = step >> 1; i < nx; i += step) arr.push([i, j, k]);
-    return arr;
-  }, [built]);
-
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const color = useMemo(() => new THREE.Color(), []);
-  const quat = useMemo(() => new THREE.Quaternion(), []);
-  const dir = useMemo(() => new THREE.Vector3(), []);
-
-  useFrame(() => {
-    const { sim, nx, ny, nz, dx, cellCenter } = built;
+  useFrame((_, delta) => {
+    const { sim, nx, ny, nz, dx, origin, cellCenter, worldToCell } = built;
     if (!paused) sim.step(0.05);
+    const dt = Math.min(delta, 0.05);
 
-    const cloud = cloudRef.current;
-    if (cloud) {
+    // ---- haze (temperature / contamination) ----
+    const haze = hazeRef.current;
+    if (haze) {
       let n = 0;
       if (mode !== "airflow") {
         const field = mode === "temperature" ? sim.temp : sim.s;
         const total = nx * ny * nz;
-        for (let c = 0; c < total && n < MAX_CLOUD; c++) {
+        for (let c = 0; c < total && n < MAX_HAZE; c++) {
           if (sim.solid[c] || sim.open[c]) continue;
           const v = field[c];
-          let mag: number, r: number, gg: number, b: number;
+          let r: number, g: number, b: number;
           if (mode === "temperature") {
             const t = Math.max(-1, Math.min(1, v / 12));
-            mag = Math.abs(t);
-            if (mag < 0.14) continue;
-            if (t >= 0) { r = 0.85; gg = 0.33; b = 0.31; } else { r = 0.23; gg = 0.51; b = 0.96; }
+            if (Math.abs(t) < 0.14) continue;
+            if (t >= 0) { r = 0.86; g = 0.30 + 0.25 * (1 - t); b = 0.28; }
+            else { const a = -t; r = 0.30 + 0.25 * (1 - a); g = 0.55; b = 0.96; }
           } else {
-            mag = Math.min(1, v);
-            if (mag < 0.08) continue;
-            r = 0.49; gg = 0.23; b = 0.93;
+            if (v < 0.06) continue;
+            r = 0.55; g = 0.22; b = 0.95;
           }
           const i = c % nx;
           const j = Math.floor(c / nx) % ny;
           const k = Math.floor(c / (nx * ny));
           const [wx, wy, wz] = cellCenter(i, j, k);
-          const s = dx * (0.35 + 0.65 * mag);
-          dummy.position.set(wx, wy, wz);
-          dummy.scale.set(s, s, s);
-          dummy.rotation.set(0, 0, 0);
-          dummy.updateMatrix();
-          cloud.setMatrixAt(n, dummy.matrix);
-          color.setRGB(r, gg, b);
-          cloud.setColorAt(n, color);
+          hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
+          hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
           n++;
         }
       }
-      cloud.count = n;
-      cloud.instanceMatrix.needsUpdate = true;
-      if (cloud.instanceColor) cloud.instanceColor.needsUpdate = true;
+      haze.visible = mode !== "airflow" && n > 0;
+      haze.geometry.setDrawRange(0, n);
+      (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+      (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
     }
 
-    const arrow = arrowRef.current;
-    if (arrow) {
-      let n = 0;
+    // ---- airflow particles ----
+    const part = partRef.current;
+    if (part) {
+      part.visible = mode === "airflow";
       if (mode === "airflow") {
-        let smax = 1e-6;
-        for (const [i, j, k] of samples) {
+        const ox = origin[0], oy = origin[1], oz = origin[2];
+        const ex = ox + nx * dx, ey = oy + ny * dx, ez = oz + nz * dx;
+        for (let p = 0; p < NUM_PARTICLES; p++) {
+          let x = partPos[p * 3], y = partPos[p * 3 + 1], z = partPos[p * 3 + 2];
+          const [i, j, k] = worldToCell(x, y, z);
           const c = sim.cIdx(i, j, k);
-          if (sim.solid[c] || sim.open[c]) continue;
           const [u, v, w] = sim.velocityAt(i, j, k);
-          const m = Math.hypot(u, v, w);
-          if (m > smax) smax = m;
+          const sp = Math.hypot(u, v, w);
+          partAge[p] += dt;
+          // respawn stale, escaped, or stuck particles into fresh air
+          if (
+            partAge[p] > 3.5 || sp < 0.02 || sim.solid[c] || sim.open[c] ||
+            x < ox || x > ex || y < oy || y > ey || z < oz || z > ez
+          ) {
+            const [rx, ry, rz] = randomAir();
+            x = rx; y = ry; z = rz; partAge[p] = 0;
+          } else {
+            const m = 2.2; // visual speed multiplier
+            x += u * dt * m; y += v * dt * m; z += w * dt * m;
+          }
+          partPos[p * 3] = x; partPos[p * 3 + 1] = y; partPos[p * 3 + 2] = z;
+          const t = Math.min(1, sp / 1.0);
+          partCol[p * 3] = 0.15 + 0.35 * t;
+          partCol[p * 3 + 1] = 0.55 + 0.25 * t;
+          partCol[p * 3 + 2] = 0.85;
         }
-        for (const [i, j, k] of samples) {
-          if (n >= MAX_ARROWS) break;
-          const c = sim.cIdx(i, j, k);
-          if (sim.solid[c] || sim.open[c]) continue;
-          const [u, v, w] = sim.velocityAt(i, j, k);
-          const m = Math.hypot(u, v, w);
-          if (m < smax * 0.12) continue;
-          const [wx, wy, wz] = cellCenter(i, j, k);
-          dir.set(u / m, v / m, w / m);
-          quat.setFromUnitVectors(UP, dir);
-          const len = dx * (0.9 + 1.1 * Math.min(1, m / smax));
-          dummy.position.set(wx, wy, wz);
-          dummy.quaternion.copy(quat);
-          dummy.scale.set(dx * 0.5, len, dx * 0.5);
-          dummy.updateMatrix();
-          arrow.setMatrixAt(n, dummy.matrix);
-          const t = Math.min(1, m / smax);
-          color.setRGB(0.12 + 0.45 * t, 0.5, 0.72 - 0.32 * t);
-          arrow.setColorAt(n, color);
-          n++;
-        }
+        (part.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+        (part.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
       }
-      arrow.count = n;
-      arrow.instanceMatrix.needsUpdate = true;
-      if (arrow.instanceColor) arrow.instanceColor.needsUpdate = true;
     }
   });
 
   return (
     <group>
-      <instancedMesh ref={cloudRef} args={[null as unknown as THREE.BufferGeometry, null as unknown as THREE.Material, MAX_CLOUD]} frustumCulled={false}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial transparent opacity={0.5} depthWrite={false} />
-      </instancedMesh>
-      <instancedMesh ref={arrowRef} args={[null as unknown as THREE.BufferGeometry, null as unknown as THREE.Material, MAX_ARROWS]} frustumCulled={false}>
-        <coneGeometry args={[0.5, 1, 7]} />
-        <meshStandardMaterial transparent opacity={0.92} depthWrite={false} />
-      </instancedMesh>
+      <points ref={hazeRef} frustumCulled={false}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
+          <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
+        </bufferGeometry>
+        <pointsMaterial
+          map={soft}
+          vertexColors
+          transparent
+          depthWrite={false}
+          sizeAttenuation
+          size={built.dx * 3.2}
+          opacity={0.32}
+        />
+      </points>
+
+      <points ref={partRef} frustumCulled={false}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[partPos, 3]} usage={THREE.DynamicDrawUsage} />
+          <bufferAttribute attach="attributes-color" args={[partCol, 3]} usage={THREE.DynamicDrawUsage} />
+        </bufferGeometry>
+        <pointsMaterial
+          map={soft}
+          vertexColors
+          transparent
+          depthWrite={false}
+          sizeAttenuation
+          size={built.dx * 1.1}
+          opacity={0.95}
+        />
+      </points>
     </group>
   );
 }

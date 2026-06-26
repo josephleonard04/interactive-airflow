@@ -58,18 +58,39 @@ export function SimPanel() {
       )}
       <div className="btn-row">
         <button className={paused ? "tool" : "tool active"} onClick={togglePause}>
-          {paused ? "Play" : "Pause"}
+          {paused ? "▶ Play" : "⏸ Pause"}
         </button>
       </div>
-      <p className="muted-line">{legend(mode)}</p>
+      <Legend mode={mode} />
     </div>
   );
 }
 
-function legend(mode: SimMode): string {
-  if (mode === "temperature") return "Blue = cold · red = warm (warm air rises). Add a heater or AC.";
-  if (mode === "contamination") return "Violet = the smell. Open a window/door so it can leave.";
-  return "Darts show airflow — AC & fans push air; open windows/doors let it leave.";
+function Legend({ mode }: { mode: SimMode }) {
+  if (mode === "temperature") {
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg,#3b82f6,#f3eee6,#d9534f)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+          <span>Cool</span>
+          <span>Warm (rises)</span>
+        </div>
+      </div>
+    );
+  }
+  if (mode === "contamination") {
+    return (
+      <p className="muted-line" style={{ marginTop: 10 }}>
+        <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 5, background: "#8b3aed", marginRight: 6, verticalAlign: "middle" }} />
+        Violet haze = where the smell spreads. Open a window/door so it can leave.
+      </p>
+    );
+  }
+  return (
+    <p className="muted-line" style={{ marginTop: 10 }}>
+      Glowing dots drift along with the air — watch where it flows. AC &amp; fans push it; open windows/doors let it out.
+    </p>
+  );
 }
 
 const btn: React.CSSProperties = { position: "absolute", top: 14, right: 14, zIndex: 10 };
