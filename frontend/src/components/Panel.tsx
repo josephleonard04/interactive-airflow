@@ -161,6 +161,32 @@ export function Panel() {
               />
             </label>
           )}
+          {["ac", "fan", "heater"].includes(selected.type) && (
+            <>
+              <div className="field">
+                <span>power</span>
+                <button
+                  className={selected.on !== false ? "toggle on" : "toggle"}
+                  onClick={() => updateItem(selected.id, { on: selected.on === false })}
+                >
+                  {selected.on !== false ? "On" : "Off"}
+                </button>
+              </div>
+              {selected.on !== false && (
+                <div className="tools" style={{ marginTop: 4 }}>
+                  {[1, 2, 3].map((lvl) => (
+                    <button
+                      key={lvl}
+                      className={(selected.power ?? 2) === lvl ? "tool active" : "tool"}
+                      onClick={() => updateItem(selected.id, { power: lvl })}
+                    >
+                      {lvl === 1 ? "Low" : lvl === 2 ? "Med" : "High"}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
           <RotationDial
             valueRad={selected.rotationY}
             onChange={(rad) => setPosition(selected.id, selected.position, rad)}

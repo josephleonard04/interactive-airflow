@@ -38,6 +38,10 @@ export interface PlacedItem {
   rotationY: number;
   mount: Mount;
   flow?: number;
+  /** HVAC (ac/fan/heater): whether it's running. Undefined = on. */
+  on?: boolean;
+  /** HVAC power level 1 (low) · 2 (medium) · 3 (high). Undefined = 2. */
+  power?: number;
   movable: boolean;
 }
 
