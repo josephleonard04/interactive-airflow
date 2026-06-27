@@ -29,6 +29,10 @@ export interface Sim3D {
   cellCenter: (i: number, j: number, k: number) => [number, number, number];
   setSource: (rect: Rect | null) => void;
   hasTemperature: boolean;
+  /** Points just in front of vents/AC/fans — where to seed airflow particles. */
+  seeds: Array<[number, number, number]>;
+  /** Heat (red) / cold (blue) source locations, to anchor the temperature view. */
+  markers: Array<{ pos: [number, number, number]; kind: "hot" | "cold" }>;
 }
 
 const clampi = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -77,6 +81,14 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
 
   for (const s of scene.solids) for (const [i, j, k] of cellsOf(s.world)) sim.solid[sim.cIdx(i, j, k)] = 1;
 
+  // solid ceiling at the roof line so air stays inside the house (no escaping
+  // above the roof; warm air pools under the ceiling, which is correct)
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        if (origin[1] + (j + 0.5) * dx > plan.wallHeight) sim.solid[sim.cIdx(i, j, k)] = 1;
+      }
+
   for (const p of scene.outlets)
     for (const [i, j, k] of cellsOf(p.world)) {
       const c = sim.cIdx(i, j, k);
@@ -110,6 +122,8 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   };
 
   let hasTemperature = false;
+  const seeds: Array<[number, number, number]> = [];
+  const markers: Array<{ pos: [number, number, number]; kind: "hot" | "cold" }> = [];
   for (const it of plan.items) {
     const isAC = it.type === "ac";
     const isSupply = it.type === "supply";
@@ -119,6 +133,8 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     if (it.on === false) continue;
     const mult = POWER[it.power ?? 2] ?? 1;
     const cells = cellsOf(itemAabb(it));
+    if (isAC) markers.push({ pos: [...it.position] as [number, number, number], kind: "cold" });
+    if (isHeater) markers.push({ pos: [...it.position] as [number, number, number], kind: "hot" });
 
     if (isAC || isSupply || isFan) {
       const dir: [number, number, number] = isSupply ? [0, -1, 0] : horizDir(it.rotationY); // ceiling vent blows down
@@ -126,6 +142,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
         if (sim.solid[c]) sim.solid[c] = 0;
+        seeds.push(cellCenter(i, j, k));
         if (isFan) {
           // recirculating: two opposite faces (net-zero mass)
           if (dir[0] !== 0) { const a = sim.uIdx(i, j, k), b = sim.uIdx(i + 1, j, k); sim.uFixed[a] = sim.uFixed[b] = 1; sim.uVal[a] = sim.uVal[b] = dir[0] * speed; }
@@ -165,5 +182,5 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, hasTemperature };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, hasTemperature, seeds, markers };
 }
