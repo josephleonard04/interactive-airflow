@@ -42,7 +42,7 @@ body {
 .viewport {
   position: relative;
   min-width: 0;
-  background: radial-gradient(circle at 50% 24%, #f7f2ea 0%, #e4dac8 55%, #cfc1a8 100%);
+  background: #ffffff;
 }
 
 .panel {
