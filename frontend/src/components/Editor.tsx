@@ -176,7 +176,20 @@ function DragController({ offset }: { offset: Vec3 }) {
           cx = edge.line + edge.sign * off;
           cz = along;
         }
-        setPosition(draggingId, [cx, worldY0, cz], edge.rot);
+
+        // height up/down the wall: intersect the ray with the vertical wall plane
+        // and use the cursor's Y (clamped to keep the item on the wall).
+        const sh = item.size[1];
+        const wallH = plan.wallHeight;
+        const normal = edge.axis === "x" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+        const lineWorld = edge.axis === "x" ? edge.line + offset[2] : edge.line + offset[0];
+        const wallPlane = new THREE.Plane(normal, -lineWorld);
+        const wp = new THREE.Vector3();
+        let cy = worldY0;
+        if (ray.ray.intersectPlane(wallPlane, wp)) {
+          cy = Math.min(wallH - sh / 2 - 0.02, Math.max(sh / 2 + 0.02, wp.y));
+        }
+        setPosition(draggingId, [cx, cy, cz], edge.rot);
         return;
       }
 
