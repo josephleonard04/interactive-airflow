@@ -28,6 +28,7 @@ export const CATALOG: Record<string, ItemSpec> = {
   heater: { size: [0.8, 0.5, 0.18], category: "hvac", mount: "floor", flow: 0, label: "Heater" },
   fan: { size: [0.45, 1.3, 0.45], category: "hvac", mount: "floor", flow: 0, label: "Fan" },
   supply: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Vent" },
+  smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
 };
 
 /** Items offered in the "add" palette, grouped. */
@@ -36,4 +37,5 @@ export const PALETTE: Array<{ group: string; types: string[] }> = [
   { group: "Kitchen", types: ["fridge", "kitchen_sink"] },
   { group: "Bathroom", types: ["sink", "toilet", "bathtub"] },
   { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply"] },
+  { group: "Simulation", types: ["smell"] },
 ];

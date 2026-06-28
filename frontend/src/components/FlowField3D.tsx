@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { buildSim3D } from "../sim/sim3d";
-import { computeRoomLevels } from "../sim/roomLevels";
+import { buildSim3D, diffusionFill } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
@@ -88,42 +87,43 @@ export function FlowField3D() {
 
   useEffect(() => { for (let p = 0; p < NUM_PARTICLES; p++) spawn(p); }, [spawn]);
 
-  // fill temperature / smell into the haze from the per-room steady levels
+  // fill temperature / smell into the haze from the per-cell steady-state field
+  // (shows local detail — heater warm AND AC cool in the same room — and spreads
+  // through open doors, blocked by walls)
   const computeHaze = useCallback(() => {
     const haze = hazeRef.current;
     if (!haze) return;
     if (mode === "airflow") { haze.visible = false; return; }
-    const { sim, ny, worldToCell, cellCenter } = built;
+    const { sim, nx, ny, nz, cellCenter, ambient } = built;
     const roofY = plan.wallHeight;
-    const levels = computeRoomLevels(plan, mode, sourceRoomId);
+    const field = mode === "temperature"
+      ? diffusionFill(built, sim.tempFixed, sim.tempVal)
+      : diffusionFill(built, sim.sFixed, sim.sVal);
     let n = 0;
-    for (const room of plan.rooms) {
-      const lvl = levels.get(room.id) ?? 0;
-      if (mode === "temperature") { if (Math.abs(lvl) < 0.4) continue; }
-      else if (lvl < 0.05) continue;
+    const total = nx * ny * nz;
+    for (let c = 0; c < total && n < MAX_HAZE; c++) {
+      if (sim.solid[c] || ambient[c]) continue;
+      const v = field[c];
       let r: number, g: number, b: number;
       if (mode === "temperature") {
-        if (lvl > 0) { r = 0.92; g = 0.27; b = 0.18; } else { r = 0.18; g = 0.46; b = 0.96; }
-      } else { r = 0.55; g = 0.2; b = 0.95; }
-      const [i0, , k0] = worldToCell(room.rect.x, 0, room.rect.z);
-      const [i1, , k1] = worldToCell(room.rect.x + room.rect.w, 0, room.rect.z + room.rect.d);
-      for (let k = k0; k <= k1 && n < MAX_HAZE; k++)
-        for (let j = 0; j < ny; j++)
-          for (let i = i0; i <= i1 && n < MAX_HAZE; i++) {
-            const c = sim.cIdx(i, j, k);
-            if (sim.solid[c] || sim.open[c]) continue;
-            const [wx, wy, wz] = cellCenter(i, j, k);
-            if (wy > roofY) continue;
-            hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
-            hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
-            n++;
-          }
+        if (Math.abs(v) < 0.6) continue;
+        if (v > 0) { r = 0.92; g = 0.27; b = 0.18; } else { r = 0.18; g = 0.46; b = 0.96; }
+      } else {
+        if (v < 0.06) continue;
+        r = 0.55; g = 0.2; b = 0.95;
+      }
+      const i = c % nx, j = Math.floor(c / nx) % ny, k = Math.floor(c / (nx * ny));
+      const [wx, wy, wz] = cellCenter(i, j, k);
+      if (wy > roofY) continue;
+      hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
+      hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
+      n++;
     }
     haze.visible = n > 0;
     haze.geometry.setDrawRange(0, n);
     (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-  }, [built, mode, plan, sourceRoomId, hazePos, hazeCol]);
+  }, [built, mode, sourceRoomId, plan.wallHeight, hazePos, hazeCol]);
 
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 

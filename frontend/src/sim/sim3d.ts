@@ -28,6 +28,8 @@ export interface Sim3D {
   worldToCell: (wx: number, wy: number, wz: number) => [number, number, number];
   cellCenter: (i: number, j: number, k: number) => [number, number, number];
   setSource: (rect: Rect | null) => void;
+  /** Exterior-opening cells (open windows/doors) — ambient sinks for the fill. */
+  ambient: Uint8Array;
   hasTemperature: boolean;
   /** Points just in front of vents/AC/fans — where to seed airflow particles. */
   seeds: Array<[number, number, number]>;
@@ -89,11 +91,13 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         if (origin[1] + (j + 0.5) * dx > plan.wallHeight) sim.solid[sim.cIdx(i, j, k)] = 1;
       }
 
+  const ambient = new Uint8Array(nx * ny * nz);
   for (const p of scene.outlets)
     for (const [i, j, k] of cellsOf(p.world)) {
       const c = sim.cIdx(i, j, k);
       sim.solid[c] = 0;
       sim.open[c] = 1;
+      ambient[c] = 1; // exterior opening = ambient sink for the scalar fill
     }
 
   const itemAabb = (it: PlacedItem): Box => {
@@ -166,9 +170,25 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     }
   }
 
+  // Smell sources the user placed in the scene (drag-and-drop icons). These are
+  // the base smell sources; setSource can add a whole-room source on top.
+  const baseSmell: number[] = [];
+  for (const it of plan.items) {
+    if (it.type !== "smell" || it.on === false) continue;
+    for (const [i, j, k] of cellsOf(itemAabb(it))) {
+      const c = sim.cIdx(i, j, k);
+      if (!sim.solid[c]) baseSmell.push(c);
+    }
+  }
+  const applyBaseSmell = () => {
+    for (const c of baseSmell) { sim.sFixed[c] = 1; sim.sVal[c] = 1; }
+  };
+  applyBaseSmell();
+
   const setSource = (rect: Rect | null) => {
     sim.sFixed.fill(0);
     sim.sVal.fill(0);
+    applyBaseSmell(); // keep the placed smell sources
     if (!rect) return;
     const [i0, , k0] = worldToCell(rect.x, 0, rect.z);
     const [i1, , k1] = worldToCell(rect.x + rect.w, 0, rect.z + rect.d);
@@ -182,5 +202,36 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, hasTemperature, seeds, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, hasTemperature, seeds, markers };
+}
+
+// Per-cell steady-state scalar field by diffusion over the connected air: source
+// cells hold their value, air mixes through open doors, walls + closed doors are
+// barriers, and exterior openings vent to ambient (0). Unlike a per-room average,
+// this shows local detail — e.g. a heater (warm) and an AC (cool) in the SAME
+// room both appear. Gauss-Seidel relaxation of Laplace's equation; cheap, one-time.
+export function diffusionFill(s: Sim3D, fixed: Uint8Array, val: Float32Array, iters = 240): Float32Array {
+  const { sim, nx, ny, nz, ambient } = s;
+  const f = new Float32Array(nx * ny * nz);
+  for (let c = 0; c < f.length; c++) if (fixed[c]) f[c] = val[c];
+  const idx = (i: number, j: number, k: number) => i + nx * (j + ny * k);
+  for (let it = 0; it < iters; it++) {
+    for (let k = 0; k < nz; k++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++) {
+          const c = idx(i, j, k);
+          if (sim.solid[c]) continue;
+          if (fixed[c]) { f[c] = val[c]; continue; }
+          if (ambient[c]) { f[c] = 0; continue; }
+          let sum = 0, n = 0;
+          if (i > 0 && !sim.solid[idx(i - 1, j, k)]) { sum += f[idx(i - 1, j, k)]; n++; }
+          if (i < nx - 1 && !sim.solid[idx(i + 1, j, k)]) { sum += f[idx(i + 1, j, k)]; n++; }
+          if (j > 0 && !sim.solid[idx(i, j - 1, k)]) { sum += f[idx(i, j - 1, k)]; n++; }
+          if (j < ny - 1 && !sim.solid[idx(i, j + 1, k)]) { sum += f[idx(i, j + 1, k)]; n++; }
+          if (k > 0 && !sim.solid[idx(i, j, k - 1)]) { sum += f[idx(i, j, k - 1)]; n++; }
+          if (k < nz - 1 && !sim.solid[idx(i, j, k + 1)]) { sum += f[idx(i, j, k + 1)]; n++; }
+          if (n > 0) f[c] = sum / n;
+        }
+  }
+  return f;
 }

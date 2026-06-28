@@ -276,6 +276,25 @@ function KitchenSink([w, h, d]: V) {
   );
 }
 
+// A placed "smell source": a glowing magenta orb on a small stem, plus rising
+// wisp rings so it reads as an odor source.
+function Smell(size: V): JSX.Element {
+  const r = Math.min(size[0], size[2]) * 0.42;
+  return (
+    <group>
+      <Box size={[0.05, size[1] * 0.5, 0.05]} position={[0, size[1] * 0.25, 0]} color="#7c3aed" />
+      <mesh position={[0, size[1] * 0.6, 0]} castShadow>
+        <sphereGeometry args={[r, 18, 18]} />
+        <meshStandardMaterial color="#a855f7" emissive="#7c3aed" emissiveIntensity={0.7} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, size[1] * 0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[r * 0.7, 0.012, 8, 20]} />
+        <meshStandardMaterial color="#c084fc" emissive="#a855f7" emissiveIntensity={0.5} toneMapped={false} transparent opacity={0.7} />
+      </mesh>
+    </group>
+  );
+}
+
 export function Model({ type, size }: { type: string; size: V }) {
   switch (type) {
     case "bed":
@@ -308,6 +327,8 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Fan(size);
     case "supply":
       return Vent(size);
+    case "smell":
+      return Smell(size);
     default:
       return <Box size={size} color={itemColor(type)} />;
   }
