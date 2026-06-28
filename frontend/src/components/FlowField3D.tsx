@@ -3,23 +3,22 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildSim3D } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
+import type { FloorPlan } from "../floorplan/types";
 
-// Steady-state airflow visualization, rendered inside the 3D house. We run the
-// Euler solver to equilibrium ONCE (then freeze) and show the final result —
-// not a live animation:
-//   - airflow       → streamlines (smooth curves tracing the air's path) with
-//                     arrowheads for direction (fluid-like, not flying dots)
-//   - temperature   → red (warm) / blue (cool) haze + a per-room indicator so
-//                     every room shows its result
-//   - contamination → violet haze + per-room indicator
-// Re-solves automatically when the home, source room, or settings change.
+// Steady-state airflow visualization inside the 3D house. The Euler solver runs to
+// equilibrium ONCE, then we show the settled result:
+//   - airflow       → soft dots that keep drifting along the steady flow (no arrows)
+//   - temperature   → rooms filled red (warm) / blue (cool); spreads through OPEN
+//                     doors to connected rooms, blocked by walls / closed doors
+//   - contamination → connected rooms filled violet from the source room
+// Temperature/smell use a room-connectivity model (open doors link rooms, open
+// windows vent to ambient) so "the whole house is affected if the doors are open".
 
-const MAX_HAZE = 14000;
-const MAX_LINEV = 18000; // streamline line vertices
-const MAX_ARROWS = 200;
-const TARGET_STEPS = 200; // steps to reach steady state
-const BATCH = 5;
-const UP = new THREE.Vector3(0, 1, 0);
+const MAX_HAZE = 16000;
+const NUM_PARTICLES = 500;
+const TARGET_STEPS = 180;
+const BATCH = 6;
+const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 
 function makeSoftTexture(): THREE.Texture {
   const s = 64;
@@ -28,14 +27,50 @@ function makeSoftTexture(): THREE.Texture {
   const g = c.getContext("2d")!;
   const grd = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
   grd.addColorStop(0, "rgba(255,255,255,1)");
-  grd.addColorStop(0.45, "rgba(255,255,255,0.55)");
+  grd.addColorStop(0.45, "rgba(255,255,255,0.5)");
   grd.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
   return new THREE.CanvasTexture(c);
 }
 
-interface Indicator { pos: [number, number, number]; color: string }
+// Steady-state value per room over the open-door connectivity graph.
+function computeRoomLevels(plan: FloorPlan, mode: string, sourceRoomId: string | null): Map<string, number> {
+  const ids = plan.rooms.map((r) => r.id);
+  const adj = new Map<string, string[]>(ids.map((id) => [id, []]));
+  const outside = new Map<string, number>(ids.map((id) => [id, 0]));
+  for (const o of [...plan.doors, ...plan.windows]) {
+    if (!o.open) continue;
+    const [a, b] = o.rooms;
+    if (b === "outside") outside.set(a, (outside.get(a) ?? 0) + 1);
+    else { adj.get(a)?.push(b); adj.get(b)?.push(a); }
+  }
+  const fixed = new Set<string>();
+  const val = new Map<string, number>(ids.map((id) => [id, 0]));
+  if (mode === "temperature") {
+    for (const it of plan.items) {
+      if (it.on === false) continue;
+      const p = POWER[it.power ?? 2] ?? 1;
+      if (it.type === "heater") { val.set(it.roomId, (val.get(it.roomId) ?? 0) + 10 * p); fixed.add(it.roomId); }
+      if (it.type === "ac") { val.set(it.roomId, (val.get(it.roomId) ?? 0) - 10 * p); fixed.add(it.roomId); }
+    }
+  } else if (sourceRoomId) {
+    val.set(sourceRoomId, 1); fixed.add(sourceRoomId);
+  }
+  const T = new Map<string, number>(ids.map((id) => [id, fixed.has(id) ? val.get(id)! : 0]));
+  for (let it = 0; it < 80; it++) {
+    for (const id of ids) {
+      if (fixed.has(id)) continue;
+      const nb = adj.get(id)!;
+      const out = outside.get(id)!;
+      let sum = 0, n = 0;
+      for (const m of nb) { sum += T.get(m)!; n++; }
+      n += out; // outside contributes ambient 0
+      T.set(id, n > 0 ? sum / n : 0);
+    }
+  }
+  return T;
+}
 
 export function FlowField3D() {
   const plan = useSceneStore((s) => s.plan);
@@ -49,17 +84,17 @@ export function FlowField3D() {
   const hazePos = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
   const hazeCol = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
   const hazeRef = useRef<THREE.Points>(null);
-  const linePos = useMemo(() => new Float32Array(MAX_LINEV * 3), []);
-  const lineCol = useMemo(() => new Float32Array(MAX_LINEV * 3), []);
-  const lineRef = useRef<THREE.LineSegments>(null);
-  const arrowRef = useRef<THREE.InstancedMesh>(null);
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
+
+  const head = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
+  const ageA = useMemo(() => new Float32Array(NUM_PARTICLES), []);
+  const maxAgeA = useMemo(() => new Float32Array(NUM_PARTICLES), []);
+  const headCol = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
+  const headRef = useRef<THREE.Points>(null);
 
   const steps = useRef(0);
   const converged = useRef(false);
   const [ready, setReady] = useState(false);
 
-  // (re)start the solve whenever the home / source changes
   useEffect(() => {
     const room = plan.rooms.find((r) => r.id === sourceRoomId) ?? null;
     built.setSource(room ? room.rect : null);
@@ -69,168 +104,107 @@ export function FlowField3D() {
     setSimReady(false);
   }, [built, sourceRoomId, plan.rooms, setSimReady]);
 
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  const col = useMemo(() => new THREE.Color(), []);
-  const quat = useMemo(() => new THREE.Quaternion(), []);
-  const dir = useMemo(() => new THREE.Vector3(), []);
-
-  const computeView = useCallback(() => {
-    const { sim, nx, ny, nz, dx, origin, cellCenter, worldToCell, seeds } = built;
-    const roofY = plan.wallHeight;
-    const ox = origin[0], oy = origin[1], oz = origin[2];
-    const ex = ox + nx * dx, ez = oz + nz * dx;
-    const haze = hazeRef.current, line = lineRef.current, arrow = arrowRef.current;
-
-    if (mode === "airflow") {
-      if (haze) haze.visible = false;
-      // seeds: vents + a sparse interior grid so the whole house is traced
-      const sd: Array<[number, number, number]> = seeds.slice(0, 60).map((s) => [s[0], s[1], s[2]]);
-      const stride = Math.max(2, Math.round(Math.cbrt((nx * ny * nz) / 90)));
-      for (let k = stride >> 1; k < nz; k += stride)
-        for (let j = stride >> 1; j < ny; j += stride)
-          for (let i = stride >> 1; i < nx; i += stride) {
-            const c = sim.cIdx(i, j, k);
-            if (!sim.solid[c] && !sim.open[c]) sd.push(cellCenter(i, j, k));
-          }
-      let v = 0; // line vertices written
-      let a = 0; // arrows
-      const stepLen = dx * 0.7;
-      const writeV = (x: number, y: number, z: number, sp: number) => {
-        if (v >= MAX_LINEV) return;
-        linePos[v * 3] = x; linePos[v * 3 + 1] = y; linePos[v * 3 + 2] = z;
-        const t = Math.min(1, sp / 1.0);
-        lineCol[v * 3] = 0.16 - 0.06 * t; lineCol[v * 3 + 1] = 0.5 - 0.18 * t; lineCol[v * 3 + 2] = 0.95;
-        v++;
-      };
-      for (const seed of sd) {
-        if (v + 2 * 36 > MAX_LINEV) break;
-        let px = seed[0], py = seed[1], pz = seed[2];
-        const pts: Array<[number, number, number, number]> = [];
-        for (let s = 0; s < 36; s++) {
-          if (px < ox || px > ex || py < oy || py > roofY || pz < oz || pz > ez) break;
-          const [i, j, k] = worldToCell(px, py, pz);
+  const spawn = useMemo(() => {
+    const { sim, nx, ny, nz, dx, cellCenter, seeds } = built;
+    return (p: number) => {
+      let pos: [number, number, number] | null = null;
+      if (seeds.length && Math.random() < 0.7) {
+        const s = seeds[(Math.random() * seeds.length) | 0];
+        pos = [s[0] + (Math.random() - 0.5) * dx, s[1] + (Math.random() - 0.5) * dx, s[2] + (Math.random() - 0.5) * dx];
+      } else {
+        for (let t = 0; t < 25; t++) {
+          const i = (Math.random() * nx) | 0, j = (Math.random() * ny) | 0, k = (Math.random() * nz) | 0;
           const c = sim.cIdx(i, j, k);
-          if (sim.solid[c]) break;
-          const [u, vv, w] = sim.velocityAt(i, j, k);
-          const sp = Math.hypot(u, vv, w);
-          if (sp < 0.03) break;
-          pts.push([px, py, pz, sp]);
-          px += (u / sp) * stepLen; py += (vv / sp) * stepLen; pz += (w / sp) * stepLen;
-        }
-        if (pts.length < 4) continue;
-        for (let q = 0; q < pts.length - 1; q++) {
-          writeV(pts[q][0], pts[q][1], pts[q][2], pts[q][3]);
-          writeV(pts[q + 1][0], pts[q + 1][1], pts[q + 1][2], pts[q + 1][3]);
-        }
-        // arrowhead at the middle, pointing along the flow
-        if (arrow && a < MAX_ARROWS) {
-          const mi = (pts.length / 2) | 0;
-          const [mx, my, mz] = pts[mi];
-          const [nx2, ny2, nz2] = pts[Math.min(mi + 1, pts.length - 1)];
-          dir.set(nx2 - mx, ny2 - my, nz2 - mz);
-          if (dir.lengthSq() < 1e-9) dir.set(0, 1, 0);
-          dir.normalize();
-          quat.setFromUnitVectors(UP, dir);
-          dummy.position.set(mx, my, mz);
-          dummy.quaternion.copy(quat);
-          dummy.scale.set(dx * 0.9, dx * 1.6, dx * 0.9);
-          dummy.updateMatrix();
-          arrow.setMatrixAt(a, dummy.matrix);
-          col.setRGB(0.12, 0.38, 0.95);
-          arrow.setColorAt(a, col);
-          a++;
+          if (!sim.solid[c] && !sim.open[c]) { pos = cellCenter(i, j, k); break; }
         }
       }
-      if (line) {
-        line.visible = true;
-        line.geometry.setDrawRange(0, v);
-        (line.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-        (line.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-      }
-      if (arrow) {
-        arrow.visible = true;
-        arrow.count = a;
-        arrow.instanceMatrix.needsUpdate = true;
-        if (arrow.instanceColor) arrow.instanceColor.needsUpdate = true;
-      }
-      setIndicators([]);
-      return;
-    }
+      if (!pos) pos = cellCenter(nx >> 1, ny >> 1, nz >> 1);
+      head[p * 3] = pos[0]; head[p * 3 + 1] = pos[1]; head[p * 3 + 2] = pos[2];
+      ageA[p] = Math.random() * 2;
+      maxAgeA[p] = 2 + Math.random() * 2.5;
+    };
+  }, [built, head, ageA, maxAgeA]);
 
-    // temperature / contamination: haze (saturated where strong) + per-room indicator
-    if (line) line.visible = false;
-    if (arrow) arrow.visible = false;
+  useEffect(() => { for (let p = 0; p < NUM_PARTICLES; p++) spawn(p); }, [spawn]);
+
+  // fill temperature / smell into the haze from the per-room steady levels
+  const computeHaze = useCallback(() => {
+    const haze = hazeRef.current;
+    if (!haze) return;
+    if (mode === "airflow") { haze.visible = false; return; }
+    const { sim, ny, worldToCell, cellCenter } = built;
+    const roofY = plan.wallHeight;
+    const levels = computeRoomLevels(plan, mode, sourceRoomId);
     let n = 0;
-    const field = mode === "temperature" ? sim.temp : sim.s;
-    const total = nx * ny * nz;
-    for (let c = 0; c < total && n < MAX_HAZE; c++) {
-      if (sim.solid[c] || sim.open[c]) continue;
-      const val = field[c];
+    for (const room of plan.rooms) {
+      const lvl = levels.get(room.id) ?? 0;
+      if (mode === "temperature") { if (Math.abs(lvl) < 0.4) continue; }
+      else if (lvl < 0.05) continue;
       let r: number, g: number, b: number;
       if (mode === "temperature") {
-        const t = val / 10;
-        if (Math.abs(t) < 0.18) continue;
-        if (t > 0) { r = 0.92; g = 0.27; b = 0.18; } else { r = 0.18; g = 0.46; b = 0.96; }
-      } else {
-        if (val < 0.1) continue;
-        r = 0.55; g = 0.2; b = 0.95;
-      }
-      const i = c % nx, j = Math.floor(c / nx) % ny, k = Math.floor(c / (nx * ny));
-      const [wx, wy, wz] = cellCenter(i, j, k);
-      if (wy > roofY) continue;
-      hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
-      hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
-      n++;
-    }
-    if (haze) {
-      haze.visible = n > 0;
-      haze.geometry.setDrawRange(0, n);
-      (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-      (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-    }
-
-    // per-room indicator: average value over each room → every room shows a result
-    const inds: Indicator[] = [];
-    for (const room of plan.rooms) {
+        if (lvl > 0) { r = 0.92; g = 0.27; b = 0.18; } else { r = 0.18; g = 0.46; b = 0.96; }
+      } else { r = 0.55; g = 0.2; b = 0.95; }
       const [i0, , k0] = worldToCell(room.rect.x, 0, room.rect.z);
       const [i1, , k1] = worldToCell(room.rect.x + room.rect.w, 0, room.rect.z + room.rect.d);
-      let sum = 0, cnt = 0;
-      for (let k = k0; k <= k1; k++)
+      for (let k = k0; k <= k1 && n < MAX_HAZE; k++)
         for (let j = 0; j < ny; j++)
-          for (let i = i0; i <= i1; i++) {
+          for (let i = i0; i <= i1 && n < MAX_HAZE; i++) {
             const c = sim.cIdx(i, j, k);
             if (sim.solid[c] || sim.open[c]) continue;
-            sum += field[c]; cnt++;
+            const [wx, wy, wz] = cellCenter(i, j, k);
+            if (wy > roofY) continue;
+            hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
+            hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
+            n++;
           }
-      const avg = cnt ? sum / cnt : 0;
-      let color: string;
-      if (mode === "temperature") {
-        const t = Math.max(-1, Math.min(1, avg / 6));
-        if (t >= 0) color = `rgb(${(lerp(220, 235, t)) | 0},${(lerp(220, 70, t)) | 0},${(lerp(220, 55, t)) | 0})`;
-        else { const x = -t; color = `rgb(${(lerp(220, 60, x)) | 0},${(lerp(220, 120, x)) | 0},${(lerp(220, 245, x)) | 0})`; }
-      } else {
-        const x = Math.max(0, Math.min(1, avg));
-        color = `rgb(${(lerp(225, 140, x)) | 0},${(lerp(225, 50, x)) | 0},${(lerp(225, 240, x)) | 0})`;
-      }
-      inds.push({ pos: [room.rect.x + room.rect.w / 2, plan.wallHeight * 0.55, room.rect.z + room.rect.d / 2], color });
     }
-    setIndicators(inds);
-  }, [built, mode, plan.rooms, plan.wallHeight, hazePos, hazeCol, linePos, lineCol, dummy, col, quat, dir]);
+    haze.visible = n > 0;
+    haze.geometry.setDrawRange(0, n);
+    (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+  }, [built, mode, plan, sourceRoomId, hazePos, hazeCol]);
 
-  // recompute the (static) view once converged, or when the mode changes
-  useEffect(() => {
-    if (ready) computeView();
-  }, [ready, computeView]);
+  useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
-  useFrame(() => {
-    if (converged.current) return; // steady state: nothing to animate
-    for (let b = 0; b < BATCH; b++) built.sim.step(0.05);
-    steps.current += BATCH;
-    if (steps.current >= TARGET_STEPS) {
-      converged.current = true;
-      setReady(true);
-      setSimReady(true);
+  useFrame((_, delta) => {
+    // converge to steady state once
+    if (!converged.current) {
+      for (let b = 0; b < BATCH; b++) built.sim.step(0.05);
+      steps.current += BATCH;
+      if (steps.current >= TARGET_STEPS) { converged.current = true; setReady(true); setSimReady(true); }
+      return;
     }
+    // airflow: keep drifting dots through the (frozen) steady flow
+    const headPts = headRef.current;
+    const showAir = mode === "airflow";
+    if (headPts) headPts.visible = showAir;
+    if (!showAir || !headPts) return;
+    const { sim, nx, ny, nz, dx, origin, worldToCell } = built;
+    const dt = Math.min(delta, 0.05);
+    const roofY = plan.wallHeight;
+    const ox = origin[0], oy = origin[1], oz = origin[2];
+    const ex = ox + nx * dx, ey = Math.min(oy + ny * dx, roofY), ez = oz + nz * dx;
+    for (let p = 0; p < NUM_PARTICLES; p++) {
+      let x = head[p * 3], y = head[p * 3 + 1], z = head[p * 3 + 2];
+      const [i, j, k] = worldToCell(x, y, z);
+      const [u, v, w] = sim.velocityAt(i, j, k);
+      const sp = Math.hypot(u, v, w);
+      ageA[p] += dt;
+      const cx = x + u * dt * 1.8, cy = y + v * dt * 1.8, cz = z + w * dt * 1.8;
+      const out = cx < ox || cx > ex || cy < oy || cy > ey || cz < oz || cz > ez;
+      if (!out) {
+        const [ci, cj, ck] = worldToCell(cx, cy, cz);
+        const cc = sim.cIdx(ci, cj, ck);
+        if (sim.open[cc]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+        else if (!sim.solid[cc]) { x = cx; y = cy; z = cz; }
+      } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+      if (ageA[p] > maxAgeA[p] || sp < 0.015) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+      head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
+      const t = Math.min(1, sp / 1.0);
+      headCol[p * 3] = 0.18 - 0.06 * t; headCol[p * 3 + 1] = 0.5 - 0.18 * t; headCol[p * 3 + 2] = 0.95;
+    }
+    (headPts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   });
 
   return (
@@ -240,32 +214,16 @@ export function FlowField3D() {
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 3.2} opacity={0.42} />
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 3.0} opacity={0.32} />
       </points>
 
-      <lineSegments ref={lineRef} frustumCulled={false} visible={false}>
+      <points ref={headRef} frustumCulled={false} visible={false}>
         <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[linePos, 3]} usage={THREE.DynamicDrawUsage} />
-          <bufferAttribute attach="attributes-color" args={[lineCol, 3]} usage={THREE.DynamicDrawUsage} />
+          <bufferAttribute attach="attributes-position" args={[head, 3]} usage={THREE.DynamicDrawUsage} />
+          <bufferAttribute attach="attributes-color" args={[headCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <lineBasicMaterial vertexColors transparent opacity={0.85} />
-      </lineSegments>
-
-      <instancedMesh ref={arrowRef} args={[null as unknown as THREE.BufferGeometry, null as unknown as THREE.Material, MAX_ARROWS]} frustumCulled={false} visible={false}>
-        <coneGeometry args={[0.5, 1, 7]} />
-        <meshStandardMaterial vertexColors transparent opacity={0.95} depthWrite={false} toneMapped={false} />
-      </instancedMesh>
-
-      {indicators.map((m, i) => (
-        <mesh key={i} position={m.pos}>
-          <sphereGeometry args={[built.dx * 1.4, 16, 16]} />
-          <meshStandardMaterial color={m.color} emissive={m.color} emissiveIntensity={0.6} toneMapped={false} />
-        </mesh>
-      ))}
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 1.6} opacity={0.9} />
+      </points>
     </group>
   );
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }
