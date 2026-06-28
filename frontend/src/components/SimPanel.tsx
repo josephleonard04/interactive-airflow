@@ -15,6 +15,9 @@ export function SimPanel() {
   const toggleSim = useSceneStore((s) => s.toggleSim);
   const setSimMode = useSceneStore((s) => s.setSimMode);
   const setSource = useSceneStore((s) => s.setSimSource);
+  const addItem = useSceneStore((s) => s.addItem);
+  const selectItem = useSceneStore((s) => s.selectItem);
+  const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
   const [goal, setGoal] = useState("");
   const [results, setResults] = useState<Evaluation[]>([]);
@@ -82,14 +85,29 @@ export function SimPanel() {
         ))}
       </div>
       {mode === "contamination" && (
-        <div className="field" style={{ marginTop: 8 }}>
-          <span>Smell source</span>
-          <select value={sourceRoomId ?? ""} onChange={(e) => setSource(e.target.value || null)} style={{ maxWidth: 150 }}>
-            <option value="">(none)</option>
-            {plan.rooms.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
+        <div style={{ marginTop: 8 }}>
+          <div className="btn-row">
+            <button
+              className="tool"
+              onClick={() => { const id = addItem("smell"); if (id) selectItem(id); }}
+            >
+              ＋ Place a smell source
+            </button>
+          </div>
+          <p className="muted-line" style={{ marginTop: 4 }}>
+            {smellCount > 0
+              ? `${smellCount} smell source${smellCount > 1 ? "s" : ""} placed — drag the purple markers where you want.`
+              : "Drop one or more purple markers; smell spreads from each."}
+          </p>
+          <div className="field" style={{ marginTop: 4 }}>
+            <span>or whole room</span>
+            <select value={sourceRoomId ?? ""} onChange={(e) => setSource(e.target.value || null)} style={{ maxWidth: 140 }}>
+              <option value="">(none)</option>
+              {plan.rooms.map((r) => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
       {!ready && (

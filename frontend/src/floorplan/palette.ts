@@ -32,6 +32,7 @@ const ITEM_COLOR: Record<string, string> = {
   ac: "#aab6c4",
   fan: "#7b8794",
   heater: "#c47a55",
+  smell: "#a855f7",
 };
 
 export function itemColor(type: string): string {
