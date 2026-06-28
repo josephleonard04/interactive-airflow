@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildSim3D } from "../sim/sim3d";
+import { computeRoomLevels } from "../sim/roomLevels";
 import { useSceneStore } from "../scene/store";
-import type { FloorPlan } from "../floorplan/types";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -18,7 +18,6 @@ const MAX_HAZE = 16000;
 const NUM_PARTICLES = 500;
 const TARGET_STEPS = 180;
 const BATCH = 6;
-const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 
 function makeSoftTexture(): THREE.Texture {
   const s = 64;
@@ -32,44 +31,6 @@ function makeSoftTexture(): THREE.Texture {
   g.fillStyle = grd;
   g.fillRect(0, 0, s, s);
   return new THREE.CanvasTexture(c);
-}
-
-// Steady-state value per room over the open-door connectivity graph.
-function computeRoomLevels(plan: FloorPlan, mode: string, sourceRoomId: string | null): Map<string, number> {
-  const ids = plan.rooms.map((r) => r.id);
-  const adj = new Map<string, string[]>(ids.map((id) => [id, []]));
-  const outside = new Map<string, number>(ids.map((id) => [id, 0]));
-  for (const o of [...plan.doors, ...plan.windows]) {
-    if (!o.open) continue;
-    const [a, b] = o.rooms;
-    if (b === "outside") outside.set(a, (outside.get(a) ?? 0) + 1);
-    else { adj.get(a)?.push(b); adj.get(b)?.push(a); }
-  }
-  const fixed = new Set<string>();
-  const val = new Map<string, number>(ids.map((id) => [id, 0]));
-  if (mode === "temperature") {
-    for (const it of plan.items) {
-      if (it.on === false) continue;
-      const p = POWER[it.power ?? 2] ?? 1;
-      if (it.type === "heater") { val.set(it.roomId, (val.get(it.roomId) ?? 0) + 10 * p); fixed.add(it.roomId); }
-      if (it.type === "ac") { val.set(it.roomId, (val.get(it.roomId) ?? 0) - 10 * p); fixed.add(it.roomId); }
-    }
-  } else if (sourceRoomId) {
-    val.set(sourceRoomId, 1); fixed.add(sourceRoomId);
-  }
-  const T = new Map<string, number>(ids.map((id) => [id, fixed.has(id) ? val.get(id)! : 0]));
-  for (let it = 0; it < 80; it++) {
-    for (const id of ids) {
-      if (fixed.has(id)) continue;
-      const nb = adj.get(id)!;
-      const out = outside.get(id)!;
-      let sum = 0, n = 0;
-      for (const m of nb) { sum += T.get(m)!; n++; }
-      n += out; // outside contributes ambient 0
-      T.set(id, n > 0 ? sum / n : 0);
-    }
-  }
-  return T;
 }
 
 export function FlowField3D() {
