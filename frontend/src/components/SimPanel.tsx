@@ -1,5 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSceneStore, type SimMode } from "../scene/store";
+import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
 // 3D house via FlowField3D). Pressing Simulate runs the sim directly on the home
@@ -14,6 +15,22 @@ export function SimPanel() {
   const toggleSim = useSceneStore((s) => s.toggleSim);
   const setSimMode = useSceneStore((s) => s.setSimMode);
   const setSource = useSceneStore((s) => s.setSimSource);
+
+  const [goal, setGoal] = useState("");
+  const [results, setResults] = useState<Evaluation[]>([]);
+
+  // Plain-language goal → physical objectives → checked against the result, and
+  // the matching view is shown so the user sees what's happening.
+  const checkGoal = () => {
+    if (!goal.trim()) return;
+    const evals = evaluateGoal(goal, plan);
+    setResults(evals);
+    const first = evals[0]?.objective;
+    if (first) {
+      if (first.scalar === "temperature") setSimMode("temperature");
+      else { setSimMode("contamination"); if (first.sourceId) setSource(first.sourceId); }
+    }
+  };
 
   // default the smell source to the kitchen the first time
   useEffect(() => {
@@ -37,6 +54,26 @@ export function SimPanel() {
         <strong style={{ fontSize: 13 }}>Airflow simulation</strong>
         <button className="ghost" onClick={toggleSim}>✕</button>
       </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Ask in plain language</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") checkGoal(); }}
+            placeholder="e.g. keep my bedroom cool"
+            style={{ flex: 1, minWidth: 0, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", fontSize: 12, color: "var(--text)" }}
+          />
+          <button className="tool" onClick={checkGoal}>Check</button>
+        </div>
+        {results.map((r, i) => (
+          <p key={i} className="muted-line" style={{ marginTop: 6, color: r.satisfied === null ? "var(--muted)" : r.satisfied ? "#2e7d32" : "#c0392b" }}>
+            {r.summary}
+          </p>
+        ))}
+      </div>
+
       <div className="tools">
         {(["airflow", "temperature", "contamination"] as SimMode[]).map((m) => (
           <button key={m} className={mode === m ? "tool active" : "tool"} onClick={() => setSimMode(m)}>
