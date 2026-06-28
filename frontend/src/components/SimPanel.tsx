@@ -127,10 +127,14 @@ function Legend({ mode }: { mode: SimMode }) {
   }
   if (mode === "contamination") {
     return (
-      <p className="muted-line" style={{ marginTop: 10 }}>
-        <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 5, background: "#8b3aed", marginRight: 6, verticalAlign: "middle" }} />
-        Violet = the smell. It reaches rooms with an open door; closed doors keep it out.
-      </p>
+      <div style={{ marginTop: 10 }}>
+        <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg,#efe7fb,#a855f7,#6b21a8)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+          <span>Weak smell</span>
+          <span>Strong smell</span>
+        </div>
+        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow through open doors; closed doors keep it out.</p>
+      </div>
     );
   }
   return (

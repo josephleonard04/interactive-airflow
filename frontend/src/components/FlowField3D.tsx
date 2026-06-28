@@ -88,49 +88,58 @@ export function FlowField3D() {
 
   useEffect(() => { for (let p = 0; p < NUM_PARTICLES; p++) spawn(p); }, [spawn]);
 
-  // render the airflow-carried temperature / smell field as a gradient that covers
-  // the whole connected house (intensity = strength), from the cached steady field
+  // render temperature / smell as a flat 2D top-down coloured layer: average the
+  // airflow-carried field down each vertical column and lay one coloured sheet of
+  // soft points over the floor plan (intensity = strength)
   const computeHaze = useCallback(() => {
     const haze = hazeRef.current;
     if (!haze) return;
     const F = fieldsRef.current;
     if (mode === "airflow" || !F) { haze.visible = false; return; }
-    const { sim, nx, ny, nz, cellCenter, ambient } = built;
-    const roofY = plan.wallHeight;
+    const { sim, nx, ny, nz, cellCenter } = built;
+    const ambient = built.ambient;
     const field = mode === "temperature" ? F.temp : F.smell;
+    // column average over height → a 2D (x,z) map
+    const colSum = new Float64Array(nx * nz);
+    const colN = new Int32Array(nx * nz);
+    for (let k = 0; k < nz; k++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++) {
+          const c = sim.cIdx(i, j, k);
+          if (sim.solid[c] || ambient[c]) continue;
+          const q = i + nx * k;
+          colSum[q] += field[c];
+          colN[q]++;
+        }
     let mx = 1e-6;
-    for (let c = 0; c < nx * ny * nz; c++) {
-      if (sim.solid[c] || ambient[c]) continue;
-      const a = Math.abs(field[c]);
-      if (a > mx) mx = a;
-    }
+    for (let q = 0; q < nx * nz; q++) if (colN[q]) { const a = Math.abs(colSum[q] / colN[q]); if (a > mx) mx = a; }
+
+    const Y0 = 0.18; // floor-level sheet
     let n = 0;
-    const total = nx * ny * nz;
-    for (let c = 0; c < total && n < MAX_HAZE; c++) {
-      if (sim.solid[c] || ambient[c]) continue;
-      const t = field[c] / mx; // normalized −1..1 (temp) or 0..1 (smell)
-      let r: number, g: number, b: number;
-      if (mode === "temperature") {
-        const a = Math.abs(t);
-        if (a < 0.03) continue; // skip ~neutral air
-        if (t > 0) { r = 0.95; g = 0.85 - 0.6 * a; b = 0.82 - 0.62 * a; } // pale → deep red
-        else { r = 0.82 - 0.62 * a; g = 0.88 - 0.4 * a; b = 0.97; } // pale → deep blue
-      } else {
-        if (t < 0.03) continue;
-        r = 0.92 - 0.4 * t; g = 0.82 - 0.6 * t; b = 0.97 - 0.04 * t; // pale lavender → deep violet
+    for (let k = 0; k < nz; k++)
+      for (let i = 0; i < nx && n < MAX_HAZE; i++) {
+        const q = i + nx * k;
+        if (!colN[q]) continue;
+        const t = colSum[q] / colN[q] / mx; // normalized
+        let r: number, g: number, b: number;
+        if (mode === "temperature") {
+          const a = Math.abs(t);
+          if (a < 0.03) continue;
+          if (t > 0) { r = 0.95; g = 0.85 - 0.62 * a; b = 0.82 - 0.64 * a; } else { r = 0.82 - 0.64 * a; g = 0.88 - 0.42 * a; b = 0.97; }
+        } else {
+          if (t < 0.03) continue;
+          r = 0.92 - 0.4 * t; g = 0.82 - 0.62 * t; b = 0.97 - 0.04 * t;
+        }
+        const [wx, , wz] = cellCenter(i, 0, k);
+        hazePos[n * 3] = wx; hazePos[n * 3 + 1] = Y0; hazePos[n * 3 + 2] = wz;
+        hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
+        n++;
       }
-      const i = c % nx, j = Math.floor(c / nx) % ny, k = Math.floor(c / (nx * ny));
-      const [wx, wy, wz] = cellCenter(i, j, k);
-      if (wy > roofY) continue;
-      hazePos[n * 3] = wx; hazePos[n * 3 + 1] = wy; hazePos[n * 3 + 2] = wz;
-      hazeCol[n * 3] = r; hazeCol[n * 3 + 1] = g; hazeCol[n * 3 + 2] = b;
-      n++;
-    }
     haze.visible = n > 0;
     haze.geometry.setDrawRange(0, n);
     (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-  }, [built, mode, plan.wallHeight, hazePos, hazeCol]);
+  }, [built, mode, hazePos, hazeCol]);
 
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
@@ -192,7 +201,7 @@ export function FlowField3D() {
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 2.7} opacity={0.2} />
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.0} opacity={0.5} />
       </points>
 
       <points ref={headRef} frustumCulled={false} visible={false}>
