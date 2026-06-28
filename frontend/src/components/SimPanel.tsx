@@ -72,8 +72,9 @@ function Legend({ mode }: { mode: SimMode }) {
         <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg,#3b82f6,#f3eee6,#d9534f)" }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
           <span>Cool</span>
-          <span>Warm (rises)</span>
+          <span>Warm</span>
         </div>
+        <p className="muted-line" style={{ marginTop: 6 }}>Spreads to rooms with an open door; walls &amp; closed doors block it.</p>
       </div>
     );
   }
@@ -81,14 +82,13 @@ function Legend({ mode }: { mode: SimMode }) {
     return (
       <p className="muted-line" style={{ marginTop: 10 }}>
         <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 5, background: "#8b3aed", marginRight: 6, verticalAlign: "middle" }} />
-        Violet haze = where the smell ends up. Each room's dot shows its level.
+        Violet = the smell. It reaches rooms with an open door; closed doors keep it out.
       </p>
     );
   }
   return (
     <p className="muted-line" style={{ marginTop: 10 }}>
-      Streamlines trace the air's path; arrows show direction. This is the
-      settled (steady-state) flow.
+      Drifting dots follow the settled airflow — watch where the air moves. AC &amp; fans push it; open windows let it out.
     </p>
   );
 }
