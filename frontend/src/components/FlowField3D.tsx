@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { buildSim3D, diffusionFill } from "../sim/sim3d";
+import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
@@ -53,6 +53,7 @@ export function FlowField3D() {
 
   const steps = useRef(0);
   const converged = useRef(false);
+  const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array } | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -87,30 +88,36 @@ export function FlowField3D() {
 
   useEffect(() => { for (let p = 0; p < NUM_PARTICLES; p++) spawn(p); }, [spawn]);
 
-  // fill temperature / smell into the haze from the per-cell steady-state field
-  // (shows local detail — heater warm AND AC cool in the same room — and spreads
-  // through open doors, blocked by walls)
+  // render the airflow-carried temperature / smell field as a gradient that covers
+  // the whole connected house (intensity = strength), from the cached steady field
   const computeHaze = useCallback(() => {
     const haze = hazeRef.current;
     if (!haze) return;
-    if (mode === "airflow") { haze.visible = false; return; }
+    const F = fieldsRef.current;
+    if (mode === "airflow" || !F) { haze.visible = false; return; }
     const { sim, nx, ny, nz, cellCenter, ambient } = built;
     const roofY = plan.wallHeight;
-    const field = mode === "temperature"
-      ? diffusionFill(built, sim.tempFixed, sim.tempVal)
-      : diffusionFill(built, sim.sFixed, sim.sVal);
+    const field = mode === "temperature" ? F.temp : F.smell;
+    let mx = 1e-6;
+    for (let c = 0; c < nx * ny * nz; c++) {
+      if (sim.solid[c] || ambient[c]) continue;
+      const a = Math.abs(field[c]);
+      if (a > mx) mx = a;
+    }
     let n = 0;
     const total = nx * ny * nz;
     for (let c = 0; c < total && n < MAX_HAZE; c++) {
       if (sim.solid[c] || ambient[c]) continue;
-      const v = field[c];
+      const t = field[c] / mx; // normalized −1..1 (temp) or 0..1 (smell)
       let r: number, g: number, b: number;
       if (mode === "temperature") {
-        if (Math.abs(v) < 0.6) continue;
-        if (v > 0) { r = 0.92; g = 0.27; b = 0.18; } else { r = 0.18; g = 0.46; b = 0.96; }
+        const a = Math.abs(t);
+        if (a < 0.03) continue; // skip ~neutral air
+        if (t > 0) { r = 0.95; g = 0.85 - 0.6 * a; b = 0.82 - 0.62 * a; } // pale → deep red
+        else { r = 0.82 - 0.62 * a; g = 0.88 - 0.4 * a; b = 0.97; } // pale → deep blue
       } else {
-        if (v < 0.06) continue;
-        r = 0.55; g = 0.2; b = 0.95;
+        if (t < 0.03) continue;
+        r = 0.92 - 0.4 * t; g = 0.82 - 0.6 * t; b = 0.97 - 0.04 * t; // pale lavender → deep violet
       }
       const i = c % nx, j = Math.floor(c / nx) % ny, k = Math.floor(c / (nx * ny));
       const [wx, wy, wz] = cellCenter(i, j, k);
@@ -123,7 +130,7 @@ export function FlowField3D() {
     haze.geometry.setDrawRange(0, n);
     (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-  }, [built, mode, sourceRoomId, plan.wallHeight, hazePos, hazeCol]);
+  }, [built, mode, plan.wallHeight, hazePos, hazeCol]);
 
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
@@ -132,7 +139,17 @@ export function FlowField3D() {
     if (!converged.current) {
       for (let b = 0; b < BATCH; b++) built.sim.step(0.05);
       steps.current += BATCH;
-      if (steps.current >= TARGET_STEPS) { converged.current = true; setReady(true); setSimReady(true); }
+      if (steps.current >= TARGET_STEPS) {
+        // freeze and solve the airflow-carried temperature & smell fields once
+        const sim = built.sim;
+        fieldsRef.current = {
+          temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
+          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+        };
+        converged.current = true;
+        setReady(true);
+        setSimReady(true);
+      }
       return;
     }
     // airflow: keep drifting dots through the (frozen) steady flow
@@ -175,7 +192,7 @@ export function FlowField3D() {
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 3.0} opacity={0.32} />
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 2.7} opacity={0.2} />
       </points>
 
       <points ref={headRef} frustumCulled={false} visible={false}>

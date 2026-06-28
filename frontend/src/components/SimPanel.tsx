@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSceneStore, type SimMode } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 
@@ -34,14 +34,6 @@ export function SimPanel() {
       else { setSimMode("contamination"); if (first.sourceId) setSource(first.sourceId); }
     }
   };
-
-  // default the smell source to the kitchen the first time
-  useEffect(() => {
-    if (active && sourceRoomId == null) {
-      const def = plan.rooms.find((r) => r.type === "kitchen") ?? plan.rooms[0];
-      if (def) setSource(def.id);
-    }
-  }, [active, sourceRoomId, plan.rooms, setSource]);
 
   if (!active) {
     return (

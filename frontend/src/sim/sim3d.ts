@@ -205,17 +205,42 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, hasTemperature, seeds, markers };
 }
 
-// Per-cell steady-state scalar field by diffusion over the connected air: source
-// cells hold their value, air mixes through open doors, walls + closed doors are
-// barriers, and exterior openings vent to ambient (0). Unlike a per-room average,
-// this shows local detail — e.g. a heater (warm) and an AC (cool) in the SAME
-// room both appear. Gauss-Seidel relaxation of Laplace's equation; cheap, one-time.
-export function diffusionFill(s: Sim3D, fixed: Uint8Array, val: Float32Array, iters = 240): Float32Array {
+// Steady-state scalar field carried by the AIRFLOW: advection along the converged
+// velocity field plus mixing (diffusion), so temperature / smell follow the air
+// currents and fill the whole connected house. Sources hold their value, exterior
+// openings vent to ambient (0), walls block. One-time relaxation on the frozen
+// velocity — this is what "matches the airflow" at steady state.
+export function advectDiffuseFill(
+  s: Sim3D,
+  fixed: Uint8Array,
+  val: Float32Array,
+  opts?: { iters?: number; kappa?: number; adv?: number },
+): Float32Array {
   const { sim, nx, ny, nz, ambient } = s;
-  const f = new Float32Array(nx * ny * nz);
-  for (let c = 0; c < f.length; c++) if (fixed[c]) f[c] = val[c];
+  const iters = opts?.iters ?? 240;
+  const kappa = opts?.kappa ?? 0.18; // mixing strength
+  const adv = opts?.adv ?? 0.9; // cells moved per (m/s) per iteration
+  const n3 = nx * ny * nz;
+  const f = new Float32Array(n3);
+  const tmp = new Float32Array(n3);
+  for (let c = 0; c < n3; c++) if (fixed[c]) f[c] = val[c];
   const idx = (i: number, j: number, k: number) => i + nx * (j + ny * k);
+  const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x);
+
+  const sample = (F: Float32Array, x: number, y: number, z: number, fb: number): number => {
+    x = clamp(x, 0, nx - 1.001); y = clamp(y, 0, ny - 1.001); z = clamp(z, 0, nz - 1.001);
+    const i0 = Math.floor(x), j0 = Math.floor(y), k0 = Math.floor(z);
+    const tx = x - i0, ty = y - j0, tz = z - k0;
+    const g = (i: number, j: number, k: number) => { const c = idx(i, j, k); return sim.solid[c] ? fb : F[c]; };
+    const c00 = g(i0, j0, k0) * (1 - tx) + g(i0 + 1, j0, k0) * tx;
+    const c10 = g(i0, j0 + 1, k0) * (1 - tx) + g(i0 + 1, j0 + 1, k0) * tx;
+    const c01 = g(i0, j0, k0 + 1) * (1 - tx) + g(i0 + 1, j0, k0 + 1) * tx;
+    const c11 = g(i0, j0 + 1, k0 + 1) * (1 - tx) + g(i0 + 1, j0 + 1, k0 + 1) * tx;
+    return (c00 * (1 - ty) + c10 * ty) * (1 - tz) + (c01 * (1 - ty) + c11 * ty) * tz;
+  };
+
   for (let it = 0; it < iters; it++) {
+    tmp.set(f);
     for (let k = 0; k < nz; k++)
       for (let j = 0; j < ny; j++)
         for (let i = 0; i < nx; i++) {
@@ -223,15 +248,23 @@ export function diffusionFill(s: Sim3D, fixed: Uint8Array, val: Float32Array, it
           if (sim.solid[c]) continue;
           if (fixed[c]) { f[c] = val[c]; continue; }
           if (ambient[c]) { f[c] = 0; continue; }
-          let sum = 0, n = 0;
-          if (i > 0 && !sim.solid[idx(i - 1, j, k)]) { sum += f[idx(i - 1, j, k)]; n++; }
-          if (i < nx - 1 && !sim.solid[idx(i + 1, j, k)]) { sum += f[idx(i + 1, j, k)]; n++; }
-          if (j > 0 && !sim.solid[idx(i, j - 1, k)]) { sum += f[idx(i, j - 1, k)]; n++; }
-          if (j < ny - 1 && !sim.solid[idx(i, j + 1, k)]) { sum += f[idx(i, j + 1, k)]; n++; }
-          if (k > 0 && !sim.solid[idx(i, j, k - 1)]) { sum += f[idx(i, j, k - 1)]; n++; }
-          if (k < nz - 1 && !sim.solid[idx(i, j, k + 1)]) { sum += f[idx(i, j, k + 1)]; n++; }
-          if (n > 0) f[c] = sum / n;
+          // advect: trace back along the air velocity
+          const uc = 0.5 * (sim.u[sim.uIdx(i, j, k)] + sim.u[sim.uIdx(i + 1, j, k)]);
+          const vc = 0.5 * (sim.v[sim.vIdx(i, j, k)] + sim.v[sim.vIdx(i, j + 1, k)]);
+          const wc = 0.5 * (sim.w[sim.wIdx(i, j, k)] + sim.w[sim.wIdx(i, j, k + 1)]);
+          const adVal = sample(tmp, i - uc * adv, j - vc * adv, k - wc * adv, tmp[c]);
+          // mix with neighbours (diffusion)
+          let sum = 0, cnt = 0;
+          if (i > 0 && !sim.solid[idx(i - 1, j, k)]) { sum += tmp[idx(i - 1, j, k)]; cnt++; }
+          if (i < nx - 1 && !sim.solid[idx(i + 1, j, k)]) { sum += tmp[idx(i + 1, j, k)]; cnt++; }
+          if (j > 0 && !sim.solid[idx(i, j - 1, k)]) { sum += tmp[idx(i, j - 1, k)]; cnt++; }
+          if (j < ny - 1 && !sim.solid[idx(i, j + 1, k)]) { sum += tmp[idx(i, j + 1, k)]; cnt++; }
+          if (k > 0 && !sim.solid[idx(i, j, k - 1)]) { sum += tmp[idx(i, j, k - 1)]; cnt++; }
+          if (k < nz - 1 && !sim.solid[idx(i, j, k + 1)]) { sum += tmp[idx(i, j, k + 1)]; cnt++; }
+          const diff = cnt > 0 ? sum / cnt : adVal;
+          f[c] = adVal * (1 - kappa) + diff * kappa;
         }
   }
   return f;
 }
+
