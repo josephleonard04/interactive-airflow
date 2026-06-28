@@ -49,7 +49,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   let ny = g[1]; // vertical
   let nz = g[2];
   let dx = scene.domain.dx;
-  const target = opts.targetCells ?? 16000; // coarse enough for real-time single-thread JS
+  const target = opts.targetCells ?? 27000; // ~18k cells: accurate yet real-time
   if (nx * ny * nz > target) {
     const f = Math.ceil(Math.cbrt((nx * ny * nz) / target));
     nx = Math.ceil(nx / f);
@@ -59,7 +59,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   }
   const origin = scene.domain.gridOrigin as [number, number, number];
 
-  const sim = new Euler3D({ nx, ny, nz, dx, iterations: opts.iterations ?? 12 });
+  const sim = new Euler3D({ nx, ny, nz, dx, iterations: opts.iterations ?? 40 });
 
   const worldToCell = (wx: number, wy: number, wz: number): [number, number, number] => [
     clampi(Math.floor((wx - origin[0]) / dx), 0, nx - 1),

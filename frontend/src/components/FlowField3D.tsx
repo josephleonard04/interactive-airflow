@@ -13,8 +13,8 @@ import { useSceneStore } from "../scene/store";
 //   - contamination → a violet haze from a marked source room
 // Soft round sprites overlap into a smooth volume rather than blocky voxels.
 
-const MAX_HAZE = 8000;
-const NUM_PARTICLES = 700;
+const MAX_HAZE = 9000;
+const NUM_PARTICLES = 450;
 
 function makeSoftTexture(): THREE.Texture {
   const s = 64;
@@ -43,14 +43,11 @@ export function FlowField3D() {
   const hazeCol = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
   const hazeRef = useRef<THREE.Points>(null);
 
-  // particles: head positions + ages; rendered as comet trail (line) + bright head
+  // airflow particles: soft dots that drift with the air (seeded from vents)
   const head = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
   const age = useMemo(() => new Float32Array(NUM_PARTICLES), []);
   const maxAge = useMemo(() => new Float32Array(NUM_PARTICLES), []);
-  const linePos = useMemo(() => new Float32Array(NUM_PARTICLES * 6), []);
-  const lineCol = useMemo(() => new Float32Array(NUM_PARTICLES * 6), []);
   const headCol = useMemo(() => new Float32Array(NUM_PARTICLES * 3), []);
-  const lineRef = useRef<THREE.LineSegments>(null);
   const headRef = useRef<THREE.Points>(null);
 
   useEffect(() => {
@@ -135,13 +132,11 @@ export function FlowField3D() {
       (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
     }
 
-    // ---- airflow comet trails (seeded from vents, kept inside the house) ----
-    const line = lineRef.current;
+    // ---- airflow: soft dots drifting with the air (seeded from vents, contained) ----
     const headPts = headRef.current;
     const showAir = mode === "airflow";
-    if (line) line.visible = showAir;
     if (headPts) headPts.visible = showAir;
-    if (showAir && line && headPts) {
+    if (showAir && headPts) {
       const ox = origin[0], oy = origin[1], oz = origin[2];
       const ex = ox + nx * dx, ey = Math.min(oy + ny * dx, roofY), ez = oz + nz * dx;
       for (let p = 0; p < NUM_PARTICLES; p++) {
@@ -160,22 +155,12 @@ export function FlowField3D() {
         } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
         if (age[p] > maxAge[p] || sp < 0.015) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
         head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
-
-        // trail: tail behind the head along the flow, length ∝ speed
-        const inv = sp > 1e-5 ? 1 / sp : 0;
-        const tl = dx * (0.6 + 2.0 * Math.min(1, sp));
-        const tx = x - u * inv * tl, ty = y - v * inv * tl, tz = z - w * inv * tl;
-        linePos[p * 6] = tx; linePos[p * 6 + 1] = ty; linePos[p * 6 + 2] = tz;
-        linePos[p * 6 + 3] = x; linePos[p * 6 + 4] = y; linePos[p * 6 + 5] = z;
+        // colour by speed: gentle sky-blue (slow) → deeper blue (fast)
         const tt = Math.min(1, sp / 1.0);
-        const hr = 0.10 + 0.20 * tt, hg = 0.45 - 0.2 * tt, hb = 0.95; // slow=cyan-blue, fast=indigo
-        // tail fades toward the white background
-        lineCol[p * 6] = 0.85; lineCol[p * 6 + 1] = 0.9; lineCol[p * 6 + 2] = 1.0;
-        lineCol[p * 6 + 3] = hr; lineCol[p * 6 + 4] = hg; lineCol[p * 6 + 5] = hb;
-        headCol[p * 3] = hr; headCol[p * 3 + 1] = hg; headCol[p * 3 + 2] = hb;
+        headCol[p * 3] = 0.20 - 0.08 * tt;
+        headCol[p * 3 + 1] = 0.55 - 0.20 * tt;
+        headCol[p * 3 + 2] = 0.95;
       }
-      (line.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-      (line.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
       (headPts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
       (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
     }
@@ -191,20 +176,12 @@ export function FlowField3D() {
         <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 3.2} opacity={0.4} />
       </points>
 
-      <lineSegments ref={lineRef} frustumCulled={false}>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[linePos, 3]} usage={THREE.DynamicDrawUsage} />
-          <bufferAttribute attach="attributes-color" args={[lineCol, 3]} usage={THREE.DynamicDrawUsage} />
-        </bufferGeometry>
-        <lineBasicMaterial vertexColors transparent opacity={0.9} />
-      </lineSegments>
-
       <points ref={headRef} frustumCulled={false}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[head, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[headCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 1.0} opacity={0.95} />
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 1.7} opacity={0.9} />
       </points>
 
       {markers.map((m, idx) => (
