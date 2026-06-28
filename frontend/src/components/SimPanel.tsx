@@ -9,11 +9,10 @@ export function SimPanel() {
   const plan = useSceneStore((s) => s.plan);
   const active = useSceneStore((s) => s.simActive);
   const mode = useSceneStore((s) => s.simMode);
-  const paused = useSceneStore((s) => s.simPaused);
+  const ready = useSceneStore((s) => s.simReady);
   const sourceRoomId = useSceneStore((s) => s.simSourceRoomId);
   const toggleSim = useSceneStore((s) => s.toggleSim);
   const setSimMode = useSceneStore((s) => s.setSimMode);
-  const togglePause = useSceneStore((s) => s.toggleSimPause);
   const setSource = useSceneStore((s) => s.setSimSource);
 
   // default the smell source to the kitchen the first time
@@ -56,11 +55,11 @@ export function SimPanel() {
           </select>
         </div>
       )}
-      <div className="btn-row">
-        <button className={paused ? "tool" : "tool active"} onClick={togglePause}>
-          {paused ? "▶ Play" : "⏸ Pause"}
-        </button>
-      </div>
+      {!ready && (
+        <p className="muted-line" style={{ marginTop: 10, color: "var(--accent-ink)" }}>
+          ⏳ Computing the steady state…
+        </p>
+      )}
       <Legend mode={mode} />
     </div>
   );
@@ -82,13 +81,14 @@ function Legend({ mode }: { mode: SimMode }) {
     return (
       <p className="muted-line" style={{ marginTop: 10 }}>
         <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 5, background: "#8b3aed", marginRight: 6, verticalAlign: "middle" }} />
-        Violet haze = where the smell spreads. Open a window/door so it can leave.
+        Violet haze = where the smell ends up. Each room's dot shows its level.
       </p>
     );
   }
   return (
     <p className="muted-line" style={{ marginTop: 10 }}>
-      Glowing dots drift along with the air — watch where it flows. AC &amp; fans push it; open windows/doors let it out.
+      Streamlines trace the air's path; arrows show direction. This is the
+      settled (steady-state) flow.
     </p>
   );
 }

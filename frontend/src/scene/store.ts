@@ -75,10 +75,13 @@ export interface SceneState {
   simMode: SimMode;
   simPaused: boolean;
   simSourceRoomId: string | null;
+  /** false while the steady-state solve is still converging. */
+  simReady: boolean;
   toggleSim: () => void;
   setSimMode: (m: SimMode) => void;
   toggleSimPause: () => void;
   setSimSource: (id: string | null) => void;
+  setSimReady: (v: boolean) => void;
 }
 
 export type SimMode = "airflow" | "temperature" | "contamination";
@@ -118,11 +121,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simMode: "airflow",
   simPaused: false,
   simSourceRoomId: null,
+  simReady: false,
 
-  toggleSim: () => set((s) => ({ simActive: !s.simActive })),
+  toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
   setSimMode: (m) => set({ simMode: m }),
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
-  setSimSource: (id) => set({ simSourceRoomId: id }),
+  setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
+  setSimReady: (v) => set({ simReady: v }),
 
   generate: (size, mode) =>
     set({

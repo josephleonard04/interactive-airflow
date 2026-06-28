@@ -38,8 +38,8 @@ export interface Sim3D {
 const clampi = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
-const HEATER_T = 12;
-const AC_T = -8;
+const HEATER_T = 10; // heater (warm) and AC (cool) use equal magnitude
+const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 
 export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
