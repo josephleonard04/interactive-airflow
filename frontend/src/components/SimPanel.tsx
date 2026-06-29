@@ -116,30 +116,32 @@ function Legend({ mode }: { mode: SimMode }) {
   if (mode === "temperature") {
     return (
       <div style={{ marginTop: 10 }}>
-        <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg,#3b82f6,#f3eee6,#d9534f)" }} />
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Air temperature</div>
+        <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#1f5fe0,#bcd0f0,#f4efe8,#f0a06a,#d63b22)" }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>Cool</span>
-          <span>Warm</span>
+          <span>Cooler</span>
+          <span>Warmer</span>
         </div>
-        <p className="muted-line" style={{ marginTop: 6 }}>Spreads to rooms with an open door; walls &amp; closed doors block it.</p>
+        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls.</p>
       </div>
     );
   }
   if (mode === "contamination") {
     return (
       <div style={{ marginTop: 10 }}>
-        <div style={{ height: 10, borderRadius: 5, background: "linear-gradient(90deg,#efe7fb,#a855f7,#6b21a8)" }} />
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Contaminant concentration</div>
+        <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#efe7fb,#c9a0f0,#8a3fd0,#5a1d96)" }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>Weak smell</span>
-          <span>Strong smell</span>
+          <span>Low</span>
+          <span>High</span>
         </div>
-        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow through open doors; closed doors keep it out.</p>
+        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls.</p>
       </div>
     );
   }
   return (
     <p className="muted-line" style={{ marginTop: 10 }}>
-      Drifting dots follow the settled airflow — watch where the air moves. AC &amp; fans push it; open windows let it out.
+      Dots show air streaming from the AC; it travels through open doors and leaves by open windows &amp; the entrance.
     </p>
   );
 }
