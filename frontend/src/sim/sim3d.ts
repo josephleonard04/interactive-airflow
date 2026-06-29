@@ -146,7 +146,9 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
         if (sim.solid[c]) sim.solid[c] = 0;
-        seeds.push(cellCenter(i, j, k));
+        // only AC / supply generate air → seed airflow particles here; a fan only
+        // pushes existing air, so it is not a particle source
+        if (isAC || isSupply) seeds.push(cellCenter(i, j, k));
         if (isFan) {
           // recirculating: two opposite faces (net-zero mass)
           if (dir[0] !== 0) { const a = sim.uIdx(i, j, k), b = sim.uIdx(i + 1, j, k); sim.uFixed[a] = sim.uFixed[b] = 1; sim.uVal[a] = sim.uVal[b] = dir[0] * speed; }

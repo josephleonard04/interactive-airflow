@@ -69,10 +69,12 @@ export function FlowField3D() {
     const { sim, nx, ny, nz, dx, cellCenter, seeds } = built;
     return (p: number) => {
       let pos: [number, number, number] | null = null;
-      if (seeds.length && Math.random() < 0.7) {
+      if (seeds.length) {
+        // air originates at the AC / supply vents — always seed there
         const s = seeds[(Math.random() * seeds.length) | 0];
         pos = [s[0] + (Math.random() - 0.5) * dx, s[1] + (Math.random() - 0.5) * dx, s[2] + (Math.random() - 0.5) * dx];
       } else {
+        // no air source: show ambient room air (e.g. a fan just pushing it around)
         for (let t = 0; t < 25; t++) {
           const i = (Math.random() * nx) | 0, j = (Math.random() * ny) | 0, k = (Math.random() * nz) | 0;
           const c = sim.cIdx(i, j, k);
@@ -120,15 +122,19 @@ export function FlowField3D() {
       for (let i = 0; i < nx && n < MAX_HAZE; i++) {
         const q = i + nx * k;
         if (!colN[q]) continue;
-        const t = colSum[q] / colN[q] / mx; // normalized
+        const t = colSum[q] / colN[q] / mx; // normalized −1..1 (temp) or 0..1 (smell)
         let r: number, g: number, b: number;
         if (mode === "temperature") {
-          const a = Math.abs(t);
-          if (a < 0.03) continue;
-          if (t > 0) { r = 0.95; g = 0.85 - 0.62 * a; b = 0.82 - 0.64 * a; } else { r = 0.82 - 0.64 * a; g = 0.88 - 0.42 * a; b = 0.97; }
+          let a = Math.abs(t);
+          if (a < 0.02) continue;
+          a = Math.sqrt(a); // perceptual boost so even mild differences read
+          if (t > 0) { r = 0.96; g = 0.60 - 0.5 * a; b = 0.32 - 0.24 * a; } // light orange → deep red
+          else { r = 0.30 - 0.22 * a; g = 0.55 - 0.12 * a; b = 0.96; } // light blue → deep blue
         } else {
-          if (t < 0.03) continue;
-          r = 0.92 - 0.4 * t; g = 0.82 - 0.62 * t; b = 0.97 - 0.04 * t;
+          let a = t;
+          if (a < 0.02) continue;
+          a = Math.sqrt(a);
+          r = 0.80 - 0.50 * a; g = 0.52 - 0.45 * a; b = 0.96 - 0.06 * a; // light lavender → deep violet
         }
         const [wx, , wz] = cellCenter(i, 0, k);
         hazePos[n * 3] = wx; hazePos[n * 3 + 1] = Y0; hazePos[n * 3 + 2] = wz;
@@ -201,7 +207,7 @@ export function FlowField3D() {
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.0} opacity={0.5} />
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.2} opacity={0.62} />
       </points>
 
       <points ref={headRef} frustumCulled={false} visible={false}>
