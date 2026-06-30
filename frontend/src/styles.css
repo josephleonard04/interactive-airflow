@@ -1,16 +1,19 @@
 :root {
-  /* warm, cozy "home-designer game" theme */
-  --bg: #ece2d2;
-  --panel: #fffdf8;
-  --panel-2: #f5ecdc;
-  --line: #e6dac6;
-  --text: #4a3f33;
-  --muted: #9a8b78;
-  --accent: #f0a04b;
-  --accent-ink: #4a3220;
-  --accent-soft: #fdeede;
-  --danger: #d9534f;
-  --danger-soft: #fdeceb;
+  /* clean cream + teal "airflow studio" theme (Prof. Xie style) */
+  --bg: #eef1ea;
+  --panel: #f8f6ee;
+  --panel-2: #edf0e8;
+  --line: #e1e5db;
+  --text: #26312d;
+  --muted: #5d6763;
+  --accent: #2a9d8f;
+  --accent-strong: #156d63;
+  --accent-shadow: #1f8478;
+  --accent-ink: #ffffff;
+  --accent-soft: #e0f1ed;
+  --accent-ink-soft: #156d63;
+  --danger: #c0392b;
+  --danger-soft: #fadbd8;
   --furniture: #b79e7d;
   --supply: #3b82f6;
   --return: #f59e0b;
@@ -112,11 +115,11 @@ button.primary {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
-  box-shadow: 0 3px 0 #d4843a;
+  box-shadow: 0 3px 0 var(--accent-shadow);
 }
 
 button.primary:active {
-  box-shadow: 0 1px 0 #d4843a;
+  box-shadow: 0 1px 0 var(--accent-shadow);
 }
 
 .list {
@@ -232,7 +235,7 @@ button.tool {
 button.tool.active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: #9a5a1a;
+  color: var(--accent-ink-soft);
 }
 
 .banner {
@@ -242,7 +245,7 @@ button.tool.active {
   background: var(--accent-soft);
   border: 1px solid var(--accent);
   border-radius: 9px;
-  color: #9a5a1a;
+  color: var(--accent-ink-soft);
 }
 
 /* selected box */
@@ -395,7 +398,7 @@ button.toggle {
 button.toggle.on {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: #9a5a1a;
+  color: var(--accent-ink-soft);
 }
 
 .op-ico {
@@ -607,11 +610,11 @@ button.setup-go {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: var(--accent);
-  box-shadow: 0 3px 0 #d4843a;
+  box-shadow: 0 3px 0 var(--accent-shadow);
 }
 
 button.setup-go:active {
-  box-shadow: 0 1px 0 #d4843a;
+  box-shadow: 0 1px 0 var(--accent-shadow);
 }
 
 .setup-foot {

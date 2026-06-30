@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
-import { useSceneStore, type SimMode, type SimEngine } from "../scene/store";
+import { useSceneStore, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
+
+const PRESETS: Array<{ id: AirflowPreset; label: string; hint: string }> = [
+  { id: "comfort", label: "Comfort", hint: "Balanced AC + fan" },
+  { id: "cooling", label: "Cooling", hint: "AC high, gentle fan" },
+  { id: "purge", label: "Purge", hint: "Max fresh air" },
+];
+
+const INTENT_TEMPLATES = [
+  "Keep my bedroom cool",
+  "Keep the kitchen smell out of the bedroom",
+  "Warm up the living room",
+];
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
 // 3D house via FlowField3D). Pressing Simulate runs the sim directly on the home
@@ -24,6 +36,7 @@ export function SimPanel() {
   const setEngine = useSceneStore((s) => s.setEngine);
   const runAccurate = useSceneStore((s) => s.runAccurate);
   const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
+  const applyAirflowPreset = useSceneStore((s) => s.applyAirflowPreset);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
   useEffect(() => {
@@ -35,9 +48,9 @@ export function SimPanel() {
 
   // Plain-language goal → physical objectives → checked against the result, and
   // the matching view is shown so the user sees what's happening.
-  const checkGoal = () => {
-    if (!goal.trim()) return;
-    const evals = evaluateGoal(goal, plan);
+  const checkGoalText = (text: string) => {
+    if (!text.trim()) return;
+    const evals = evaluateGoal(text, plan);
     setResults(evals);
     const first = evals[0]?.objective;
     if (first) {
@@ -45,6 +58,7 @@ export function SimPanel() {
       else { setSimMode("contamination"); if (first.sourceId) setSource(first.sourceId); }
     }
   };
+  const checkGoal = () => checkGoalText(goal);
 
   if (!active) {
     return (
@@ -129,6 +143,17 @@ export function SimPanel() {
       )}
 
       <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Quick presets</div>
+        <div className="tools">
+          {PRESETS.map((p) => (
+            <button key={p.id} className="tool" onClick={() => applyAirflowPreset(p.id)} title={p.hint}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Ask in plain language</div>
         <div style={{ display: "flex", gap: 6 }}>
           <input
@@ -140,10 +165,29 @@ export function SimPanel() {
           />
           <button className="tool" onClick={checkGoal}>Check</button>
         </div>
+        <div className="chips" style={{ marginTop: 6 }}>
+          {INTENT_TEMPLATES.map((t) => (
+            <button key={t} className="chip" style={{ fontSize: 11 }} onClick={() => { setGoal(t); checkGoalText(t); }}>
+              {t}
+            </button>
+          ))}
+        </div>
         {results.map((r, i) => (
-          <p key={i} className="muted-line" style={{ marginTop: 6, color: r.satisfied === null ? "var(--muted)" : r.satisfied ? "#2e7d32" : "#c0392b" }}>
-            {r.summary}
-          </p>
+          <div
+            key={i}
+            style={{
+              marginTop: 8,
+              padding: "8px 10px",
+              borderRadius: 9,
+              border: "1px solid var(--line)",
+              background: "#fff",
+              borderLeft: `3px solid ${r.satisfied === null ? "var(--muted)" : r.satisfied ? "#2a9d8f" : "#c0392b"}`,
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, color: r.satisfied === null ? "var(--muted)" : r.satisfied ? "#156d63" : "#c0392b" }}>
+              {r.summary}
+            </span>
+          </div>
         ))}
       </div>
 
