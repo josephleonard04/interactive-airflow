@@ -70,6 +70,13 @@ export type ScalarSource = {
 const roomWidth = 9.8
 const roomDepth = 7.2
 const roomHeight = 2.8
+
+// Canonical room dimensions in metres, shared by both simulation engines
+// (the real-time Stable Fluids solver and the accurate OpenFOAM exporter) so
+// the two always describe the same physical room. X = width, Z = depth,
+// Y = height. The world origin sits at the room-floor centre.
+export const ROOM = { width: roomWidth, depth: roomDepth, height: roomHeight } as const
+
 const solveIterations = 8
 const scalarKeys: ScalarFieldKey[] = ['temperature', 'humidity', 'pm25', 'co2', 'noise']
 const scalarAmbient: Record<ScalarFieldKey, number> = {
