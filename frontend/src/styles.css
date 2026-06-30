@@ -38,7 +38,7 @@ body {
 
 .app {
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: 1fr 360px;
   height: 100vh;
 }
 
@@ -50,7 +50,7 @@ body {
 
 .panel {
   background: var(--panel);
-  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   padding: 18px;
   overflow-y: auto;
 }

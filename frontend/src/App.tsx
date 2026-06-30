@@ -11,11 +11,11 @@ export function App() {
 
   return (
     <div className="app">
-      <Panel />
       <main className="viewport">
         <Editor />
         <SimPanel />
       </main>
+      <Panel />
     </div>
   );
 }

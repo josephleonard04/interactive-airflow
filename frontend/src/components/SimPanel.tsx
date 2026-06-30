@@ -268,11 +268,11 @@ function Legend({ mode }: { mode: SimMode }) {
   );
 }
 
-const btn: React.CSSProperties = { position: "absolute", top: 14, right: 14, zIndex: 10 };
+const btn: React.CSSProperties = { position: "absolute", top: 14, left: 14, zIndex: 10 };
 const panel: React.CSSProperties = {
   position: "absolute",
   top: 14,
-  right: 14,
+  left: 14,
   zIndex: 10,
   width: 250,
   background: "var(--panel)",
