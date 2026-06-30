@@ -1243,3 +1243,227 @@ g.sketch-shape circle {
   background: #c0392b;
   box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.14);
 }
+
+/* ---- Setup screen (choose room size) ---- */
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(120% 120% at 50% 0%, #f3f5ef 0%, #e7ebe1 60%, #dfe4d8 100%);
+}
+
+.setup-card {
+  width: min(520px, 100%);
+  padding: 30px 32px 26px;
+  border-radius: 18px;
+  border: 1px solid rgba(50, 60, 56, 0.12);
+  background: #ffffff;
+  box-shadow: 0 30px 70px rgba(31, 41, 37, 0.18);
+}
+
+.setup-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #2a9d8f;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.setup-title {
+  margin: 10px 0 6px;
+  color: #18201d;
+  font-size: 27px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.setup-sub {
+  margin: 0 0 20px;
+  color: #5b6660;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.setup-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+
+.setup-preset {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  padding: 12px 13px;
+  border: 1px solid rgba(50, 60, 56, 0.16);
+  border-radius: 11px;
+  background: #f8faf6;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.setup-preset:hover {
+  border-color: rgba(42, 157, 143, 0.5);
+  transform: translateY(-1px);
+}
+
+.setup-preset.active {
+  border-color: rgba(42, 157, 143, 0.8);
+  background: #e3f3ee;
+}
+
+.setup-preset strong {
+  color: #1f2925;
+  font-size: 14px;
+}
+
+.setup-preset span {
+  color: #6a756f;
+  font-size: 10.5px;
+}
+
+.setup-unit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.setup-section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #46524d;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.setup-unit {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 8px;
+  background: #edf0e8;
+}
+
+.setup-unit button {
+  min-width: 38px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 6px;
+  color: #5d6763;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.setup-unit button.selected {
+  color: #1f2925;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(31, 41, 37, 0.08);
+}
+
+.setup-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.setup-field {
+  display: grid;
+  gap: 6px;
+}
+
+.setup-field-label {
+  color: #1f2925;
+  font-size: 12.5px;
+  font-weight: 760;
+}
+
+.setup-input-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(50, 60, 56, 0.2);
+  border-radius: 9px;
+  background: #f8faf6;
+  overflow: hidden;
+}
+
+.setup-input-wrap:focus-within {
+  border-color: rgba(42, 157, 143, 0.65);
+  background: #ffffff;
+}
+
+.setup-input-wrap input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 4px 9px 11px;
+  border: 0;
+  background: transparent;
+  color: #1f2925;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.setup-input-wrap input:focus {
+  outline: none;
+}
+
+.setup-unit-suffix {
+  padding-right: 10px;
+  color: #8a948e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.setup-field-hint {
+  color: #8a948e;
+  font-size: 10.5px;
+}
+
+.setup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.setup-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #46524d;
+  font-size: 12.5px;
+  font-weight: 720;
+}
+
+.setup-start {
+  padding: 12px 24px;
+  border: 0;
+  border-radius: 10px;
+  color: #ffffff;
+  background: #2a9d8f;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.setup-start:hover {
+  background: #218477;
+  transform: translateY(-1px);
+}

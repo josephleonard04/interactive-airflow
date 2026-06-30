@@ -23,3 +23,10 @@ export type ObjectTransform = {
   position: [number, number, number]
   rotation: [number, number, number]
 }
+
+/** User-chosen room size in metres. width = X, depth = Z, height = Y. */
+export type RoomDimensions = {
+  width: number
+  depth: number
+  height: number
+}

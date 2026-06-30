@@ -23,8 +23,9 @@ import {
   Zap,
 } from 'lucide-react'
 import './App.css'
-import { createSampler, type DeviceKey, type DeviceState } from './stableFluidSolver'
+import { createSampler, ROOM, type DeviceKey, type DeviceState } from './stableFluidSolver'
 import { useStableFluidAirflow } from './hooks/useStableFluidAirflow'
+import { SetupScreen } from './components/SetupScreen'
 import { buildAirflowCase } from './engine/airflowCase'
 import { exportOpenFoamCase } from './engine/openfoam/exportCase'
 import {
@@ -66,6 +67,7 @@ import type {
   EditableObjectKey,
   FlowDisplayMode,
   ObjectTransform,
+  RoomDimensions,
   ScalarOverlayMode,
   ScalarOverlaySlice,
   TransformMode,
@@ -125,6 +127,12 @@ function App() {
   const [objectTransforms, setObjectTransforms] =
     useState<Record<EditableObjectKey, ObjectTransform>>(initialObjectTransforms)
   const [autoFanSweep, setAutoFanSweep] = useState(false)
+  const [started, setStarted] = useState(false)
+  const [roomDims, setRoomDims] = useState<RoomDimensions>({
+    width: ROOM.width,
+    depth: ROOM.depth,
+    height: ROOM.height,
+  })
   const [engine, setEngine] = useState<'realtime' | 'openfoam'>('realtime')
   const [ofResult, setOfResult] = useState<OpenFoamResult | null>(null)
   const [ofRunning, setOfRunning] = useState(false)
@@ -186,6 +194,14 @@ function App() {
   const intentGroundings = useMemo(
     () => buildIntentGroundings(intentSession, objectTransforms),
     [intentSession, objectTransforms],
+  )
+
+  // The scene is authored at ROOM dims; render it inside a group scaled to the
+  // user's chosen size. The solver runs on a fixed grid, so scaling the world
+  // keeps the simulation consistent while showing the room at the right size.
+  const roomScale = useMemo<[number, number, number]>(
+    () => [roomDims.width / ROOM.width, roomDims.height / ROOM.height, roomDims.depth / ROOM.depth],
+    [roomDims.width, roomDims.height, roomDims.depth],
   )
 
   const fanSpeed = devices.fan.enabled ? devices.fan.speed : 0
@@ -379,6 +395,14 @@ function App() {
 
   return (
     <main className={isPanelCollapsed ? 'app-shell panel-collapsed' : 'app-shell'}>
+      {!started && (
+        <SetupScreen
+          onStart={(dims) => {
+            setRoomDims(dims)
+            setStarted(true)
+          }}
+        />
+      )}
       <section className="workspace">
         <header className="topbar">
           <div>
@@ -534,38 +558,44 @@ function App() {
             data-testid="room-canvas"
             onPointerMissed={() => setSelectedObject(null)}
           >
-            <SceneCameraRig view={cameraView} />
+            <SceneCameraRig view={cameraView} scale={roomScale} />
             <color attach="background" args={['#eef1ea']} />
             <ambientLight intensity={0.72} />
             <directionalLight castShadow position={[3, 5.5, 4]} intensity={1.25} shadow-mapSize={[2048, 2048]} />
             <spotLight position={[-4.5, 4.5, 2.5]} angle={0.48} penumbra={0.45} intensity={0.56} />
-            <AirflowScene
-              devices={devices}
-              flowDisplayMode={flowDisplayMode}
-              lineDensity={lineDensity}
-              mode={transformMode}
-              onSelect={setSelectedObject}
-              scalarOverlayMode={scalarOverlayMode}
-              scalarOverlaySlice={scalarOverlaySlice}
-              intentGroundings={intentGroundings}
-              onTransformActiveChange={setIsTransforming}
-              onTransformChange={updateObjectTransform}
-              sampler={activeSampler}
-              selectedId={selectedObject}
-              showFlowMap={showFlowMap}
-              snapshot={activeSnapshot}
-              transforms={objectTransforms}
-              wallOpacity={wallOpacity}
-            />
-            <ContactShadows position={[0, 0.015, 0]} opacity={0.22} scale={9} blur={2.5} far={3.2} />
+            <group scale={roomScale}>
+              <AirflowScene
+                devices={devices}
+                flowDisplayMode={flowDisplayMode}
+                lineDensity={lineDensity}
+                mode={transformMode}
+                onSelect={setSelectedObject}
+                scalarOverlayMode={scalarOverlayMode}
+                scalarOverlaySlice={scalarOverlaySlice}
+                intentGroundings={intentGroundings}
+                onTransformActiveChange={setIsTransforming}
+                onTransformChange={updateObjectTransform}
+                sampler={activeSampler}
+                selectedId={selectedObject}
+                showFlowMap={showFlowMap}
+                snapshot={activeSnapshot}
+                transforms={objectTransforms}
+                wallOpacity={wallOpacity}
+              />
+              <ContactShadows position={[0, 0.015, 0]} opacity={0.22} scale={9} blur={2.5} far={3.2} />
+            </group>
             <Environment preset="apartment" />
             <OrbitControls
               enablePan={false}
               enabled={!isTransforming}
-              maxDistance={16}
+              maxDistance={16 * roomScale[0]}
               maxPolarAngle={Math.PI / 2.05}
-              minDistance={4.2}
-              target={cameraViews[cameraView].target}
+              minDistance={4.2 * Math.min(...roomScale)}
+              target={[
+                cameraViews[cameraView].target[0] * roomScale[0],
+                cameraViews[cameraView].target[1] * roomScale[1],
+                cameraViews[cameraView].target[2] * roomScale[2],
+              ]}
             />
           </Canvas>
         </div>
