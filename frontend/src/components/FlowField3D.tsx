@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
+import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
 import { buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
@@ -58,7 +59,7 @@ export function FlowField3D() {
 
   const steps = useRef(0);
   const converged = useRef(false);
-  const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array } | null>(null);
+  const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array; noise: Float32Array } | null>(null);
   const [ready, setReady] = useState(false);
   const [paths, setPaths] = useState<StreamlinePaths | null>(null);
 
@@ -117,7 +118,7 @@ export function FlowField3D() {
     if (mode === "airflow" || !F) { haze.visible = false; return; }
     const { sim, nx, ny, nz, cellCenter } = built;
     const ambient = built.ambient;
-    const field = mode === "temperature" ? F.temp : F.smell;
+    const field = mode === "temperature" ? F.temp : mode === "noise" ? F.noise : F.smell;
     // column average over height → a 2D (x,z) map
     const colSum = new Float64Array(nx * nz);
     const colN = new Int32Array(nx * nz);
@@ -147,6 +148,12 @@ export function FlowField3D() {
           a = Math.sqrt(a); // perceptual boost so even mild differences read
           if (t > 0) { r = 0.96; g = 0.60 - 0.5 * a; b = 0.32 - 0.24 * a; } // light orange → deep red
           else { r = 0.30 - 0.22 * a; g = 0.55 - 0.12 * a; b = 0.96; } // light blue → deep blue
+        } else if (mode === "noise") {
+          let a = t;
+          if (a < 0.04) continue;
+          a = Math.sqrt(a); // green (quiet) → yellow → red (loud)
+          if (a < 0.5) { const u = a / 0.5; r = 0.13 + 0.85 * u; g = 0.77 + 0.03 * u; b = 0.37 - 0.29 * u; }
+          else { const u = (a - 0.5) / 0.5; r = 0.98 - 0.12 * u; g = 0.80 - 0.65 * u; b = 0.08 + 0.06 * u; }
         } else {
           let a = t;
           if (a < 0.02) continue;
@@ -177,6 +184,7 @@ export function FlowField3D() {
         fieldsRef.current = {
           temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
           smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+          noise: computeNoiseField(plan, built),
         };
         converged.current = true;
         buildPaths();
@@ -191,6 +199,7 @@ export function FlowField3D() {
         fieldsRef.current = {
           temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
           smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+          noise: computeNoiseField(plan, built),
         };
         converged.current = true;
         buildPaths();

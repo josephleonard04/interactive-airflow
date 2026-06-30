@@ -215,9 +215,9 @@ export function SimPanel() {
       </div>
 
       <div className="tools">
-        {(["airflow", "temperature", "contamination"] as SimMode[]).map((m) => (
+        {(["airflow", "temperature", "contamination", "noise"] as SimMode[]).map((m) => (
           <button key={m} className={mode === m ? "tool active" : "tool"} onClick={() => setSimMode(m)}>
-            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : "Smell"}
+            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : m === "contamination" ? "Smell" : "Noise"}
           </button>
         ))}
       </div>
@@ -280,7 +280,20 @@ function Legend({ mode }: { mode: SimMode }) {
           <span>Low</span>
           <span>High</span>
         </div>
-        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls.</p>
+        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls. Lower near open windows &amp; vents.</p>
+      </div>
+    );
+  }
+  if (mode === "noise") {
+    return (
+      <div style={{ marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Appliance noise</div>
+        <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#22c55e,#facc15,#dc2626)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+          <span>Quiet</span>
+          <span>Loud</span>
+        </div>
+        <p className="muted-line" style={{ marginTop: 6 }}>Radiates from running appliances (AC, fan, heater, fridge, TV); fades with distance and through walls.</p>
       </div>
     );
   }

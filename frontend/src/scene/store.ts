@@ -197,7 +197,7 @@ export const PRESETS: Record<AirflowPreset, PresetSpec> = {
   },
 };
 
-export type SimMode = "airflow" | "temperature" | "contamination";
+export type SimMode = "airflow" | "temperature" | "contamination" | "noise";
 
 let customId = 0;
 const HISTORY = 50;
