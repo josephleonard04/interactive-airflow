@@ -33,6 +33,9 @@ export function SimPanel() {
   const runAccurate = useSceneStore((s) => s.runAccurate);
   const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
   const applyAirflowPreset = useSceneStore((s) => s.applyAirflowPreset);
+  const pendingChange = useSceneStore((s) => s.pendingChange);
+  const acceptChange = useSceneStore((s) => s.acceptChange);
+  const cancelChange = useSceneStore((s) => s.cancelChange);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
   useEffect(() => {
@@ -138,49 +141,73 @@ export function SimPanel() {
         </div>
       )}
 
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Quick presets</div>
-        <div className="chips">
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>Quick presets</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
           {PRESET_IDS.map((id) => (
-            <button key={id} className="chip" onClick={() => applyAirflowPreset(id)} title={PRESETS[id].hint}>
-              {PRESETS[id].label}
+            <button
+              key={id}
+              onClick={() => applyAirflowPreset(id)}
+              title={PRESETS[id].hint}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3,
+                textAlign: "left", padding: "10px 11px", borderRadius: 11, lineHeight: 1.25,
+              }}
+            >
+              <strong style={{ fontSize: 13 }}>{PRESETS[id].label}</strong>
+              <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 500 }}>{PRESETS[id].hint.split(":")[0].split(",")[0]}</span>
             </button>
           ))}
         </div>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Ask in plain language</div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") checkGoal(); }}
-            placeholder="e.g. keep my bedroom cool"
-            style={{ flex: 1, minWidth: 0, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", fontSize: 12, color: "var(--text)" }}
-          />
-          <button className="tool" onClick={checkGoal}>Check</button>
+      {pendingChange && (
+        <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, border: "1px solid var(--accent)", background: "var(--accent-soft)" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent-ink-soft)", marginBottom: 6 }}>
+            “{pendingChange.title}” — review changes
+          </div>
+          <ul style={{ margin: "0 0 10px", paddingLeft: 16, fontSize: 12, color: "var(--text)", lineHeight: 1.6 }}>
+            {pendingChange.lines.map((l, i) => <li key={i}>{l}</li>)}
+          </ul>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="primary" style={{ flex: 1 }} onClick={acceptChange}>Accept</button>
+            <button className="tool" style={{ flex: 1 }} onClick={acceptChange} title="Keep the changes and tweak them yourself">Modify</button>
+            <button className="tool" style={{ flex: 1 }} onClick={cancelChange} title="Undo this preset">Cancel</button>
+          </div>
         </div>
-        <div className="chips" style={{ marginTop: 6 }}>
+      )}
+
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>Ask in plain language</div>
+        <textarea
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) checkGoal(); }}
+          placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
+          rows={3}
+          style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
+        />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
           {INTENT_TEMPLATES.map((t) => (
             <button key={t} className="chip" style={{ fontSize: 11 }} onClick={() => { setGoal(t); checkGoalText(t); }}>
               {t}
             </button>
           ))}
+          <button className="primary" style={{ marginLeft: "auto" }} onClick={checkGoal}>Check</button>
         </div>
         {results.map((r, i) => (
           <div
             key={i}
             style={{
               marginTop: 8,
-              padding: "8px 10px",
-              borderRadius: 9,
+              padding: "9px 11px",
+              borderRadius: 10,
               border: "1px solid var(--line)",
               background: "#fff",
               borderLeft: `3px solid ${r.satisfied === null ? "var(--muted)" : r.satisfied ? "#2a9d8f" : "#c0392b"}`,
             }}
           >
-            <span style={{ fontSize: 12, fontWeight: 700, color: r.satisfied === null ? "var(--muted)" : r.satisfied ? "#156d63" : "#c0392b" }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: r.satisfied === null ? "var(--muted)" : r.satisfied ? "#156d63" : "#c0392b" }}>
               {r.summary}
             </span>
           </div>
@@ -270,7 +297,9 @@ const panel: React.CSSProperties = {
   top: 14,
   left: 14,
   zIndex: 10,
-  width: 250,
+  width: 300,
+  maxHeight: "calc(100vh - 28px)",
+  overflowY: "auto",
   background: "var(--panel)",
   border: "1px solid var(--line)",
   borderRadius: 14,

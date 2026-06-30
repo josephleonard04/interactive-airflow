@@ -101,6 +101,15 @@ export interface SceneState {
 
   /** One-click device presets (set on/power across all HVAC). */
   applyAirflowPreset: (preset: AirflowPreset) => void;
+  /** Summary of the last preset's changes, pending Accept/Cancel. */
+  pendingChange: PendingChange | null;
+  acceptChange: () => void;
+  cancelChange: () => void;
+}
+
+export interface PendingChange {
+  title: string;
+  lines: string[];
 }
 
 export type SimEngine = "realtime" | "openfoam";
@@ -258,7 +267,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   applyAirflowPreset: (preset) =>
     set((s) => {
       const spec = PRESETS[preset];
-      const items = s.plan.items.map((it) => {
+      const before = s.plan;
+      const items = before.items.map((it) => {
         const d = spec.devices[it.type];
         if (!d) return it;
         return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
@@ -269,17 +279,50 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
         return open === o.open ? o : { ...o, open };
       };
+      const after = {
+        ...before,
+        items,
+        doors: before.doors.map(setOpen),
+        windows: before.windows.map(setOpen),
+        walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
+      };
+
+      // Human-readable diff for the Accept/Cancel review.
+      const lines: string[] = [];
+      const names: Record<string, string> = { ac: "AC", fan: "Fan", supply: "Vent", heater: "Heater" };
+      const powerWord = ["", "low", "medium", "high"];
+      for (const it of after.items) {
+        const b = before.items.find((x) => x.id === it.id);
+        if (!b || !names[it.type]) continue;
+        if (b.on === it.on && b.power === it.power && b.oscillate === it.oscillate) continue;
+        const on = it.on !== false;
+        const osc = it.type === "fan" && it.oscillate ? ", oscillating" : "";
+        lines.push(`${names[it.type]} → ${on ? `on · ${powerWord[it.power ?? 2]}${osc}` : "off"}`);
+      }
+      const cnt = (arr: Opening[], base: Opening[], open: boolean) =>
+        arr.filter((o, i) => o.open === open && base[i]?.open !== open).length;
+      const dOpen = cnt(after.doors, before.doors, true);
+      const dShut = cnt(after.doors, before.doors, false);
+      const wOpen = cnt(after.windows, before.windows, true);
+      const wShut = cnt(after.windows, before.windows, false);
+      if (dOpen) lines.push(`Opened ${dOpen} interior door${dOpen > 1 ? "s" : ""}`);
+      if (dShut) lines.push(`Closed ${dShut} door${dShut > 1 ? "s" : ""}`);
+      if (wOpen) lines.push(`Opened ${wOpen} window${wOpen > 1 ? "s" : ""}`);
+      if (wShut) lines.push(`Closed ${wShut} window${wShut > 1 ? "s" : ""}`);
+
       return {
         ...snapshot(s),
-        plan: {
-          ...s.plan,
-          items,
-          doors: s.plan.doors.map(setOpen),
-          windows: s.plan.windows.map(setOpen),
-          walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
-        },
+        plan: after,
+        pendingChange: { title: spec.label, lines: lines.length ? lines : ["Already set — no change."] },
       };
     }),
+
+  pendingChange: null,
+  acceptChange: () => set({ pendingChange: null }),
+  cancelChange: () => {
+    get().undo();
+    set({ pendingChange: null });
+  },
 
   generate: (size, mode) =>
     set({
