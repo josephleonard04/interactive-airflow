@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useSceneStore, type SimMode } from "../scene/store";
+import { useEffect, useState } from "react";
+import { useSceneStore, type SimMode, type SimEngine } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -17,7 +17,18 @@ export function SimPanel() {
   const setSource = useSceneStore((s) => s.setSimSource);
   const addItem = useSceneStore((s) => s.addItem);
   const selectItem = useSceneStore((s) => s.selectItem);
+  const engine = useSceneStore((s) => s.engine);
+  const accurate = useSceneStore((s) => s.accurate);
+  const accurateRunning = useSceneStore((s) => s.accurateRunning);
+  const accurateHealth = useSceneStore((s) => s.accurateHealth);
+  const setEngine = useSceneStore((s) => s.setEngine);
+  const runAccurate = useSceneStore((s) => s.runAccurate);
+  const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
+
+  useEffect(() => {
+    if (engine === "openfoam") refreshAccurateHealth();
+  }, [engine, refreshAccurateHealth]);
 
   const [goal, setGoal] = useState("");
   const [results, setResults] = useState<Evaluation[]>([]);
@@ -49,6 +60,73 @@ export function SimPanel() {
         <strong style={{ fontSize: 13 }}>Airflow simulation</strong>
         <button className="ghost" onClick={toggleSim}>✕</button>
       </div>
+
+      <div style={{ display: "flex", gap: 4, marginBottom: 10, background: "#eef0ea", borderRadius: 8, padding: 3 }}>
+        {(["realtime", "openfoam"] as SimEngine[]).map((e) => (
+          <button
+            key={e}
+            className={engine === e ? "tool active" : "tool"}
+            style={{ flex: 1 }}
+            onClick={() => setEngine(e)}
+            title={e === "realtime" ? "Live in-browser solver" : "Accurate OpenFOAM CFD (runs on the local backend)"}
+          >
+            {e === "realtime" ? "⚡ Real-time" : "🧪 Accurate"}
+          </button>
+        ))}
+      </div>
+
+      {engine === "openfoam" && (
+        <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: "#f7f5ef", border: "1px solid var(--line)" }}>
+          <button className="primary" style={{ width: "100%" }} disabled={accurateRunning} onClick={runAccurate}>
+            {accurateRunning ? "Running CFD…" : accurate ? "↻ Re-run accurate (OpenFOAM)" : "▶ Run accurate (OpenFOAM)"}
+          </button>
+          {accurate && (
+            <div style={{ marginTop: 8 }}>
+              <span
+                style={{
+                  display: "inline-block",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  background: accurate.status === "ok" ? "#def3ed" : accurate.status === "mock" ? "#fdf0d8" : "#fadbd8",
+                  color: accurate.status === "ok" ? "#146a5f" : accurate.status === "mock" ? "#9a6a16" : "#a23226",
+                }}
+              >
+                {accurate.status === "ok" ? "CFD result" : accurate.status === "mock" ? "preview (no OpenFOAM)" : "error"}
+              </span>
+              {accurate.message && <p className="muted-line" style={{ marginTop: 6 }}>{accurate.message}</p>}
+              <p className="muted-line" style={{ marginTop: 6 }}>
+                Flux balance: {accurate.balance.inflow.toFixed(2)} in / {accurate.balance.outflow.toFixed(2)} out m³/s
+                {accurate.balance.balanced ? " ✓" : " ⚠"}
+              </p>
+              {accurate.balance.note && <p className="muted-line" style={{ marginTop: 4, color: "#9a6a16" }}>{accurate.balance.note}</p>}
+              {accurate.seconds != null && (
+                <p className="muted-line" style={{ marginTop: 4 }}>
+                  {accurate.status === "ok" ? "Solved" : "Computed"} in {accurate.seconds}s
+                </p>
+              )}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10, fontSize: 11, color: "var(--muted)" }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: accurateHealth?.reachable ? (accurateHealth.openfoam ? "#2a9d8f" : "#d9a514") : "#c0392b",
+              }}
+            />
+            {accurateHealth == null
+              ? "Checking backend…"
+              : !accurateHealth.reachable
+                ? "Backend offline — run backend\\run.ps1"
+                : accurateHealth.openfoam
+                  ? `Backend online · OpenFOAM ready${accurateHealth.version ? ` (${accurateHealth.version})` : ""}`
+                  : "Backend online · OpenFOAM not installed (preview)"}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Ask in plain language</div>
