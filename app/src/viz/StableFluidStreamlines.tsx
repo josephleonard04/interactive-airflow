@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
+import { Line } from '@react-three/drei'
 import type { ObjectTransform } from '../state/appTypes'
-import { buildStreamlineGeometry, type AirflowSampler } from './airflowVizHelpers'
+import { buildStreamlinePaths, type AirflowSampler } from './airflowVizHelpers'
 
 export function StableFluidStreamlines({
   color,
@@ -21,16 +22,35 @@ export function StableFluidStreamlines({
   speed: number
   spread: number
 }) {
-  const geometry = useMemo(
-    () => buildStreamlineGeometry({ density, enabled, fanTransform, origin, sampler, speed, spread }),
-    [density, enabled, fanTransform.rotation[1], origin[0], origin[1], origin[2], sampler, speed, spread],
+  const { points, colors } = useMemo(
+    () => buildStreamlinePaths({ density, enabled, fanTransform, origin, sampler, speed, spread, color }),
+    [density, enabled, fanTransform.rotation[1], origin[0], origin[1], origin[2], sampler, speed, spread, color],
   )
 
-  useEffect(() => () => geometry.dispose(), [geometry])
+  if (points.length === 0) return null
 
+  // Two passes: a soft wide halo for glow + a crisp bright core. Both are
+  // anti-aliased fat lines (Line2) coloured by local flow speed.
   return (
-    <lineSegments geometry={geometry}>
-      <lineBasicMaterial color={color} transparent opacity={0.82} depthWrite={false} />
-    </lineSegments>
+    <group>
+      <Line
+        points={points}
+        segments
+        vertexColors={colors}
+        lineWidth={5.4}
+        transparent
+        opacity={0.16}
+        depthWrite={false}
+      />
+      <Line
+        points={points}
+        segments
+        vertexColors={colors}
+        lineWidth={2.1}
+        transparent
+        opacity={0.94}
+        depthWrite={false}
+      />
+    </group>
   )
 }
