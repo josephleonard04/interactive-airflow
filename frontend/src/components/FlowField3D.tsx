@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
+import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
+import { buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -58,6 +60,7 @@ export function FlowField3D() {
   const converged = useRef(false);
   const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array } | null>(null);
   const [ready, setReady] = useState(false);
+  const [paths, setPaths] = useState<StreamlinePaths | null>(null);
 
   useEffect(() => {
     const room = plan.rooms.find((r) => r.id === sourceRoomId) ?? null;
@@ -65,8 +68,15 @@ export function FlowField3D() {
     steps.current = 0;
     converged.current = false;
     setReady(false);
+    setPaths(null);
     setSimReady(false);
   }, [built, sourceRoomId, plan.rooms, setSimReady, engine, accurate]);
+
+  // Build smooth streamlines from the frozen steady-state velocity field.
+  const buildPaths = useCallback(
+    () => setPaths(buildStreamlinePaths(built, { roofY: plan.wallHeight })),
+    [built, plan.wallHeight],
+  );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
 
@@ -167,6 +177,7 @@ export function FlowField3D() {
           smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
         };
         converged.current = true;
+        buildPaths();
         setReady(true);
         setSimReady(true);
         return;
@@ -180,6 +191,7 @@ export function FlowField3D() {
           smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
         };
         converged.current = true;
+        buildPaths();
         setReady(true);
         setSimReady(true);
       }
@@ -218,8 +230,16 @@ export function FlowField3D() {
     (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   });
 
+  const showStreamlines = mode === "airflow" && paths != null && paths.points.length > 0;
+
   return (
     <group>
+      {showStreamlines && (
+        <group>
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.16} depthWrite={false} />
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.9} transparent opacity={0.95} depthWrite={false} />
+        </group>
+      )}
       <points ref={hazeRef} frustumCulled={false} visible={false}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
