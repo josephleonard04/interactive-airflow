@@ -154,6 +154,15 @@ function App() {
     if (ofResult) setOfStale(true)
   }, [flowLayout, devices])
 
+  // Proactively probe the backend when the accurate engine is selected, so the
+  // HUD can show online/offline (and how to start it) before the user clicks run.
+  useEffect(() => {
+    if (engine !== 'openfoam') return
+    const controller = new AbortController()
+    checkBackendHealth(controller.signal).then(setOfHealth)
+    return () => controller.abort()
+  }, [engine])
+
   const runAccurateSimulation = async () => {
     if (ofRunning) return
     setOfRunning(true)
@@ -506,6 +515,16 @@ function App() {
                   Runs a buoyantSimpleFoam case from the current scene on the local backend.
                 </p>
               )}
+              <div className="engine-backend">
+                <span className={`engine-dot ${ofHealth?.reachable ? (ofHealth.openfoam ? 'on' : 'partial') : 'off'}`} />
+                {ofHealth == null
+                  ? 'Checking backend…'
+                  : !ofHealth.reachable
+                    ? 'Backend offline — run  backend\\run.ps1'
+                    : ofHealth.openfoam
+                      ? `Backend online · OpenFOAM ready${ofHealth.version ? ` (${ofHealth.version})` : ''}`
+                      : 'Backend online · OpenFOAM not installed (preview mode)'}
+              </div>
             </div>
           )}
           <Canvas

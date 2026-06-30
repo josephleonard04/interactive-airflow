@@ -1208,3 +1208,38 @@ g.sketch-shape circle {
   color: #9a6a16;
   font-weight: 700;
 }
+
+.engine-backend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(50, 60, 56, 0.1);
+  font-size: 11px;
+  color: #6a756f;
+}
+
+.engine-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: #c0392b;
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.14);
+}
+
+.engine-dot.on {
+  background: #2a9d8f;
+  box-shadow: 0 0 0 3px rgba(42, 157, 143, 0.16);
+}
+
+.engine-dot.partial {
+  background: #d9a514;
+  box-shadow: 0 0 0 3px rgba(217, 165, 20, 0.16);
+}
+
+.engine-dot.off {
+  background: #c0392b;
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.14);
+}

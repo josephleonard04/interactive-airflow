@@ -115,8 +115,15 @@ export function StableFluidParticles({
 
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[1, 10, 10]} />
-      <meshBasicMaterial color={color} transparent opacity={0.58} depthWrite={false} />
+      <sphereGeometry args={[1, 12, 12]} />
+      <meshBasicMaterial
+        color={color}
+        transparent
+        opacity={0.5}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        toneMapped={false}
+      />
     </instancedMesh>
   )
 }
