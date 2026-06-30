@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
 import { useSceneStore } from "../scene/store";
+import { applyFieldToSim } from "../engine/accurate";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -37,6 +38,8 @@ export function FlowField3D() {
   const mode = useSceneStore((s) => s.simMode);
   const sourceRoomId = useSceneStore((s) => s.simSourceRoomId);
   const setSimReady = useSceneStore((s) => s.setSimReady);
+  const engine = useSceneStore((s) => s.engine);
+  const accurate = useSceneStore((s) => s.accurate);
 
   const built = useMemo(() => buildSim3D(plan), [plan]);
   const soft = useMemo(makeSoftTexture, []);
@@ -63,7 +66,9 @@ export function FlowField3D() {
     converged.current = false;
     setReady(false);
     setSimReady(false);
-  }, [built, sourceRoomId, plan.rooms, setSimReady]);
+  }, [built, sourceRoomId, plan.rooms, setSimReady, engine, accurate]);
+
+  const useOpenFoam = engine === "openfoam" && accurate?.field != null;
 
   const spawn = useMemo(() => {
     const { sim, nx, ny, nz, dx, cellCenter, seeds } = built;
@@ -152,11 +157,24 @@ export function FlowField3D() {
   useFrame((_, delta) => {
     // converge to steady state once
     if (!converged.current) {
-      for (let b = 0; b < BATCH; b++) built.sim.step(0.05);
+      const sim = built.sim;
+      // Accurate engine: skip the live solve — inject the OpenFOAM velocity
+      // field, then let the same scalar fill carry temperature/smell along it.
+      if (useOpenFoam && accurate?.field) {
+        applyFieldToSim(built, accurate.field);
+        fieldsRef.current = {
+          temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
+          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+        };
+        converged.current = true;
+        setReady(true);
+        setSimReady(true);
+        return;
+      }
+      for (let b = 0; b < BATCH; b++) sim.step(0.05);
       steps.current += BATCH;
       if (steps.current >= TARGET_STEPS) {
         // freeze and solve the airflow-carried temperature & smell fields once
-        const sim = built.sim;
         fieldsRef.current = {
           temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
           smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),

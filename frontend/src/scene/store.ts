@@ -9,6 +9,12 @@ import {
   rectContains,
 } from "../floorplan/geometry";
 import { generateEmpty, generateHome } from "../floorplan/home";
+import {
+  checkBackendHealth,
+  runAccurate as runAccurateEngine,
+  type AccurateResult,
+  type BackendHealth,
+} from "../engine/accurate";
 import type {
   FloorPlan,
   HomeSize,
@@ -82,7 +88,19 @@ export interface SceneState {
   toggleSimPause: () => void;
   setSimSource: (id: string | null) => void;
   setSimReady: (v: boolean) => void;
+
+  // Two engines: "realtime" = the in-browser Euler solver (live), "openfoam" =
+  // an accurate CFD pass run on the local backend on demand.
+  engine: SimEngine;
+  accurate: AccurateResult | null;
+  accurateRunning: boolean;
+  accurateHealth: BackendHealth | null;
+  setEngine: (e: SimEngine) => void;
+  runAccurate: () => Promise<void>;
+  refreshAccurateHealth: () => Promise<void>;
 }
+
+export type SimEngine = "realtime" | "openfoam";
 
 export type SimMode = "airflow" | "temperature" | "contamination";
 
@@ -128,6 +146,28 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
   setSimReady: (v) => set({ simReady: v }),
+
+  engine: "realtime",
+  accurate: null,
+  accurateRunning: false,
+  accurateHealth: null,
+  setEngine: (engine) => set({ engine }),
+  refreshAccurateHealth: async () => {
+    const accurateHealth = await checkBackendHealth();
+    set({ accurateHealth });
+  },
+  runAccurate: async () => {
+    if (get().accurateRunning) return;
+    set({ accurateRunning: true, engine: "openfoam" });
+    try {
+      const accurateHealth = await checkBackendHealth();
+      set({ accurateHealth });
+      const accurate = await runAccurateEngine(get().plan);
+      set({ accurate });
+    } finally {
+      set({ accurateRunning: false });
+    }
+  },
 
   generate: (size, mode) =>
     set({
