@@ -42,6 +42,8 @@ export interface PlacedItem {
   on?: boolean;
   /** HVAC power level 1 (low) · 2 (medium) · 3 (high). Undefined = 2. */
   power?: number;
+  /** Fan only: oscillating (sweeps side to side) vs fixed direction. */
+  oscillate?: boolean;
   movable: boolean;
 }
 

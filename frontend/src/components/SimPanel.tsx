@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
-import { useSceneStore, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
+import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 
-const PRESETS: Array<{ id: AirflowPreset; label: string; hint: string }> = [
-  { id: "comfort", label: "Comfort", hint: "Balanced AC + fan" },
-  { id: "cooling", label: "Cooling", hint: "AC high, gentle fan" },
-  { id: "purge", label: "Purge", hint: "Max fresh air" },
-];
+const PRESET_IDS = Object.keys(PRESETS) as AirflowPreset[];
 
 const INTENT_TEMPLATES = [
   "Keep my bedroom cool",
@@ -144,10 +140,10 @@ export function SimPanel() {
 
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4, fontWeight: 600 }}>Quick presets</div>
-        <div className="tools">
-          {PRESETS.map((p) => (
-            <button key={p.id} className="tool" onClick={() => applyAirflowPreset(p.id)} title={p.hint}>
-              {p.label}
+        <div className="chips">
+          {PRESET_IDS.map((id) => (
+            <button key={id} className="chip" onClick={() => applyAirflowPreset(id)} title={PRESETS[id].hint}>
+              {PRESETS[id].label}
             </button>
           ))}
         </div>
