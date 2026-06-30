@@ -6,22 +6,33 @@ import {
   BoxSelect,
   Download,
   Eye,
+  FlaskConical,
   Gauge,
   Home,
   Maximize2,
   Move3D,
   PanelRightClose,
   PanelRightOpen,
+  Play,
   RotateCcw,
   Rotate3D,
   Upload,
   Sofa,
   Waves,
   Wind,
+  Zap,
 } from 'lucide-react'
 import './App.css'
-import type { DeviceKey, DeviceState } from './stableFluidSolver'
+import { createSampler, type DeviceKey, type DeviceState } from './stableFluidSolver'
 import { useStableFluidAirflow } from './hooks/useStableFluidAirflow'
+import { buildAirflowCase } from './engine/airflowCase'
+import { exportOpenFoamCase } from './engine/openfoam/exportCase'
+import {
+  checkBackendHealth,
+  runOpenFoam,
+  type BackendHealth,
+} from './engine/openfoam/client'
+import { openfoamResultToSnapshot, type OpenFoamResult } from './engine/openfoam/result'
 import { bindSketchToIntent } from './intent/bind'
 import { mapIntentsToDeviceConfig, type IntentMapperMode } from './intent/heuristicMapper'
 import { describeIntentParseResult, parseAirflowIntents } from './intent/parse'
@@ -114,13 +125,54 @@ function App() {
   const [objectTransforms, setObjectTransforms] =
     useState<Record<EditableObjectKey, ObjectTransform>>(initialObjectTransforms)
   const [autoFanSweep, setAutoFanSweep] = useState(false)
+  const [engine, setEngine] = useState<'realtime' | 'openfoam'>('realtime')
+  const [ofResult, setOfResult] = useState<OpenFoamResult | null>(null)
+  const [ofRunning, setOfRunning] = useState(false)
+  const [ofStale, setOfStale] = useState(false)
+  const [ofHealth, setOfHealth] = useState<BackendHealth | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fanSweepCenterRef = useRef(initialObjectTransforms.fan.rotation[1])
   const flowLayout = useMemo(() => buildFlowLayout(objectTransforms), [objectTransforms])
   const { sampler, snapshot, status } = useStableFluidAirflow(devices, flowLayout)
+
+  // Accurate engine: when an OpenFOAM result is available and the accurate
+  // engine is selected, render that field through the same visualization by
+  // adapting it into a snapshot. Otherwise show the live real-time field.
+  const ofSnapshot = useMemo(
+    () => (ofResult ? openfoamResultToSnapshot(ofResult) : null),
+    [ofResult],
+  )
+  const showingOpenFoam = engine === 'openfoam' && ofSnapshot != null
+  const activeSnapshot = showingOpenFoam ? ofSnapshot : snapshot
+  const activeSampler = useMemo(
+    () => (showingOpenFoam ? createSampler(activeSnapshot) : sampler),
+    [showingOpenFoam, activeSnapshot, sampler],
+  )
+
+  // The displayed OpenFOAM result goes stale when the scene or devices change.
+  useEffect(() => {
+    if (ofResult) setOfStale(true)
+  }, [flowLayout, devices])
+
+  const runAccurateSimulation = async () => {
+    if (ofRunning) return
+    setOfRunning(true)
+    setEngine('openfoam')
+    try {
+      const health = await checkBackendHealth()
+      setOfHealth(health)
+      const ofCase = exportOpenFoamCase(buildAirflowCase(flowLayout, devices))
+      const result = await runOpenFoam(ofCase)
+      setOfResult(result)
+      setOfStale(false)
+    } finally {
+      setOfRunning(false)
+    }
+  }
+
   const zoneMetrics = useMemo(
-    () => readZoneMetrics(snapshot, objectTransforms),
-    [snapshot, objectTransforms],
+    () => readZoneMetrics(activeSnapshot, objectTransforms),
+    [activeSnapshot, objectTransforms],
   )
   const intentGroundings = useMemo(
     () => buildIntentGroundings(intentSession, objectTransforms),
@@ -328,6 +380,26 @@ function App() {
             <h1>Living Room Airflow Designer</h1>
           </div>
           <div className="toolbar" aria-label="View controls">
+            <div className="engine-segmented" aria-label="Simulation engine">
+              <button
+                type="button"
+                className={engine === 'realtime' ? 'selected' : ''}
+                onClick={() => setEngine('realtime')}
+                title="Real-time engine: live CPU Stable Fluids preview"
+              >
+                <Zap size={14} />
+                Real-time
+              </button>
+              <button
+                type="button"
+                className={engine === 'openfoam' ? 'selected' : ''}
+                onClick={() => setEngine('openfoam')}
+                title="Accurate engine: OpenFOAM CFD (run on demand)"
+              >
+                <FlaskConical size={14} />
+                Accurate
+              </button>
+            </div>
             <div className="view-segmented" aria-label="Camera views">
               {(['iso', 'top', 'front', 'fit'] as CameraView[]).map((view) => (
                 <button
@@ -391,6 +463,51 @@ function App() {
         </header>
 
         <div className="scene-panel">
+          {engine === 'openfoam' && (
+            <div className="engine-hud" role="status">
+              <div className="engine-hud-head">
+                <FlaskConical size={16} />
+                <strong>Accurate engine — OpenFOAM</strong>
+                {showingOpenFoam && ofResult && (
+                  <span className={`engine-badge ${ofResult.status}`}>
+                    {ofResult.status === 'ok'
+                      ? 'CFD result'
+                      : ofResult.status === 'mock'
+                        ? 'preview (no OpenFOAM)'
+                        : 'error'}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="run-accurate"
+                onClick={runAccurateSimulation}
+                disabled={ofRunning}
+              >
+                <Play size={15} />
+                {ofRunning
+                  ? 'Running CFD…'
+                  : ofResult
+                    ? 'Re-run accurate simulation'
+                    : 'Run accurate simulation'}
+              </button>
+              {ofStale && ofResult && !ofRunning && (
+                <p className="engine-note stale">Scene changed since this result — re-run to update.</p>
+              )}
+              {ofResult?.message && <p className="engine-note">{ofResult.message}</p>}
+              {ofResult?.seconds != null && !ofRunning && (
+                <p className="engine-note dim">
+                  {ofResult.status === 'ok' ? 'Solved' : 'Computed'} in {ofResult.seconds}s
+                  {ofHealth?.version ? ` · OpenFOAM ${ofHealth.version}` : ''}
+                </p>
+              )}
+              {!ofResult && !ofRunning && (
+                <p className="engine-note dim">
+                  Runs a buoyantSimpleFoam case from the current scene on the local backend.
+                </p>
+              )}
+            </div>
+          )}
           <Canvas
             camera={{ position: cameraViews.fit.position, fov: 50 }}
             shadows
@@ -414,10 +531,10 @@ function App() {
               intentGroundings={intentGroundings}
               onTransformActiveChange={setIsTransforming}
               onTransformChange={updateObjectTransform}
-              sampler={sampler}
+              sampler={activeSampler}
               selectedId={selectedObject}
               showFlowMap={showFlowMap}
-              snapshot={snapshot}
+              snapshot={activeSnapshot}
               transforms={objectTransforms}
               wallOpacity={wallOpacity}
             />

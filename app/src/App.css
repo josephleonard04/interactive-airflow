@@ -1082,3 +1082,129 @@ g.sketch-shape circle {
     min-height: 430px;
   }
 }
+
+/* ---- Two-engine controls (real-time vs accurate OpenFOAM) ---- */
+.engine-segmented {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #edf0e8;
+}
+
+.engine-segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  color: #5d6763;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.engine-segmented button.selected {
+  color: #1f2925;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(31, 41, 37, 0.08);
+}
+
+.engine-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 5;
+  width: 290px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(50, 60, 56, 0.12);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 14px 34px rgba(31, 41, 37, 0.14);
+}
+
+.engine-hud-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #1f2925;
+  font-size: 13px;
+}
+
+.engine-hud-head strong {
+  flex: 1;
+  font-size: 13px;
+}
+
+.engine-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.engine-badge.ok {
+  background: #def3ed;
+  color: #146a5f;
+}
+
+.engine-badge.mock {
+  background: #fdf0d8;
+  color: #9a6a16;
+}
+
+.engine-badge.error {
+  background: #fadbd8;
+  color: #a23226;
+}
+
+.run-accurate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 12px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 9px;
+  color: #ffffff;
+  background: #2a9d8f;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.run-accurate:hover:not(:disabled) {
+  background: #218477;
+  transform: translateY(-1px);
+}
+
+.run-accurate:disabled {
+  background: #9bbbb5;
+  cursor: progress;
+}
+
+.engine-note {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #46524d;
+}
+
+.engine-note.dim {
+  color: #7c8884;
+}
+
+.engine-note.stale {
+  color: #9a6a16;
+  font-weight: 700;
+}
