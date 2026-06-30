@@ -153,9 +153,25 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
           // recirculating: two opposite faces (net-zero mass)
           if (dir[0] !== 0) { const a = sim.uIdx(i, j, k), b = sim.uIdx(i + 1, j, k); sim.uFixed[a] = sim.uFixed[b] = 1; sim.uVal[a] = sim.uVal[b] = dir[0] * speed; }
           else { const a = sim.wIdx(i, j, k), b = sim.wIdx(i, j, k + 1); sim.wFixed[a] = sim.wFixed[b] = 1; sim.wVal[a] = sim.wVal[b] = dir[2] * speed; }
+          // an oscillating fan sweeps side-to-side: also push air out laterally so
+          // it covers a wide arc instead of a single direction (more room coverage)
+          if (it.oscillate) {
+            const lat = speed * 0.55;
+            if (dir[0] !== 0) {
+              const f = sim.wIdx(i, j, k + 1), b = sim.wIdx(i, j, k);
+              sim.wFixed[f] = 1; sim.wVal[f] = lat;
+              sim.wFixed[b] = 1; sim.wVal[b] = -lat;
+            } else {
+              const f = sim.uIdx(i + 1, j, k), b = sim.uIdx(i, j, k);
+              sim.uFixed[f] = 1; sim.uVal[f] = lat;
+              sim.uFixed[b] = 1; sim.uVal[b] = -lat;
+            }
+          }
         } else {
-          // ducted vent: free boundary cell + directed jet face
+          // ducted vent: free boundary cell + directed jet face. Inflow vents
+          // inject clean air, so they also dilute odour locally (smell sink).
           sim.open[c] = 1;
+          ambient[c] = 1;
           setFace(i, j, k, dir, speed);
         }
       }
@@ -219,9 +235,9 @@ export function advectDiffuseFill(
   opts?: { iters?: number; kappa?: number; adv?: number },
 ): Float32Array {
   const { sim, nx, ny, nz, ambient } = s;
-  const iters = opts?.iters ?? 240;
-  const kappa = opts?.kappa ?? 0.18; // mixing strength
-  const adv = opts?.adv ?? 0.9; // cells moved per (m/s) per iteration
+  const iters = opts?.iters ?? 320;
+  const kappa = opts?.kappa ?? 0.26; // mixing strength (higher = spreads further)
+  const adv = opts?.adv ?? 0.95; // cells moved per (m/s) per iteration
   const n3 = nx * ny * nz;
   const f = new Float32Array(n3);
   const tmp = new Float32Array(n3);

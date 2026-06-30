@@ -50,22 +50,24 @@ function makeSampler(built: Sim3D) {
   };
 }
 
-/** Seed points: the vents/AC outlets, else a sparse grid of moving cells. */
+/**
+ * Seed points across the WHOLE house: the vents/AC outlets (where air is born)
+ * PLUS a sparse grid of any moving cells, so every room with airflow shows
+ * streamlines — not just the room with the AC.
+ */
 function seedPoints(built: Sim3D, sample: (x: number, y: number, z: number) => Vel, maxSeeds: number): THREE.Vector3[] {
   const out: THREE.Vector3[] = [];
-  if (built.seeds.length) {
-    for (const s of built.seeds) out.push(new THREE.Vector3(s[0], s[1], s[2]));
-  } else {
-    const { nx, ny, nz, cellCenter } = built;
-    const stride = Math.max(1, Math.round(Math.cbrt((nx * ny * nz) / (maxSeeds * 2))));
-    for (let k = 1; k < nz - 1; k += stride)
-      for (let j = 1; j < ny - 1; j += stride)
-        for (let i = 1; i < nx - 1; i += stride) {
-          const [x, y, z] = cellCenter(i, j, k);
-          const v = sample(x, y, z);
-          if (!v.solid && v.speed > 0.04) out.push(new THREE.Vector3(x, y, z));
-        }
-  }
+  for (const s of built.seeds) out.push(new THREE.Vector3(s[0], s[1], s[2]));
+
+  const { nx, ny, nz, cellCenter } = built;
+  const stride = Math.max(1, Math.round(Math.cbrt((nx * ny * nz) / (maxSeeds * 2))));
+  for (let k = 1; k < nz - 1; k += stride)
+    for (let j = 1; j < ny - 1; j += stride)
+      for (let i = 1; i < nx - 1; i += stride) {
+        const [x, y, z] = cellCenter(i, j, k);
+        const v = sample(x, y, z);
+        if (!v.solid && v.speed > 0.03) out.push(new THREE.Vector3(x, y, z));
+      }
   // Cap, keeping an even spread.
   if (out.length > maxSeeds) {
     const step = out.length / maxSeeds;

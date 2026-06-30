@@ -17,7 +17,7 @@ import { buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
 // windows vent to ambient) so "the whole house is affected if the doors are open".
 
 const MAX_HAZE = 16000;
-const NUM_PARTICLES = 500;
+const NUM_PARTICLES = 850;
 const TARGET_STEPS = 180;
 const BATCH = 6;
 
@@ -74,7 +74,7 @@ export function FlowField3D() {
 
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
-    () => setPaths(buildStreamlinePaths(built, { roofY: plan.wallHeight })),
+    () => setPaths(buildStreamlinePaths(built, { roofY: plan.wallHeight, maxSeeds: 72 })),
     [built, plan.wallHeight],
   );
 
@@ -84,16 +84,18 @@ export function FlowField3D() {
     const { sim, nx, ny, nz, dx, cellCenter, seeds } = built;
     return (p: number) => {
       let pos: [number, number, number] | null = null;
-      if (seeds.length) {
-        // air originates at the AC / supply vents — always seed there
+      // Spawn about half the particles at the AC/supply vents (where air is born)
+      // and half anywhere there's moving air, so every room shows airflow.
+      if (seeds.length && Math.random() < 0.5) {
         const s = seeds[(Math.random() * seeds.length) | 0];
         pos = [s[0] + (Math.random() - 0.5) * dx, s[1] + (Math.random() - 0.5) * dx, s[2] + (Math.random() - 0.5) * dx];
       } else {
-        // no air source: show ambient room air (e.g. a fan just pushing it around)
-        for (let t = 0; t < 25; t++) {
+        for (let t = 0; t < 30; t++) {
           const i = (Math.random() * nx) | 0, j = (Math.random() * ny) | 0, k = (Math.random() * nz) | 0;
           const c = sim.cIdx(i, j, k);
-          if (!sim.solid[c] && !sim.open[c]) { pos = cellCenter(i, j, k); break; }
+          if (sim.solid[c] || sim.open[c]) continue;
+          const [u, v, w] = sim.velocityAt(i, j, k);
+          if (Math.hypot(u, v, w) > 0.03) { pos = cellCenter(i, j, k); break; }
         }
       }
       if (!pos) pos = cellCenter(nx >> 1, ny >> 1, nz >> 1);

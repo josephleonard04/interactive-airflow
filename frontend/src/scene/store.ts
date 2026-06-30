@@ -104,27 +104,87 @@ export interface SceneState {
 }
 
 export type SimEngine = "realtime" | "openfoam";
-export type AirflowPreset = "comfort" | "cooling" | "purge";
+export type AirflowPreset = "comfort" | "cooling" | "freshair" | "warmup" | "circulate";
 
-// Per-device {on, power} for each preset, keyed by item type.
-const PRESET_CONFIG: Record<AirflowPreset, Record<string, { on: boolean; power: number }>> = {
+interface PresetDevice {
+  on: boolean;
+  power: number;
+  oscillate?: boolean;
+}
+export interface PresetSpec {
+  label: string;
+  hint: string;
+  /** Per-device {on,power,oscillate} keyed by item type. */
+  devices: Record<string, PresetDevice>;
+  /** Open interior doors so air/heat/odour circulate between rooms. */
+  interiorDoors: boolean;
+  /** Open exterior windows (& doors) to vent to outside. */
+  windows: boolean;
+}
+
+// A preset is a whole-home configuration: it sets every HVAC device's on/power
+// (and fan oscillation) AND opens/closes doors & windows, since cross-room
+// coverage depends on open interior doors and venting depends on open windows.
+export const PRESETS: Record<AirflowPreset, PresetSpec> = {
   comfort: {
-    ac: { on: true, power: 2 },
-    fan: { on: true, power: 2 },
-    supply: { on: true, power: 2 },
-    heater: { on: false, power: 2 },
+    label: "Comfort",
+    hint: "Balanced cooling, gentle oscillating fan, doors open so the whole home stays even.",
+    devices: {
+      ac: { on: true, power: 2 },
+      fan: { on: true, power: 2, oscillate: true },
+      supply: { on: true, power: 2 },
+      heater: { on: false, power: 2 },
+    },
+    interiorDoors: true,
+    windows: false,
   },
   cooling: {
-    ac: { on: true, power: 3 },
-    fan: { on: true, power: 1 },
-    supply: { on: true, power: 2 },
-    heater: { on: false, power: 2 },
+    label: "Cool down",
+    hint: "AC on high to cool fast; doors open to spread the cool air, windows shut.",
+    devices: {
+      ac: { on: true, power: 3 },
+      fan: { on: true, power: 2, oscillate: true },
+      supply: { on: true, power: 2 },
+      heater: { on: false, power: 2 },
+    },
+    interiorDoors: true,
+    windows: false,
   },
-  purge: {
-    ac: { on: false, power: 2 },
-    fan: { on: true, power: 3 },
-    supply: { on: true, power: 3 },
-    heater: { on: false, power: 2 },
+  freshair: {
+    label: "Fresh air",
+    hint: "Purge stale air & odours: fan + vent on high, AC off, all windows and doors open.",
+    devices: {
+      ac: { on: false, power: 2 },
+      fan: { on: true, power: 3, oscillate: true },
+      supply: { on: true, power: 3 },
+      heater: { on: false, power: 2 },
+    },
+    interiorDoors: true,
+    windows: true,
+  },
+  warmup: {
+    label: "Warm up",
+    hint: "Heater on, fan circulates the warmth, doors open, windows shut to keep heat in.",
+    devices: {
+      ac: { on: false, power: 2 },
+      fan: { on: true, power: 2, oscillate: true },
+      supply: { on: false, power: 2 },
+      heater: { on: true, power: 3 },
+    },
+    interiorDoors: true,
+    windows: false,
+  },
+  circulate: {
+    label: "Circulate",
+    hint: "Just move air around the whole home: oscillating fan + vent, AC/heater off, doors open.",
+    devices: {
+      ac: { on: false, power: 2 },
+      fan: { on: true, power: 3, oscillate: true },
+      supply: { on: true, power: 2 },
+      heater: { on: false, power: 2 },
+    },
+    interiorDoors: true,
+    windows: false,
   },
 };
 
@@ -197,13 +257,27 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   applyAirflowPreset: (preset) =>
     set((s) => {
-      const cfg = PRESET_CONFIG[preset];
+      const spec = PRESETS[preset];
+      const items = s.plan.items.map((it) => {
+        const d = spec.devices[it.type];
+        if (!d) return it;
+        return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
+      });
+      const exterior = (o: Opening) => o.rooms.includes("outside");
+      const setOpen = (o: Opening): Opening => {
+        // Interior doors follow interiorDoors; exterior openings follow windows.
+        const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
+        return open === o.open ? o : { ...o, open };
+      };
       return {
         ...snapshot(s),
-        plan: mapItems(s.plan, (it) => {
-          const c = cfg[it.type];
-          return c ? { ...it, on: c.on, power: c.power } : it;
-        }),
+        plan: {
+          ...s.plan,
+          items,
+          doors: s.plan.doors.map(setOpen),
+          windows: s.plan.windows.map(setOpen),
+          walls: s.plan.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
+        },
       };
     }),
 
