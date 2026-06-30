@@ -98,9 +98,35 @@ export interface SceneState {
   setEngine: (e: SimEngine) => void;
   runAccurate: () => Promise<void>;
   refreshAccurateHealth: () => Promise<void>;
+
+  /** One-click device presets (set on/power across all HVAC). */
+  applyAirflowPreset: (preset: AirflowPreset) => void;
 }
 
 export type SimEngine = "realtime" | "openfoam";
+export type AirflowPreset = "comfort" | "cooling" | "purge";
+
+// Per-device {on, power} for each preset, keyed by item type.
+const PRESET_CONFIG: Record<AirflowPreset, Record<string, { on: boolean; power: number }>> = {
+  comfort: {
+    ac: { on: true, power: 2 },
+    fan: { on: true, power: 2 },
+    supply: { on: true, power: 2 },
+    heater: { on: false, power: 2 },
+  },
+  cooling: {
+    ac: { on: true, power: 3 },
+    fan: { on: true, power: 1 },
+    supply: { on: true, power: 2 },
+    heater: { on: false, power: 2 },
+  },
+  purge: {
+    ac: { on: false, power: 2 },
+    fan: { on: true, power: 3 },
+    supply: { on: true, power: 3 },
+    heater: { on: false, power: 2 },
+  },
+};
 
 export type SimMode = "airflow" | "temperature" | "contamination";
 
@@ -168,6 +194,18 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       set({ accurateRunning: false });
     }
   },
+
+  applyAirflowPreset: (preset) =>
+    set((s) => {
+      const cfg = PRESET_CONFIG[preset];
+      return {
+        ...snapshot(s),
+        plan: mapItems(s.plan, (it) => {
+          const c = cfg[it.type];
+          return c ? { ...it, on: c.on, power: c.power } : it;
+        }),
+      };
+    }),
 
   generate: (size, mode) =>
     set({
