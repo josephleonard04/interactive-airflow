@@ -16,6 +16,7 @@
     "check:phase5": "node --experimental-strip-types scripts/check-phase5.ts",
     "check:phase6": "node --experimental-strip-types scripts/check-phase6.ts",
     "check:llm": "node --experimental-strip-types scripts/check-llm-route.ts",
+    "check:openfoam": "node --experimental-strip-types scripts/check-openfoam-export.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
