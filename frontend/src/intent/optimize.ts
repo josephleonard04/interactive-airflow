@@ -1,4 +1,5 @@
 import type { FloorPlan, PlacedItem, Rect, Vec3 } from "../floorplan/types";
+import { findFreeSpot, type SearchAxis } from "../floorplan/collision";
 
 // Heuristic "solver" for the most effective device layout given a goal. Rather
 // than an expensive sim-in-the-loop search, we use airflow domain rules to pick
@@ -52,6 +53,13 @@ export function deviceSpot(room: Rect, type: string, index: number, wallHeight: 
   return { position: [cxo, 0.65, czo], rotationY: 0 };
 }
 
+/** Which axis a device slides along to dodge collisions (walls slide 1D). */
+function searchAxis(type: string): SearchAxis {
+  if (type === "ac") return "x"; // back wall → slide horizontally
+  if (type === "heater") return "z"; // side wall → slide along it
+  return "area"; // fan (floor) / vent (ceiling) → search the room
+}
+
 export interface Relocation {
   items: PlacedItem[];
   changes: string[];
@@ -69,19 +77,33 @@ export function relocateForGoal(plan: FloorPlan, goal: OptimizeGoal, roomId: str
   const counts: Record<string, number> = {};
   const changes: string[] = [];
 
-  const items = plan.items.map((it) => {
-    if (!wanted.includes(it.type) || it.on === false) return it;
+  // Mutable working copy so each placement avoids the already-placed objects
+  // (no two objects share a space — furniture and earlier devices are obstacles).
+  const items: PlacedItem[] = plan.items.map((it) => ({ ...it }));
+  const toPlace = items.filter((it) => wanted.includes(it.type) && it.on !== false);
+
+  for (const it of toPlace) {
     const index = counts[it.type] ?? 0;
     counts[it.type] = index + 1;
     const spot = deviceSpot(target.rect, it.type, index, plan.wallHeight);
+    const others = items.filter((o) => o.id !== it.id);
+    const pos = findFreeSpot(
+      target.rect,
+      { size: it.size, rotationY: spot.rotationY, mount: it.mount },
+      others,
+      spot.position,
+      searchAxis(it.type),
+    );
     const moved =
-      Math.abs(spot.position[0] - it.position[0]) > 0.05 ||
-      Math.abs(spot.position[2] - it.position[2]) > 0.05 ||
+      Math.abs(pos[0] - it.position[0]) > 0.05 ||
+      Math.abs(pos[2] - it.position[2]) > 0.05 ||
       Math.abs(spot.rotationY - it.rotationY) > 0.05;
-    if (!moved) return it;
+    if (!moved) continue;
+    it.position = [pos[0], spot.position[1], pos[2]];
+    it.rotationY = spot.rotationY;
+    it.roomId = target.id;
     changes.push(`Moved ${DEVICE_LABEL[it.type] ?? it.type} to ${target.name}`);
-    return { ...it, position: spot.position, rotationY: spot.rotationY, roomId: target.id };
-  });
+  }
 
   return { items, changes, targetName: target.name };
 }

@@ -8,6 +8,7 @@ import {
   sharedEdge,
 } from "./geometry";
 import { rasterize } from "./raster";
+import { resolveOverlaps } from "./collision";
 import type { FloorPlan, HomeSize, Opening, PlacedItem, RoomDef, Vec3, WallSeg } from "./types";
 
 // A single, fixed home: living room, bedroom, kitchen, bathroom, with the
@@ -309,7 +310,7 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   placeEntrance(walls, gen, byId("living"), doors);
 
   const windows = placeWindows(walls, gen, rooms);
-  const items = placeObjects(gen, rooms, [...doors, ...windows], H);
+  const items = resolveOverlaps(placeObjects(gen, rooms, [...doors, ...windows], H), rooms);
   const grid = rasterize(rooms, bounds);
 
   return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid };
