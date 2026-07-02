@@ -37,14 +37,14 @@ function flowStep(
   const velocity = sampler(point.x, point.y, point.z)
   const distanceFromFan = Math.max(0, point.clone().sub(origin).dot(direction))
   const jetBias = Math.max(0, 1 - distanceFromFan / 2.8) * sourceStrength * 0.42
-  const swirl = Math.sin(phase) * 0.05 * Math.max(0.2, 1 - distanceFromFan / 4.2)
+  const swirl = Math.sin(phase) * 0.032 * Math.max(0.2, 1 - distanceFromFan / 4.2)
   out.set(
     velocity.x * 70 + direction.x * jetBias + side.x * swirl,
     velocity.y * 48,
     velocity.z * 70 + direction.z * jetBias + side.z * swirl,
   )
   if (out.lengthSq() < 0.0004) out.copy(direction).multiplyScalar(0.1 * sourceStrength)
-  return out.clampLength(0.04, 0.16)
+  return out.clampLength(0.035, 0.135)
 }
 
 function colorAt(
@@ -120,7 +120,7 @@ export function buildStreamlinePaths({
         .addScaledVector(up, (row / seedRadius) * spread * 0.34)
 
       const raw: THREE.Vector3[] = [point.clone()]
-      const stepCount = Math.round(46 + density * 26)
+      const stepCount = Math.round(58 + density * 32)
 
       for (let step = 0; step < stepCount; step += 1) {
         if (sampler(point.x, point.y, point.z).solid || !inBounds(point)) break
@@ -139,7 +139,7 @@ export function buildStreamlinePaths({
 
       // Resample along a smooth curve so the polyline reads as a clean arc.
       const curve = new THREE.CatmullRomCurve3(raw, false, 'centripetal')
-      const divisions = Math.min(72, raw.length * 3)
+      const divisions = Math.min(112, raw.length * 4)
       const smooth = curve.getPoints(divisions)
 
       const c0 = new THREE.Color()

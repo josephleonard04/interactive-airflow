@@ -123,10 +123,42 @@
   min-height: 0;
 }
 
+.scene-panel.asset-drop-active::after {
+  position: absolute;
+  inset: 16px;
+  z-index: 4;
+  border: 2px dashed rgba(42, 157, 143, 0.62);
+  border-radius: 8px;
+  background: rgba(42, 157, 143, 0.06);
+  content: "";
+  pointer-events: none;
+}
+
 .scene-panel canvas {
   width: 100% !important;
   height: 100% !important;
   display: block;
+  cursor: grab;
+}
+
+.scene-panel canvas:active {
+  cursor: grabbing;
+}
+
+.drop-target-badge {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 6;
+  padding: 9px 12px;
+  border: 1px solid rgba(22, 125, 113, 0.26);
+  border-radius: 8px;
+  color: #124f48;
+  background: rgba(236, 253, 245, 0.96);
+  box-shadow: 0 12px 30px rgba(31, 41, 37, 0.14);
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: none;
 }
 
 .scene-label {
@@ -592,10 +624,56 @@
 }
 
 .inventory-section p {
-  margin: 0;
+  margin: 12px 0 0;
   color: #5a6862;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.asset-grid button {
+  min-width: 0;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(50, 60, 56, 0.14);
+  border-radius: 8px;
+  color: #2b3934;
+  background: #fbfcf8;
+  cursor: grab;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.asset-grid button:hover,
+.asset-grid button.selected {
+  border-color: rgba(42, 157, 143, 0.48);
+  background: #e7f5f1;
+}
+
+.asset-grid button:active {
+  cursor: grabbing;
+  transform: translateY(1px);
+}
+
+.asset-grid span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 button:focus-visible,

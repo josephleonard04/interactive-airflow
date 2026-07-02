@@ -53,6 +53,15 @@ function GltfAsset({ url }: { url: string }) {
       if (child instanceof THREE.Mesh) {
         child.castShadow = true
         child.receiveShadow = true
+
+        const materials = Array.isArray(child.material) ? child.material : [child.material]
+        materials.forEach((material) => {
+          if (material instanceof THREE.MeshStandardMaterial) {
+            material.roughness = Math.max(material.roughness, 0.48)
+            material.metalness = Math.min(material.metalness, 0.18)
+            material.envMapIntensity = 0.55
+          }
+        })
       }
     })
 
