@@ -310,7 +310,7 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   placeEntrance(walls, gen, byId("living"), doors);
 
   const windows = placeWindows(walls, gen, rooms);
-  const items = resolveOverlaps(placeObjects(gen, rooms, [...doors, ...windows], H), rooms);
+  const items = resolveOverlaps(placeObjects(gen, rooms, [...doors, ...windows], H), rooms, [...doors, ...windows]);
   const grid = rasterize(rooms, bounds);
 
   return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid };

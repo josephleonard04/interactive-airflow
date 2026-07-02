@@ -63,6 +63,7 @@ export function FlowField3D() {
   const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array; noise: Float32Array } | null>(null);
   const [ready, setReady] = useState(false);
   const [paths, setPaths] = useState<StreamlinePaths | null>(null);
+  const dashRef = useRef<React.ComponentRef<typeof Line> | null>(null);
 
   useEffect(() => {
     const room = plan.rooms.find((r) => r.id === sourceRoomId) ?? null;
@@ -175,6 +176,8 @@ export function FlowField3D() {
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
   useFrame((_, delta) => {
+    // streamline dashes drift forward so the air visibly FLOWS along the lines
+    if (dashRef.current) dashRef.current.material.dashOffset -= delta * 0.55;
     // converge to steady state once
     if (!converged.current) {
       const sim = built.sim;
@@ -249,7 +252,22 @@ export function FlowField3D() {
       {showStreamlines && (
         <group>
           <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.16} depthWrite={false} />
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.9} transparent opacity={0.95} depthWrite={false} />
+          {/* faint continuous core so the path always reads */}
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.35} depthWrite={false} />
+          {/* animated dashes flowing along the line = moving air */}
+          <Line
+            ref={dashRef}
+            points={paths!.points}
+            segments
+            vertexColors={paths!.colors}
+            lineWidth={2.4}
+            transparent
+            opacity={0.95}
+            depthWrite={false}
+            dashed
+            dashSize={0.22}
+            gapSize={0.16}
+          />
         </group>
       )}
       <points ref={hazeRef} frustumCulled={false} visible={false}>

@@ -196,9 +196,9 @@ export function SimPanel() {
               {t}
             </button>
           ))}
-          <button className="tool" style={{ marginLeft: "auto" }} onClick={checkGoal} title="Check whether the goal is met now">Check</button>
           <button
             className="primary"
+            style={{ marginLeft: "auto" }}
             onClick={() => { if (goal.trim() && applyBestSolution(goal)) checkGoalText(goal); }}
             title="Find & apply the most effective device layout for this goal"
           >
