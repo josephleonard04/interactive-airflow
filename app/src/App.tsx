@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { ContactShadows, Environment, OrbitControls } from '@react-three/drei'
+import * as THREE from 'three'
 import {
   Activity,
   BoxSelect,
@@ -56,6 +57,7 @@ import {
   deviceCopy,
   editableObjectNames,
   initialObjectTransforms,
+  obstacleFootprints,
   presets,
   scalarOverlayCopy,
   scalarOverlaySliceCopy,
@@ -92,6 +94,36 @@ const panelTabs: Array<{ id: PanelTab; label: string; icon: typeof Activity }> =
   { id: 'devices', label: 'Devices', icon: Gauge },
   { id: 'project', label: 'Project', icon: Download },
 ]
+
+const roomAssetIds: EditableObjectKey[] = [
+  'sofa',
+  'coffeeTable',
+  'mediaConsole',
+  'sideTable',
+  'crib',
+  'seatedPerson',
+  'sleepingBaby',
+  'plant',
+  'lamp',
+  'fan',
+]
+
+const dropPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+const dropPoint = new THREE.Vector3()
+const dropRaycaster = new THREE.Raycaster()
+const floorBounds = { minX: -4.75, maxX: 4.75, minZ: -3.45, maxZ: 3.45 }
+
+function clampAssetPosition(id: EditableObjectKey, x: number, z: number): [number, number, number] {
+  const footprint = obstacleFootprints[id]
+  const halfWidth = (footprint?.w ?? 0.72) / 2
+  const halfDepth = (footprint?.d ?? 0.72) / 2
+
+  return [
+    Math.max(floorBounds.minX + halfWidth, Math.min(floorBounds.maxX - halfWidth, x)),
+    0,
+    Math.max(floorBounds.minZ + halfDepth, Math.min(floorBounds.maxZ - halfDepth, z)),
+  ]
+}
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
@@ -139,6 +171,10 @@ function App() {
   const [ofStale, setOfStale] = useState(false)
   const [ofHealth, setOfHealth] = useState<BackendHealth | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const canvasCameraRef = useRef<THREE.Camera | null>(null)
+  const canvasElementRef = useRef<HTMLCanvasElement | null>(null)
+  const lastSceneForOpenFoamRef = useRef<{ devices: DeviceState; flowLayout: ReturnType<typeof buildFlowLayout> } | null>(null)
+  const [draggingAsset, setDraggingAsset] = useState<EditableObjectKey | null>(null)
   const fanSweepCenterRef = useRef(initialObjectTransforms.fan.rotation[1])
   const flowLayout = useMemo(() => buildFlowLayout(objectTransforms), [objectTransforms])
   const { sampler, snapshot, status } = useStableFluidAirflow(devices, flowLayout)
@@ -159,8 +195,13 @@ function App() {
 
   // The displayed OpenFOAM result goes stale when the scene or devices change.
   useEffect(() => {
-    if (ofResult) setOfStale(true)
-  }, [flowLayout, devices])
+    const previous = lastSceneForOpenFoamRef.current
+    const changed = previous != null && (previous.devices !== devices || previous.flowLayout !== flowLayout)
+
+    lastSceneForOpenFoamRef.current = { devices, flowLayout }
+
+    if (changed && ofResult) setOfStale(true)
+  }, [flowLayout, devices, ofResult])
 
   // Proactively probe the backend when the accurate engine is selected, so the
   // HUD can show online/offline (and how to start it) before the user clicks run.
@@ -254,6 +295,52 @@ function App() {
       ...current,
       [id]: transform,
     }))
+  }
+
+  const placeObjectAt = (id: EditableObjectKey, position: [number, number, number]) => {
+    const clamped = clampAssetPosition(id, position[0], position[2])
+
+    setObjectTransforms((current) => ({
+      ...current,
+      [id]: {
+        ...current[id],
+        position: clamped,
+      },
+    }))
+    setSelectedObject(id)
+    setTransformMode('translate')
+
+    if (id === 'fan') {
+      setAutoFanSweep(false)
+    }
+  }
+
+  const dropAssetOnCanvas = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+
+    const id = (event.dataTransfer.getData('application/x-room-asset') || draggingAsset) as EditableObjectKey | null
+    const camera = canvasCameraRef.current
+    const canvas = canvasElementRef.current
+
+    setDraggingAsset(null)
+
+    if (!id || !camera || !canvas) {
+      return
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    )
+
+    dropRaycaster.setFromCamera(pointer, camera)
+
+    if (!dropRaycaster.ray.intersectPlane(dropPlane, dropPoint)) {
+      return
+    }
+
+    placeObjectAt(id, [dropPoint.x / roomScale[0], 0, dropPoint.z / roomScale[2]])
   }
 
   const applySessionMapping = (session: IntentSessionState, mode: IntentMapperMode = mapperMode) => {
@@ -495,7 +582,12 @@ function App() {
           </div>
         </header>
 
-        <div className="scene-panel">
+        <div
+          className={draggingAsset ? 'scene-panel asset-drop-active' : 'scene-panel'}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={() => setDraggingAsset(null)}
+          onDrop={dropAssetOnCanvas}
+        >
           {engine === 'openfoam' && (
             <div className="engine-hud" role="status">
               <div className="engine-hud-head">
@@ -551,11 +643,20 @@ function App() {
               </div>
             </div>
           )}
+          {draggingAsset ? (
+            <div className="drop-target-badge" aria-hidden="true">
+              Drop {editableObjectNames[draggingAsset]} into the room
+            </div>
+          ) : null}
           <Canvas
             camera={{ position: cameraViews.fit.position, fov: 50 }}
             shadows
             gl={{ antialias: true }}
             data-testid="room-canvas"
+            onCreated={({ camera, gl }) => {
+              canvasCameraRef.current = camera
+              canvasElementRef.current = gl.domElement
+            }}
             onPointerMissed={() => setSelectedObject(null)}
           >
             <SceneCameraRig view={cameraView} scale={roomScale} />
@@ -794,7 +895,7 @@ function App() {
                     <BoxSelect size={18} />
                     <div>
                       <strong>{selectedObject ? editableObjectNames[selectedObject] : 'No object selected'}</strong>
-                      <small>{selectedObject ? `${transformMode === 'translate' ? 'Move' : 'Rotate'} gizmo active` : 'Scene object'}</small>
+                      <small>{selectedObject ? (transformMode === 'translate' ? 'Drag on the floor to move' : 'Rotate handle active') : 'Drag an asset or click an object'}</small>
                     </div>
                   </div>
 
@@ -833,8 +934,32 @@ function App() {
                       <Sofa size={18} />
                       Room assets
                     </div>
+                    <div className="asset-grid" aria-label="Draggable room assets">
+                      {roomAssetIds.map((assetId) => (
+                        <button
+                          key={assetId}
+                          type="button"
+                          draggable
+                          className={selectedObject === assetId ? 'selected' : ''}
+                          onClick={() => {
+                            setSelectedObject(assetId)
+                            setTransformMode('translate')
+                          }}
+                          onDragStart={(event) => {
+                            setDraggingAsset(assetId)
+                            event.dataTransfer.effectAllowed = 'move'
+                            event.dataTransfer.setData('application/x-room-asset', assetId)
+                          }}
+                          onDragEnd={() => setDraggingAsset(null)}
+                          title={`Drag ${editableObjectNames[assetId]} into the room`}
+                        >
+                          <Sofa size={15} />
+                          <span>{editableObjectNames[assetId]}</span>
+                        </button>
+                      ))}
+                    </div>
                     <p>
-                      Sofa, coffee table, TV console, side table, baby crib, seated person, sleeping baby, rug, plant, lamp, and standing fan are editable 3D scene objects. The wall AC and exhaust vent are fixed HVAC devices that feed the airflow field.
+                      Drag a chip onto the floor, then grab the object directly in the 3D room. AC and exhaust stay fixed because they define the engine boundary conditions.
                     </p>
                   </div>
                 </>

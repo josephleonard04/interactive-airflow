@@ -25,10 +25,12 @@ export function StableFluidParticles({
 }) {
   const mesh = useRef<THREE.InstancedMesh>(null)
   const dummy = useMemo(() => new THREE.Object3D(), [])
+  const yaw = fanTransform.rotation[1]
   const particleState = useMemo(() => {
     const positions = new Float32Array(count * 3)
     const ages = new Float32Array(count)
     const randoms = new Float32Array(count * 5)
+    const velocities = new Float32Array(count * 3)
 
     for (let index = 0; index < count; index += 1) {
       randoms[index * 5] = Math.random() - 0.5
@@ -36,11 +38,11 @@ export function StableFluidParticles({
       randoms[index * 5 + 2] = Math.random()
       randoms[index * 5 + 3] = Math.random()
       randoms[index * 5 + 4] = Math.random()
-      resetParticle(positions, ages, randoms, index, origin, fanTransform.rotation[1], spread)
+      resetParticle(positions, ages, randoms, index, origin, yaw, spread)
     }
 
-    return { ages, positions, randoms }
-  }, [count, fanTransform.rotation[1], origin[0], origin[1], origin[2], spread])
+    return { ages, positions, randoms, velocities }
+  }, [count, origin, spread, yaw])
 
   useFrame(({ clock }, delta) => {
     if (!mesh.current) {
@@ -49,7 +51,6 @@ export function StableFluidParticles({
 
     const stepDelta = Math.min(0.033, delta)
     const opacityScale = enabled ? 1 : 0
-    const yaw = fanTransform.rotation[1]
     const directionX = -Math.cos(yaw)
     const directionZ = Math.sin(yaw)
     const sideX = -directionZ
@@ -82,6 +83,9 @@ export function StableFluidParticles({
 
       if (needsReset || !enabled) {
         resetParticle(particleState.positions, particleState.ages, particleState.randoms, index, origin, yaw, spread)
+        particleState.velocities[base] = 0
+        particleState.velocities[base + 1] = 0
+        particleState.velocities[base + 2] = 0
       }
 
       const jetCore = Math.max(0, 1 - crossJetDistance / (0.65 + downJetDistance * 0.12))
@@ -91,14 +95,22 @@ export function StableFluidParticles({
       const roll = Math.cos(clock.elapsedTime * 1.7 + randomBase) * (0.018 + sourceStrength * 0.018)
       const jetBias = Math.max(0.12, jetCore) * sourceStrength * 0.52
 
-      particleState.positions[base] += (velocity.x * flowScale + directionX * jetBias + sideX * swirl) * stepDelta
-      particleState.positions[base + 2] += (velocity.z * flowScale + directionZ * jetBias + sideZ * swirl) * stepDelta
-      particleState.positions[base + 1] +=
-        (velocity.y * flowScale * 0.74 +
-          (origin[1] - particleState.positions[base + 1]) * 0.18 +
-          Math.sin(clock.elapsedTime * 2.2 + particleState.randoms[randomBase + 3] * 9) * 0.18 +
-          roll) *
-        stepDelta
+      const smooth = 1 - Math.exp(-stepDelta * 8.5)
+      const targetVx = velocity.x * flowScale + directionX * jetBias + sideX * swirl
+      const targetVz = velocity.z * flowScale + directionZ * jetBias + sideZ * swirl
+      const targetVy =
+        velocity.y * flowScale * 0.74 +
+        (origin[1] - particleState.positions[base + 1]) * 0.18 +
+        Math.sin(clock.elapsedTime * 2.2 + particleState.randoms[randomBase + 3] * 9) * 0.14 +
+        roll
+
+      particleState.velocities[base] += (targetVx - particleState.velocities[base]) * smooth
+      particleState.velocities[base + 1] += (targetVy - particleState.velocities[base + 1]) * smooth
+      particleState.velocities[base + 2] += (targetVz - particleState.velocities[base + 2]) * smooth
+
+      particleState.positions[base] += particleState.velocities[base] * stepDelta
+      particleState.positions[base + 1] += particleState.velocities[base + 1] * stepDelta
+      particleState.positions[base + 2] += particleState.velocities[base + 2] * stepDelta
 
       dummy.position.set(
         particleState.positions[base],

@@ -46,18 +46,41 @@ export function RoomShell({
     <group>
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[9.8, 7.2]} />
-        <meshStandardMaterial color="#d8c7aa" roughness={0.82} />
+        <meshStandardMaterial color="#d7c6ac" roughness={0.82} />
       </mesh>
-      <gridHelper args={[9.8, 14, '#8a8174', '#c2b29b']} position={[0, 0.006, 0]} />
+      {Array.from({ length: 12 }).map((_, index) => (
+        <Box
+          key={`floor-plank-${index}`}
+          position={[-4.48 + index * 0.82, 0.012, 0]}
+          scale={[0.035, 0.018, 7.04]}
+          color={index % 2 === 0 ? '#c7ad88' : '#bfa580'}
+          opacity={0.52}
+        />
+      ))}
+      {Array.from({ length: 7 }).map((_, index) => (
+        <Box
+          key={`floor-cross-${index}`}
+          position={[0, 0.014, -3.02 + index * 1.0]}
+          scale={[9.42, 0.012, 0.018]}
+          color="#f3eadc"
+          opacity={0.36}
+        />
+      ))}
+      <gridHelper args={[9.8, 14, '#6f7f7a', '#d5ded7']} position={[0, 0.018, 0]} />
 
-      <Box position={[0, 1.75, -3.6]} scale={[9.8, 3.5, 0.12]} color="#f2eee6" opacity={wallOpacity} />
-      <Box position={[-4.9, 1.75, 0]} scale={[0.12, 3.5, 7.2]} color="#ece5d8" opacity={wallOpacity * 0.78} />
-      <Box position={[4.9, 1.75, 0]} scale={[0.12, 3.5, 7.2]} color="#efe9dc" opacity={wallOpacity * 0.78} />
-      <Box position={[0, 0.12, -3.52]} scale={[9.2, 0.12, 0.08]} color="#b7a58f" />
-      <Box position={[-4.82, 0.12, 0]} scale={[0.08, 0.12, 6.65]} color="#b7a58f" />
-      <Box position={[4.82, 0.12, 0]} scale={[0.08, 0.12, 6.65]} color="#b7a58f" />
+      <Box position={[0, 1.75, -3.6]} scale={[9.8, 3.5, 0.12]} color="#f6f0e7" opacity={wallOpacity} />
+      <Box position={[-4.9, 1.75, 0]} scale={[0.12, 3.5, 7.2]} color="#e7f0ec" opacity={wallOpacity * 0.86} />
+      <Box position={[4.9, 1.75, 0]} scale={[0.12, 3.5, 7.2]} color="#eef1f6" opacity={wallOpacity * 0.86} />
+      <Box position={[0, 2.86, -3.54]} scale={[9.9, 0.12, 0.18]} color="#7c8a83" opacity={0.82} />
+      <Box position={[-4.84, 2.86, 0]} scale={[0.18, 0.12, 7.22]} color="#7c8a83" opacity={0.76} />
+      <Box position={[4.84, 2.86, 0]} scale={[0.18, 0.12, 7.22]} color="#7c8a83" opacity={0.76} />
+      <Box position={[0, 0.12, -3.52]} scale={[9.2, 0.12, 0.08]} color="#9c8a71" />
+      <Box position={[-4.82, 0.12, 0]} scale={[0.08, 0.12, 6.65]} color="#8f9f98" />
+      <Box position={[4.82, 0.12, 0]} scale={[0.08, 0.12, 6.65]} color="#8d9bb0" />
+      <Box position={[0, 2.76, 0]} scale={[9.5, 0.035, 6.9]} color="#fff9ee" opacity={0.1} />
 
-      <Box position={[-2.5, 0.02, 0.55]} scale={[3.8, 0.035, 2.4]} color="#e07a5f" />
+      <Box position={[-2.5, 0.024, 0.55]} scale={[3.8, 0.035, 2.4]} color="#b65d71" opacity={0.76} />
+      <Box position={[-2.5, 0.048, 0.55]} scale={[3.55, 0.018, 2.16]} color="#e8adb8" opacity={0.42} />
       <Box position={[2.85, 1.55, -3.53]} scale={[1.55, 1.05, 0.05]} color="#cfe2d5" />
       <Box position={[-3.35, 1.5, -3.53]} scale={[1.15, 1.4, 0.05]} color="#d7e7ef" />
       <Box position={[2.85, 1.55, -3.565]} scale={[1.7, 1.18, 0.025]} color="#ffffff" opacity={0.2} roughness={0.18} />
@@ -65,6 +88,8 @@ export function RoomShell({
       <Box position={[2.85, 1.55, -3.59]} scale={[1.58, 0.04, 0.03]} color="#9aa7a1" />
       <Box position={[-3.35, 1.5, -3.565]} scale={[1.28, 1.52, 0.025]} color="#ffffff" opacity={0.18} roughness={0.18} />
       <Box position={[-3.35, 1.5, -3.59]} scale={[1.18, 0.04, 0.03]} color="#9aa7a1" />
+      <Box position={[0.15, 1.06, -3.57]} scale={[0.82, 1.92, 0.045]} color="#b7c0b9" opacity={0.5} />
+      <Box position={[0.15, 2.04, -3.61]} scale={[0.92, 0.08, 0.06]} color="#6e7b73" />
 
       {showFlowMap ? (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.048, 0]}>

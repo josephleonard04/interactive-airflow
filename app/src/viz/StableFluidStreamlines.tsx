@@ -24,7 +24,7 @@ export function StableFluidStreamlines({
 }) {
   const { points, colors } = useMemo(
     () => buildStreamlinePaths({ density, enabled, fanTransform, origin, sampler, speed, spread, color }),
-    [density, enabled, fanTransform.rotation[1], origin[0], origin[1], origin[2], sampler, speed, spread, color],
+    [color, density, enabled, fanTransform, origin, sampler, speed, spread],
   )
 
   if (points.length === 0) return null
