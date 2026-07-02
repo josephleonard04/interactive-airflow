@@ -73,9 +73,14 @@ export interface Relocation {
  */
 export function relocateForGoal(plan: FloorPlan, goal: OptimizeGoal, roomId: string | null): Relocation {
   const target = (roomId ? plan.rooms.find((r) => r.id === roomId) : null) ?? largestRoom(plan);
+  // Rooms in placement priority: the target first, then the rest by size, so
+  // multiple devices of a type spread across DIFFERENT rooms instead of piling
+  // into one spot. (A targeted goal keeps the first of each type in the target.)
+  const roomOrder = [target, ...plan.rooms.filter((r) => r.id !== target.id).sort((a, b) => b.rect.w * b.rect.d - a.rect.w * a.rect.d)];
   const wanted = GOAL_DEVICES[goal];
   const counts: Record<string, number> = {};
   const changes: string[] = [];
+  const openings = [...plan.doors, ...plan.windows];
 
   // Mutable working copy so each placement avoids the already-placed objects
   // (no two objects share a space — furniture and earlier devices are obstacles).
@@ -85,24 +90,36 @@ export function relocateForGoal(plan: FloorPlan, goal: OptimizeGoal, roomId: str
   for (const it of toPlace) {
     const index = counts[it.type] ?? 0;
     counts[it.type] = index + 1;
-    const spot = deviceSpot(target.rect, it.type, index, plan.wallHeight);
     const others = items.filter((o) => o.id !== it.id);
-    const pos = findFreeSpot(
-      target.rect,
-      { size: it.size, rotationY: spot.rotationY, mount: it.mount },
-      others,
-      spot.position,
-      searchAxis(it.type),
-    );
-    const moved =
-      Math.abs(pos[0] - it.position[0]) > 0.05 ||
-      Math.abs(pos[2] - it.position[2]) > 0.05 ||
-      Math.abs(spot.rotationY - it.rotationY) > 0.05;
-    if (!moved) continue;
-    it.position = [pos[0], spot.position[1], pos[2]];
-    it.rotationY = spot.rotationY;
-    it.roomId = target.id;
-    changes.push(`Moved ${DEVICE_LABEL[it.type] ?? it.type} to ${target.name}`);
+    // First device of a type serves the target room; extras cover other rooms.
+    const preferred = roomOrder[Math.min(index, roomOrder.length - 1)];
+    let placed = false;
+    for (const room of [preferred, ...roomOrder.filter((r) => r.id !== preferred.id)]) {
+      const spot = deviceSpot(room.rect, it.type, 0, plan.wallHeight);
+      const pos = findFreeSpot(
+        room.rect,
+        { size: it.size, rotationY: spot.rotationY, mount: it.mount },
+        others,
+        spot.position,
+        searchAxis(it.type),
+        0.04,
+        openings,
+      );
+      if (!pos) continue; // room is full — try the next room, never overlap
+      const moved =
+        Math.abs(pos[0] - it.position[0]) > 0.05 ||
+        Math.abs(pos[2] - it.position[2]) > 0.05 ||
+        Math.abs(spot.rotationY - it.rotationY) > 0.05;
+      if (moved) {
+        it.position = [pos[0], spot.position[1], pos[2]];
+        it.rotationY = spot.rotationY;
+        it.roomId = room.id;
+        changes.push(`Moved ${DEVICE_LABEL[it.type] ?? it.type} to ${room.name}`);
+      }
+      placed = true;
+      break;
+    }
+    if (!placed) changes.push(`${DEVICE_LABEL[it.type] ?? it.type}: no free spot — left in place`);
   }
 
   return { items, changes, targetName: target.name };

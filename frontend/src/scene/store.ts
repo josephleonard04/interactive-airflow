@@ -246,8 +246,8 @@ function diffPlan(before: FloorPlan, after: FloorPlan): string[] {
     if (!b || !DEV_NAME[it.type]) continue;
     if (b.on === it.on && b.power === it.power && b.oscillate === it.oscillate) continue;
     const on = it.on !== false;
-    const osc = it.type === "fan" && it.oscillate ? ", oscillating" : "";
-    lines.push(`${DEV_NAME[it.type]} → ${on ? `on · ${POWER_WORD[it.power ?? 2]}${osc}` : "off"}`);
+    const osc = it.type === "fan" ? (it.oscillate ? " · oscillating" : " · fixed direction") : "";
+    lines.push(`${DEV_NAME[it.type]} → ${on ? `on · ${POWER_WORD[it.power ?? 2]} power${osc}` : "off"}`);
   }
   const cnt = (arr: Opening[], base: Opening[], open: boolean) =>
     arr.filter((o, i) => o.open === open && base[i]?.open !== open).length;
@@ -320,6 +320,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       });
       const exterior = (o: Opening) => o.rooms.includes("outside");
       const setOpen = (o: Opening): Opening => {
+        // The entrance (an exterior door) is never auto-opened — people don't
+        // leave their front door wide open. Windows handle exterior venting.
+        if (o.kind === "door" && exterior(o)) return o;
         const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
         return open === o.open ? o : { ...o, open };
       };
@@ -365,6 +368,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       });
       const setOpen = (o: Opening): Opening => {
         const ext = o.rooms.includes("outside");
+        if (o.kind === "door" && ext) return o; // never auto-open the entrance
         let open = o.open;
         if (!ext && o.kind === "door") open = true; // open interior doors so the effect spreads
         else if (ext && goal === "ventilate") open = targetId ? o.rooms.includes(targetId) : true;
