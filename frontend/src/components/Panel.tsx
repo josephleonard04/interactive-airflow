@@ -174,6 +174,18 @@ export function Panel() {
                   ))}
                 </div>
               )}
+              {selected.type === "fan" && selected.on !== false && (
+                <div className="field" style={{ marginTop: 6 }}>
+                  <span>sweep left–right</span>
+                  <button
+                    className={selected.oscillate ? "toggle on" : "toggle"}
+                    onClick={() => updateItem(selected.id, { oscillate: !selected.oscillate })}
+                    title="Oscillate like a real stand fan — spreads air over a wide arc"
+                  >
+                    {selected.oscillate ? "Sweeping" : "Fixed"}
+                  </button>
+                </div>
+              )}
             </>
           )}
           <RotationDial

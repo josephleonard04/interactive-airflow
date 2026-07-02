@@ -1,5 +1,5 @@
 import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
-import { findFreeSpot } from "../floorplan/collision";
+import { findFreeSpot, type SearchAxis } from "../floorplan/collision";
 import type { FloorPlan, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { DEVICE_LABEL, GOAL_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
 
@@ -42,40 +42,46 @@ interface Candidate {
   rotationY: number;
   roomId: string;
   roomName: string;
+  /** Collision-dodge direction: wall devices slide along their wall line only. */
+  axis: SearchAxis;
+  /** Fan sweep mode this candidate evaluates (fans only). */
+  oscillate?: boolean;
 }
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 /** Candidate spots for a device type in one room: each wall + the centre,
- *  facing into the room — derived from the room's actual geometry. */
+ *  facing into the room — derived from the room's actual geometry. Wall
+ *  devices carry the axis of THEIR wall so they can only slide along it. */
 function candidateSpots(room: { id: string; name: string; rect: Rect }, type: string, wallHeight: number): Candidate[] {
   const { x, z, w, d } = room.rect;
   const cx = x + w / 2;
   const cz = z + d / 2;
   const out: Candidate[] = [];
-  const mk = (px: number, py: number, pz: number, rot: number) =>
-    out.push({ position: [px, py, pz] as Vec3, rotationY: rot, roomId: room.id, roomName: room.name });
+  const mk = (px: number, py: number, pz: number, rot: number, axis: SearchAxis, oscillate?: boolean) =>
+    out.push({ position: [px, py, pz] as Vec3, rotationY: rot, roomId: room.id, roomName: room.name, axis, oscillate });
 
   if (type === "ac") {
     const y = clamp(1.9, 0.6, wallHeight - 0.4);
-    mk(cx, y, z + d - 0.14, Math.PI); // north wall, blows -z
-    mk(cx, y, z + 0.14, 0); // south wall, blows +z
-    mk(x + 0.14, y, cz, Math.PI / 2); // west wall, blows +x
-    mk(x + w - 0.14, y, cz, -Math.PI / 2); // east wall, blows -x
+    mk(cx, y, z + d - 0.14, Math.PI, "x"); // north wall, blows -z
+    mk(cx, y, z + 0.14, 0, "x"); // south wall, blows +z
+    mk(x + 0.14, y, cz, Math.PI / 2, "z"); // west wall, blows +x
+    mk(x + w - 0.14, y, cz, -Math.PI / 2, "z"); // east wall, blows -x
   } else if (type === "heater") {
-    mk(x + 0.2, 0.25, cz, Math.PI / 2);
-    mk(x + w - 0.2, 0.25, cz, -Math.PI / 2);
-    mk(cx, 0.25, z + 0.2, 0);
-    mk(cx, 0.25, z + d - 0.2, Math.PI);
+    mk(x + 0.2, 0.25, cz, Math.PI / 2, "z");
+    mk(x + w - 0.2, 0.25, cz, -Math.PI / 2, "z");
+    mk(cx, 0.25, z + 0.2, 0, "x");
+    mk(cx, 0.25, z + d - 0.2, Math.PI, "x");
   } else if (type === "supply") {
-    mk(cx, wallHeight - 0.1, cz, 0);
-    mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0);
-    mk(x + w * 0.7, wallHeight - 0.1, z + d * 0.7, 0);
+    mk(cx, wallHeight - 0.1, cz, 0, "area");
+    mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0, "area");
+    mk(x + w * 0.7, wallHeight - 0.1, z + d * 0.7, 0, "area");
   } else {
-    // fan: centre + two offsets, nominal facing toward the room centre
-    mk(cx, 0.65, cz, 0);
-    mk(x + w * 0.3, 0.65, z + d * 0.35, 0);
-    mk(x + w * 0.7, 0.65, z + d * 0.65, Math.PI);
+    // fan: two spots × sweep on/off — oscillation is part of the search
+    mk(cx, 0.65, cz, 0, "area", true);
+    mk(cx, 0.65, cz, 0, "area", false);
+    mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", true);
+    mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", false);
   }
   return out;
 }
@@ -193,28 +199,43 @@ export function searchOptimize(
       for (const cand of candidateSpots(room, it.type, plan.wallHeight)) {
         if (evals >= B.maxEvals) break;
         const others = working.items.filter((o) => o.id !== it.id);
+        // Wall devices (AC/heater) may only slide ALONG their wall — never into
+        // the room, onto a window, or into a doorway (no area fallback).
+        const wallBound = cand.axis !== "area";
         const pos = findFreeSpot(
           room.rect,
           { size: it.size, rotationY: cand.rotationY, mount: it.mount },
           others,
           cand.position,
-          "area",
+          cand.axis,
           0.04,
           openings,
+          !wallBound,
         );
         if (!pos) continue; // occupied / blocks a doorway — skip, never overlap
+        const placedPos: Vec3 = wallBound
+          ? cand.axis === "x"
+            ? [pos[0], cand.position[1], cand.position[2]] // keep the wall's z
+            : [cand.position[0], cand.position[1], pos[2]] // keep the wall's x
+          : [pos[0], cand.position[1], pos[2]];
         const trial: FloorPlan = {
           ...working,
           items: working.items.map((o) =>
             o.id === it.id
-              ? { ...o, position: [pos[0], cand.position[1], pos[2]] as Vec3, rotationY: cand.rotationY, roomId: cand.roomId }
+              ? {
+                  ...o,
+                  position: placedPos,
+                  rotationY: cand.rotationY,
+                  roomId: cand.roomId,
+                  ...(cand.oscillate !== undefined ? { oscillate: cand.oscillate } : {}),
+                }
               : o,
           ),
         };
         const score = scorePlan(trial, goal, targetId, B);
         evals++;
         if (!best || score > best.score) {
-          best = { cand: { ...cand, position: [pos[0], cand.position[1], pos[2]] as Vec3 }, score };
+          best = { cand: { ...cand, position: placedPos }, score };
         }
       }
       // good-enough early exit: the target room usually wins for primaries
@@ -234,11 +255,20 @@ export function searchOptimize(
       ...working,
       items: working.items.map((o) =>
         o.id === it.id
-          ? { ...o, position: best!.cand.position, rotationY: best!.cand.rotationY, roomId: best!.cand.roomId }
+          ? {
+              ...o,
+              position: best!.cand.position,
+              rotationY: best!.cand.rotationY,
+              roomId: best!.cand.roomId,
+              ...(best!.cand.oscillate !== undefined ? { oscillate: best!.cand.oscillate } : {}),
+            }
           : o,
       ),
     };
     if (moved) changes.push(`Moved ${DEVICE_LABEL[it.type] ?? it.type} to ${best.cand.roomName} (best of search)`);
+    if (it.type === "fan" && best.cand.oscillate !== undefined) {
+      changes.push(`Fan sweep → ${best.cand.oscillate ? "on (oscillating)" : "off (fixed)"} (best of search)`);
+    }
   }
 
   if (evals > 0) changes.push(`Compared ${evals} layouts with the simulator`);

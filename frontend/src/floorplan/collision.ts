@@ -89,6 +89,8 @@ export function findFreeSpot(
   axis: SearchAxis = "area",
   margin = 0.04,
   openings: Opening[] = [],
+  /** Wall-bound items (AC, heater) must NOT drift into the room interior. */
+  allowAreaFallback = true,
 ): Vec3 | null {
   const [hx, hz] = footHalf(item.size, item.rotationY);
   const minX = room.x + hx + 0.06;
@@ -116,8 +118,11 @@ export function findFreeSpot(
   for (const c of cands) {
     if (!collides(c, item.size, item.rotationY, item.mount, others, margin, keepClear)) return c;
   }
-  // a wall item ("x"/"z") that found nothing on its line: try the whole room
-  if (axis !== "area") return findFreeSpot(room, item, others, prefer, "area", margin, openings);
+  // a line search that found nothing may widen to the whole room — but only
+  // for free-standing items; wall-mounted devices stay on their wall line.
+  if (axis !== "area" && allowAreaFallback) {
+    return findFreeSpot(room, item, others, prefer, "area", margin, openings, false);
+  }
   return null;
 }
 
