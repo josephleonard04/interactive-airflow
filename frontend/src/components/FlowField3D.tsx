@@ -43,6 +43,7 @@ export function FlowField3D() {
   const setSimReady = useSceneStore((s) => s.setSimReady);
   const engine = useSceneStore((s) => s.engine);
   const accurate = useSceneStore((s) => s.accurate);
+  const airflowStyle = useSceneStore((s) => s.airflowStyle);
 
   const built = useMemo(() => buildSim3D(plan), [plan]);
   const soft = useMemo(makeSoftTexture, []);
@@ -210,7 +211,7 @@ export function FlowField3D() {
     }
     // airflow: keep drifting dots through the (frozen) steady flow
     const headPts = headRef.current;
-    const showAir = mode === "airflow";
+    const showAir = mode === "airflow" && airflowStyle === "dots";
     if (headPts) headPts.visible = showAir;
     if (!showAir || !headPts) return;
     const { sim, nx, ny, nz, dx, origin, worldToCell } = built;
@@ -241,7 +242,7 @@ export function FlowField3D() {
     (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   });
 
-  const showStreamlines = mode === "airflow" && paths != null && paths.points.length > 0;
+  const showStreamlines = mode === "airflow" && airflowStyle === "lines" && paths != null && paths.points.length > 0;
 
   return (
     <group>

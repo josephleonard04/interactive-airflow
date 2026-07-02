@@ -15,6 +15,8 @@ import {
   type AccurateResult,
   type BackendHealth,
 } from "../engine/accurate";
+import { relocateForGoal, type OptimizeGoal } from "../intent/optimize";
+import { parseGoal } from "../intent/objectives";
 import type {
   FloorPlan,
   HomeSize,
@@ -83,8 +85,11 @@ export interface SceneState {
   simSourceRoomId: string | null;
   /** false while the steady-state solve is still converging. */
   simReady: boolean;
+  /** Airflow visual style: drifting dots (default) or streamlines. */
+  airflowStyle: AirflowStyle;
   toggleSim: () => void;
   setSimMode: (m: SimMode) => void;
+  setAirflowStyle: (s: AirflowStyle) => void;
   toggleSimPause: () => void;
   setSimSource: (id: string | null) => void;
   setSimReady: (v: boolean) => void;
@@ -99,13 +104,23 @@ export interface SceneState {
   runAccurate: () => Promise<void>;
   refreshAccurateHealth: () => Promise<void>;
 
-  /** One-click device presets (set on/power across all HVAC). */
+  /** One-click device presets (set on/power + relocate devices + open/close doors). */
   applyAirflowPreset: (preset: AirflowPreset) => void;
-  /** Summary of the last preset's changes, pending Accept/Cancel. */
+  /** Solve a plain-language goal into the most effective device layout + settings. */
+  applyBestSolution: (goalText: string) => boolean;
+  /** Summary of the last change, pending Accept/Cancel. */
   pendingChange: PendingChange | null;
   acceptChange: () => void;
   cancelChange: () => void;
 }
+
+const PRESET_GOAL: Record<AirflowPreset, OptimizeGoal> = {
+  comfort: "balanced",
+  cooling: "cool",
+  freshair: "ventilate",
+  warmup: "warm",
+  circulate: "circulate",
+};
 
 export interface PendingChange {
   title: string;
@@ -198,6 +213,7 @@ export const PRESETS: Record<AirflowPreset, PresetSpec> = {
 };
 
 export type SimMode = "airflow" | "temperature" | "contamination" | "noise";
+export type AirflowStyle = "dots" | "lines";
 
 let customId = 0;
 const HISTORY = 50;
@@ -219,6 +235,33 @@ function roomAt(plan: FloorPlan, x: number, z: number): string {
   return room ? room.id : plan.rooms[0]?.id ?? "";
 }
 
+const DEV_NAME: Record<string, string> = { ac: "AC", fan: "Fan", supply: "Vent", heater: "Heater" };
+const POWER_WORD = ["", "low", "medium", "high"];
+
+/** Human-readable device + opening changes between two plans (for the review). */
+function diffPlan(before: FloorPlan, after: FloorPlan): string[] {
+  const lines: string[] = [];
+  for (const it of after.items) {
+    const b = before.items.find((x) => x.id === it.id);
+    if (!b || !DEV_NAME[it.type]) continue;
+    if (b.on === it.on && b.power === it.power && b.oscillate === it.oscillate) continue;
+    const on = it.on !== false;
+    const osc = it.type === "fan" && it.oscillate ? ", oscillating" : "";
+    lines.push(`${DEV_NAME[it.type]} → ${on ? `on · ${POWER_WORD[it.power ?? 2]}${osc}` : "off"}`);
+  }
+  const cnt = (arr: Opening[], base: Opening[], open: boolean) =>
+    arr.filter((o, i) => o.open === open && base[i]?.open !== open).length;
+  const dOpen = cnt(after.doors, before.doors, true);
+  const dShut = cnt(after.doors, before.doors, false);
+  const wOpen = cnt(after.windows, before.windows, true);
+  const wShut = cnt(after.windows, before.windows, false);
+  if (dOpen) lines.push(`Opened ${dOpen} interior door${dOpen > 1 ? "s" : ""}`);
+  if (dShut) lines.push(`Closed ${dShut} door${dShut > 1 ? "s" : ""}`);
+  if (wOpen) lines.push(`Opened ${wOpen} window${wOpen > 1 ? "s" : ""}`);
+  if (wShut) lines.push(`Closed ${wShut} window${wShut > 1 ? "s" : ""}`);
+  return lines;
+}
+
 export const useSceneStore = create<SceneState>((set, get) => ({
   plan: generateHome(DEFAULT_SIZE),
   started: false,
@@ -235,9 +278,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simPaused: false,
   simSourceRoomId: null,
   simReady: false,
+  airflowStyle: "dots",
 
   toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
   setSimMode: (m) => set({ simMode: m }),
+  setAirflowStyle: (airflowStyle) => set({ airflowStyle }),
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
   setSimReady: (v) => set({ simReady: v }),
@@ -275,40 +320,20 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       });
       const exterior = (o: Opening) => o.rooms.includes("outside");
       const setOpen = (o: Opening): Opening => {
-        // Interior doors follow interiorDoors; exterior openings follow windows.
         const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
         return open === o.open ? o : { ...o, open };
       };
-      const after = {
+      const withOpenings: FloorPlan = {
         ...before,
         items,
         doors: before.doors.map(setOpen),
         windows: before.windows.map(setOpen),
         walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
       };
-
-      // Human-readable diff for the Accept/Cancel review.
-      const lines: string[] = [];
-      const names: Record<string, string> = { ac: "AC", fan: "Fan", supply: "Vent", heater: "Heater" };
-      const powerWord = ["", "low", "medium", "high"];
-      for (const it of after.items) {
-        const b = before.items.find((x) => x.id === it.id);
-        if (!b || !names[it.type]) continue;
-        if (b.on === it.on && b.power === it.power && b.oscillate === it.oscillate) continue;
-        const on = it.on !== false;
-        const osc = it.type === "fan" && it.oscillate ? ", oscillating" : "";
-        lines.push(`${names[it.type]} → ${on ? `on · ${powerWord[it.power ?? 2]}${osc}` : "off"}`);
-      }
-      const cnt = (arr: Opening[], base: Opening[], open: boolean) =>
-        arr.filter((o, i) => o.open === open && base[i]?.open !== open).length;
-      const dOpen = cnt(after.doors, before.doors, true);
-      const dShut = cnt(after.doors, before.doors, false);
-      const wOpen = cnt(after.windows, before.windows, true);
-      const wShut = cnt(after.windows, before.windows, false);
-      if (dOpen) lines.push(`Opened ${dOpen} interior door${dOpen > 1 ? "s" : ""}`);
-      if (dShut) lines.push(`Closed ${dShut} door${dShut > 1 ? "s" : ""}`);
-      if (wOpen) lines.push(`Opened ${wOpen} window${wOpen > 1 ? "s" : ""}`);
-      if (wShut) lines.push(`Closed ${wShut} window${wShut > 1 ? "s" : ""}`);
+      // Move the relevant devices to their most effective spots for this goal.
+      const reloc = relocateForGoal(withOpenings, PRESET_GOAL[preset], null);
+      const after: FloorPlan = { ...withOpenings, items: reloc.items };
+      const lines = [...diffPlan(before, after), ...reloc.changes];
 
       return {
         ...snapshot(s),
@@ -316,6 +341,56 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         pendingChange: { title: spec.label, lines: lines.length ? lines : ["Already set — no change."] },
       };
     }),
+
+  applyBestSolution: (goalText) => {
+    const objs = parseGoal(goalText, get().plan);
+    const obj = objs[0];
+    if (!obj) return false;
+    const goal: OptimizeGoal =
+      obj.scalar === "temperature" ? (obj.direction === "low" ? "cool" : "warm") : "ventilate";
+    // Effective device settings for the goal.
+    const cfg: Record<string, { on: boolean; power: number; oscillate?: boolean }> =
+      goal === "cool"
+        ? { ac: { on: true, power: 3 }, fan: { on: true, power: 2, oscillate: true } }
+        : goal === "warm"
+          ? { heater: { on: true, power: 3 }, fan: { on: true, power: 1, oscillate: true } }
+          : { supply: { on: true, power: 3 }, fan: { on: true, power: 3, oscillate: true } };
+    const targetId = obj.regionId;
+    set((s) => {
+      const before = s.plan;
+      const items = before.items.map((it) => {
+        const d = cfg[it.type];
+        if (!d) return it;
+        return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
+      });
+      const setOpen = (o: Opening): Opening => {
+        const ext = o.rooms.includes("outside");
+        let open = o.open;
+        if (!ext && o.kind === "door") open = true; // open interior doors so the effect spreads
+        else if (ext && goal === "ventilate") open = targetId ? o.rooms.includes(targetId) : true;
+        return open === o.open ? o : { ...o, open };
+      };
+      const withOpenings: FloorPlan = {
+        ...before,
+        items,
+        doors: before.doors.map(setOpen),
+        windows: before.windows.map(setOpen),
+        walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
+      };
+      const reloc = relocateForGoal(withOpenings, goal, targetId);
+      const after: FloorPlan = { ...withOpenings, items: reloc.items };
+      const lines = [...diffPlan(before, after), ...reloc.changes];
+      return {
+        ...snapshot(s),
+        plan: after,
+        pendingChange: {
+          title: `Best for “${goalText.trim().slice(0, 40)}”`,
+          lines: lines.length ? lines : ["Already optimal — no change."],
+        },
+      };
+    });
+    return true;
+  },
 
   pendingChange: null,
   acceptChange: () => set({ pendingChange: null }),
