@@ -15,7 +15,8 @@ import {
   type AccurateResult,
   type BackendHealth,
 } from "../engine/accurate";
-import { relocateForGoal, type OptimizeGoal } from "../intent/optimize";
+import { type OptimizeGoal } from "../intent/optimize";
+import { searchOptimize } from "../intent/searchOptimize";
 import { parseGoal } from "../intent/objectives";
 import type {
   FloorPlan,
@@ -108,6 +109,8 @@ export interface SceneState {
   applyAirflowPreset: (preset: AirflowPreset) => void;
   /** Solve a plain-language goal into the most effective device layout + settings. */
   applyBestSolution: (goalText: string) => boolean;
+  /** true while the placement search is running the simulator. */
+  optimizing: boolean;
   /** Summary of the last change, pending Accept/Cancel. */
   pendingChange: PendingChange | null;
   acceptChange: () => void;
@@ -309,43 +312,53 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }
   },
 
-  applyAirflowPreset: (preset) =>
-    set((s) => {
-      const spec = PRESETS[preset];
-      const before = s.plan;
-      const items = before.items.map((it) => {
-        const d = spec.devices[it.type];
-        if (!d) return it;
-        return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
-      });
-      const exterior = (o: Opening) => o.rooms.includes("outside");
-      const setOpen = (o: Opening): Opening => {
-        // The entrance (an exterior door) is never auto-opened — people don't
-        // leave their front door wide open. Windows handle exterior venting.
-        if (o.kind === "door" && exterior(o)) return o;
-        const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
-        return open === o.open ? o : { ...o, open };
-      };
-      const withOpenings: FloorPlan = {
-        ...before,
-        items,
-        doors: before.doors.map(setOpen),
-        windows: before.windows.map(setOpen),
-        walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
-      };
-      // Move the relevant devices to their most effective spots for this goal.
-      const reloc = relocateForGoal(withOpenings, PRESET_GOAL[preset], null);
-      const after: FloorPlan = { ...withOpenings, items: reloc.items };
-      const lines = [...diffPlan(before, after), ...reloc.changes];
-
-      return {
-        ...snapshot(s),
-        plan: after,
-        pendingChange: { title: spec.label, lines: lines.length ? lines : ["Already set — no change."] },
-      };
-    }),
+  applyAirflowPreset: (preset) => {
+    if (get().optimizing) return;
+    const spec = PRESETS[preset];
+    set({ optimizing: true });
+    // Defer the sim-scored search a tick so the "Optimizing…" state paints.
+    window.setTimeout(() => {
+      try {
+        const s = get();
+        const before = s.plan;
+        const items = before.items.map((it) => {
+          const d = spec.devices[it.type];
+          if (!d) return it;
+          return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
+        });
+        const exterior = (o: Opening) => o.rooms.includes("outside");
+        const setOpen = (o: Opening): Opening => {
+          // The entrance (an exterior door) is never auto-opened — people don't
+          // leave their front door wide open. Windows handle exterior venting.
+          if (o.kind === "door" && exterior(o)) return o;
+          const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
+          return open === o.open ? o : { ...o, open };
+        };
+        const withOpenings: FloorPlan = {
+          ...before,
+          items,
+          doors: before.doors.map(setOpen),
+          windows: before.windows.map(setOpen),
+          walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
+        };
+        // Search the user's actual layout for the best device placement.
+        const result = searchOptimize(withOpenings, PRESET_GOAL[preset], null);
+        const after: FloorPlan = { ...withOpenings, items: result.items };
+        const lines = [...diffPlan(before, after), ...result.changes];
+        set({
+          ...snapshot(s),
+          plan: after,
+          pendingChange: { title: spec.label, lines: lines.length ? lines : ["Already set — no change."] },
+          optimizing: false,
+        });
+      } catch {
+        set({ optimizing: false });
+      }
+    }, 30);
+  },
 
   applyBestSolution: (goalText) => {
+    if (get().optimizing) return false;
     const objs = parseGoal(goalText, get().plan);
     const obj = objs[0];
     if (!obj) return false;
@@ -359,43 +372,51 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           ? { heater: { on: true, power: 3 }, fan: { on: true, power: 1, oscillate: true } }
           : { supply: { on: true, power: 3 }, fan: { on: true, power: 3, oscillate: true } };
     const targetId = obj.regionId;
-    set((s) => {
-      const before = s.plan;
-      const items = before.items.map((it) => {
-        const d = cfg[it.type];
-        if (!d) return it;
-        return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
-      });
-      const setOpen = (o: Opening): Opening => {
-        const ext = o.rooms.includes("outside");
-        if (o.kind === "door" && ext) return o; // never auto-open the entrance
-        let open = o.open;
-        if (!ext && o.kind === "door") open = true; // open interior doors so the effect spreads
-        else if (ext && goal === "ventilate") open = targetId ? o.rooms.includes(targetId) : true;
-        return open === o.open ? o : { ...o, open };
-      };
-      const withOpenings: FloorPlan = {
-        ...before,
-        items,
-        doors: before.doors.map(setOpen),
-        windows: before.windows.map(setOpen),
-        walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
-      };
-      const reloc = relocateForGoal(withOpenings, goal, targetId);
-      const after: FloorPlan = { ...withOpenings, items: reloc.items };
-      const lines = [...diffPlan(before, after), ...reloc.changes];
-      return {
-        ...snapshot(s),
-        plan: after,
-        pendingChange: {
-          title: `Best for “${goalText.trim().slice(0, 40)}”`,
-          lines: lines.length ? lines : ["Already optimal — no change."],
-        },
-      };
-    });
+    set({ optimizing: true });
+    window.setTimeout(() => {
+      try {
+        const s = get();
+        const before = s.plan;
+        const items = before.items.map((it) => {
+          const d = cfg[it.type];
+          if (!d) return it;
+          return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
+        });
+        const setOpen = (o: Opening): Opening => {
+          const ext = o.rooms.includes("outside");
+          if (o.kind === "door" && ext) return o; // never auto-open the entrance
+          let open = o.open;
+          if (!ext && o.kind === "door") open = true; // open interior doors so the effect spreads
+          else if (ext && goal === "ventilate") open = targetId ? o.rooms.includes(targetId) : true;
+          return open === o.open ? o : { ...o, open };
+        };
+        const withOpenings: FloorPlan = {
+          ...before,
+          items,
+          doors: before.doors.map(setOpen),
+          windows: before.windows.map(setOpen),
+          walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
+        };
+        const result = searchOptimize(withOpenings, goal, targetId);
+        const after: FloorPlan = { ...withOpenings, items: result.items };
+        const lines = [...diffPlan(before, after), ...result.changes];
+        set({
+          ...snapshot(s),
+          plan: after,
+          pendingChange: {
+            title: `Best for “${goalText.trim().slice(0, 40)}”`,
+            lines: lines.length ? lines : ["Already optimal — no change."],
+          },
+          optimizing: false,
+        });
+      } catch {
+        set({ optimizing: false });
+      }
+    }, 30);
     return true;
   },
 
+  optimizing: false,
   pendingChange: null,
   acceptChange: () => set({ pendingChange: null }),
   cancelChange: () => {
