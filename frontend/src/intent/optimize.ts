@@ -1,0 +1,87 @@
+import type { FloorPlan, PlacedItem, Rect, Vec3 } from "../floorplan/types";
+
+// Heuristic "solver" for the most effective device layout given a goal. Rather
+// than an expensive sim-in-the-loop search, we use airflow domain rules to pick
+// an effective location + facing for each relevant device:
+//   - AC     -> high on the target room's back wall, blowing across the room
+//   - Vent   -> ceiling centre of the target room (supplies fresh air down)
+//   - Heater -> against a side wall on the floor, facing in
+//   - Fan    -> room centre, oscillating to sweep the whole room
+// Doors are opened so the effect reaches connected rooms. The result is shown
+// in the Accept/Modify/Cancel review, so the user can always reject it.
+
+export type OptimizeGoal = "cool" | "warm" | "ventilate" | "circulate" | "balanced";
+
+/** Which device types this goal actively places/uses. */
+export const GOAL_DEVICES: Record<OptimizeGoal, string[]> = {
+  cool: ["ac", "fan"],
+  warm: ["heater", "fan"],
+  ventilate: ["supply", "fan"],
+  circulate: ["fan", "supply"],
+  balanced: ["ac", "fan", "supply"],
+};
+
+export const DEVICE_LABEL: Record<string, string> = { ac: "AC", fan: "Fan", heater: "Heater", supply: "Vent" };
+
+export function largestRoom(plan: FloorPlan) {
+  return plan.rooms.reduce((b, r) => (r.rect.w * r.rect.d > b.rect.w * b.rect.d ? r : b), plan.rooms[0]);
+}
+
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+/** The most effective spot + facing for a device in a room (index spreads
+ *  multiple devices of the same type along the room). */
+export function deviceSpot(room: Rect, type: string, index: number, wallHeight: number): { position: Vec3; rotationY: number } {
+  const cx = room.x + room.w / 2;
+  const cz = room.z + room.d / 2;
+  const spread = index * 0.8;
+  const cxo = clamp(cx + spread, room.x + 0.4, room.x + room.w - 0.4);
+  const czo = clamp(cz + spread, room.z + 0.4, room.z + room.d - 0.4);
+  if (type === "ac") {
+    // back (max-z) wall, mounted high, facing into the room (-z)
+    return { position: [cxo, clamp(1.9, 0.6, wallHeight - 0.4), room.z + room.d - 0.14], rotationY: Math.PI };
+  }
+  if (type === "supply") {
+    return { position: [cxo, wallHeight - 0.1, czo], rotationY: 0 };
+  }
+  if (type === "heater") {
+    // west (min-x) wall on the floor, facing +x into the room
+    return { position: [room.x + 0.2, 0.25, czo], rotationY: Math.PI / 2 };
+  }
+  // fan: centre of the room, on the floor (oscillates, so facing is nominal)
+  return { position: [cxo, 0.65, czo], rotationY: 0 };
+}
+
+export interface Relocation {
+  items: PlacedItem[];
+  changes: string[];
+  targetName: string;
+}
+
+/**
+ * Move the goal-relevant, switched-on devices to their most effective spots in
+ * the target room (default: the largest room). Returns updated items + a
+ * human-readable list of relocations.
+ */
+export function relocateForGoal(plan: FloorPlan, goal: OptimizeGoal, roomId: string | null): Relocation {
+  const target = (roomId ? plan.rooms.find((r) => r.id === roomId) : null) ?? largestRoom(plan);
+  const wanted = GOAL_DEVICES[goal];
+  const counts: Record<string, number> = {};
+  const changes: string[] = [];
+
+  const items = plan.items.map((it) => {
+    if (!wanted.includes(it.type) || it.on === false) return it;
+    const index = counts[it.type] ?? 0;
+    counts[it.type] = index + 1;
+    const spot = deviceSpot(target.rect, it.type, index, plan.wallHeight);
+    const moved =
+      Math.abs(spot.position[0] - it.position[0]) > 0.05 ||
+      Math.abs(spot.position[2] - it.position[2]) > 0.05 ||
+      Math.abs(spot.rotationY - it.rotationY) > 0.05;
+    if (!moved) return it;
+    changes.push(`Moved ${DEVICE_LABEL[it.type] ?? it.type} to ${target.name}`);
+    return { ...it, position: spot.position, rotationY: spot.rotationY, roomId: target.id };
+  });
+
+  return { items, changes, targetName: target.name };
+}

@@ -22,6 +22,8 @@ export function SimPanel() {
   const sourceRoomId = useSceneStore((s) => s.simSourceRoomId);
   const toggleSim = useSceneStore((s) => s.toggleSim);
   const setSimMode = useSceneStore((s) => s.setSimMode);
+  const airflowStyle = useSceneStore((s) => s.airflowStyle);
+  const setAirflowStyle = useSceneStore((s) => s.setAirflowStyle);
   const setSource = useSceneStore((s) => s.setSimSource);
   const addItem = useSceneStore((s) => s.addItem);
   const selectItem = useSceneStore((s) => s.selectItem);
@@ -33,6 +35,7 @@ export function SimPanel() {
   const runAccurate = useSceneStore((s) => s.runAccurate);
   const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
   const applyAirflowPreset = useSceneStore((s) => s.applyAirflowPreset);
+  const applyBestSolution = useSceneStore((s) => s.applyBestSolution);
   const pendingChange = useSceneStore((s) => s.pendingChange);
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
@@ -193,7 +196,14 @@ export function SimPanel() {
               {t}
             </button>
           ))}
-          <button className="primary" style={{ marginLeft: "auto" }} onClick={checkGoal}>Check</button>
+          <button className="tool" style={{ marginLeft: "auto" }} onClick={checkGoal} title="Check whether the goal is met now">Check</button>
+          <button
+            className="primary"
+            onClick={() => { if (goal.trim() && applyBestSolution(goal)) checkGoalText(goal); }}
+            title="Find & apply the most effective device layout for this goal"
+          >
+            ✨ Best solution
+          </button>
         </div>
         {results.map((r, i) => (
           <div
@@ -221,6 +231,16 @@ export function SimPanel() {
           </button>
         ))}
       </div>
+      {mode === "airflow" && (
+        <div className="tools" style={{ marginTop: 6 }}>
+          <button className={airflowStyle === "dots" ? "tool active" : "tool"} onClick={() => setAirflowStyle("dots")}>
+            • Particle dots
+          </button>
+          <button className={airflowStyle === "lines" ? "tool active" : "tool"} onClick={() => setAirflowStyle("lines")}>
+            ⌇ Streamlines
+          </button>
+        </div>
+      )}
       {mode === "contamination" && (
         <div style={{ marginTop: 8 }}>
           <div className="btn-row">
