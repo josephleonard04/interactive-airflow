@@ -77,8 +77,15 @@ export function FlowField3D() {
 
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
-    () => setPaths(buildStreamlinePaths(built, { roofY: plan.wallHeight, maxSeeds: 72 })),
-    [built, plan.wallHeight],
+    () =>
+      setPaths(
+        buildStreamlinePaths(built, {
+          roofY: plan.wallHeight,
+          maxSeeds: 80,
+          rooms: plan.rooms.map((r) => r.rect),
+        }),
+      ),
+    [built, plan.wallHeight, plan.rooms],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
@@ -87,9 +94,10 @@ export function FlowField3D() {
     const { sim, nx, ny, nz, dx, cellCenter, seeds } = built;
     return (p: number) => {
       let pos: [number, number, number] | null = null;
-      // Spawn about half the particles at the AC/supply vents (where air is born)
-      // and half anywhere there's moving air, so every room shows airflow.
-      if (seeds.length && Math.random() < 0.5) {
+      // ~1/3 of particles spawn at the AC/supply vents (where air is born); the
+      // rest spawn anywhere in the house — air moves everywhere, so every room
+      // shows drifting particles, not just the AC room.
+      if (seeds.length && Math.random() < 0.35) {
         const s = seeds[(Math.random() * seeds.length) | 0];
         pos = [s[0] + (Math.random() - 0.5) * dx, s[1] + (Math.random() - 0.5) * dx, s[2] + (Math.random() - 0.5) * dx];
       } else {
@@ -97,8 +105,8 @@ export function FlowField3D() {
           const i = (Math.random() * nx) | 0, j = (Math.random() * ny) | 0, k = (Math.random() * nz) | 0;
           const c = sim.cIdx(i, j, k);
           if (sim.solid[c] || sim.open[c]) continue;
-          const [u, v, w] = sim.velocityAt(i, j, k);
-          if (Math.hypot(u, v, w) > 0.03) { pos = cellCenter(i, j, k); break; }
+          pos = cellCenter(i, j, k);
+          break;
         }
       }
       if (!pos) pos = cellCenter(nx >> 1, ny >> 1, nz >> 1);
@@ -227,8 +235,12 @@ export function FlowField3D() {
       const [i, j, k] = worldToCell(x, y, z);
       const [u, v, w] = sim.velocityAt(i, j, k);
       const sp = Math.hypot(u, v, w);
-      ageA[p] += dt;
-      const cx = x + u * dt * 1.8, cy = y + v * dt * 1.8, cz = z + w * dt * 1.8;
+      // slow air still drifts: boost sub-0.06 m/s velocities up to a visible
+      // floor (direction unchanged) so motion reads across the whole house
+      const boost = sp > 1e-4 ? Math.min(Math.max(1, 0.06 / sp), 12) : 0;
+      const ue = u * boost, ve = v * boost, we = w * boost;
+      ageA[p] += sp < 0.01 ? dt * 2.2 : dt; // stagnant particles recycle sooner
+      const cx = x + ue * dt * 1.8, cy = y + ve * dt * 1.8, cz = z + we * dt * 1.8;
       const out = cx < ox || cx > ex || cy < oy || cy > ey || cz < oz || cz > ez;
       if (!out) {
         const [ci, cj, ck] = worldToCell(cx, cy, cz);
@@ -236,7 +248,7 @@ export function FlowField3D() {
         if (sim.open[cc]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
         else if (!sim.solid[cc]) { x = cx; y = cy; z = cz; }
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
-      if (ageA[p] > maxAgeA[p] || sp < 0.015) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+      if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
       const t = Math.min(1, sp / 1.0);
       headCol[p * 3] = 0.18 - 0.06 * t; headCol[p * 3 + 1] = 0.5 - 0.18 * t; headCol[p * 3 + 2] = 0.95;

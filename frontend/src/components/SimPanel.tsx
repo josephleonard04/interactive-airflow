@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 
@@ -36,7 +36,9 @@ export function SimPanel() {
   const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
   const applyAirflowPreset = useSceneStore((s) => s.applyAirflowPreset);
   const applyBestSolution = useSceneStore((s) => s.applyBestSolution);
+  const optimizing = useSceneStore((s) => s.optimizing);
   const pendingChange = useSceneStore((s) => s.pendingChange);
+  const recheckGoal = useRef<string | null>(null);
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
@@ -44,6 +46,16 @@ export function SimPanel() {
   useEffect(() => {
     if (engine === "openfoam") refreshAccurateHealth();
   }, [engine, refreshAccurateHealth]);
+
+  // After the placement search finishes, re-check the goal against the NEW plan.
+  useEffect(() => {
+    if (!optimizing && recheckGoal.current) {
+      const g = recheckGoal.current;
+      recheckGoal.current = null;
+      checkGoalText(g);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optimizing]);
 
   const [goal, setGoal] = useState("");
   const [results, setResults] = useState<Evaluation[]>([]);
@@ -150,6 +162,7 @@ export function SimPanel() {
           {PRESET_IDS.map((id) => (
             <button
               key={id}
+              disabled={optimizing}
               onClick={() => applyAirflowPreset(id)}
               title={PRESETS[id].hint}
               style={{
@@ -163,6 +176,12 @@ export function SimPanel() {
           ))}
         </div>
       </div>
+
+      {optimizing && (
+        <p className="muted-line" style={{ marginBottom: 10, color: "var(--accent-ink-soft)", fontWeight: 700 }}>
+          ⏳ Comparing layouts with the simulator to find the best setup for your home…
+        </p>
+      )}
 
       {pendingChange && (
         <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, border: "1px solid var(--accent)", background: "var(--accent-soft)" }}>
@@ -199,10 +218,13 @@ export function SimPanel() {
           <button
             className="primary"
             style={{ marginLeft: "auto" }}
-            onClick={() => { if (goal.trim() && applyBestSolution(goal)) checkGoalText(goal); }}
-            title="Find & apply the most effective device layout for this goal"
+            disabled={optimizing}
+            onClick={() => {
+              if (goal.trim() && applyBestSolution(goal)) recheckGoal.current = goal;
+            }}
+            title="Search your layout with the simulator for the most effective setup"
           >
-            ✨ Best solution
+            {optimizing ? "⏳ Optimizing…" : "✨ Best solution"}
           </button>
         </div>
         {results.map((r, i) => (

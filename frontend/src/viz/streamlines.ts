@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Sim3D } from "../sim/sim3d";
+import type { Rect } from "../floorplan/types";
 
 // Smooth, speed-coloured streamlines for the home airflow view (Xie-style).
 // Paths are integrated through the steady velocity field with a midpoint (RK2)
@@ -51,11 +52,16 @@ function makeSampler(built: Sim3D) {
 }
 
 /**
- * Seed points across the WHOLE house: the vents/AC outlets (where air is born)
- * PLUS a sparse grid of any moving cells, so every room with airflow shows
- * streamlines — not just the room with the AC.
+ * Seed points across the WHOLE house: the vents/AC outlets (where air is born),
+ * a sparse grid of moving cells, AND the fastest cells of EVERY room — so each
+ * room shows its air motion, however gentle, not just the room with the AC.
  */
-function seedPoints(built: Sim3D, sample: (x: number, y: number, z: number) => Vel, maxSeeds: number): THREE.Vector3[] {
+function seedPoints(
+  built: Sim3D,
+  sample: (x: number, y: number, z: number) => Vel,
+  maxSeeds: number,
+  rooms: Rect[] = [],
+): THREE.Vector3[] {
   const out: THREE.Vector3[] = [];
   for (const s of built.seeds) out.push(new THREE.Vector3(s[0], s[1], s[2]));
 
@@ -68,6 +74,22 @@ function seedPoints(built: Sim3D, sample: (x: number, y: number, z: number) => V
         const v = sample(x, y, z);
         if (!v.solid && v.speed > 0.03) out.push(new THREE.Vector3(x, y, z));
       }
+
+  // Guarantee per-room coverage: the ~6 fastest air cells of each room become
+  // seeds even when the whole room is slow (air still moves everywhere).
+  for (const r of rooms) {
+    const cands: Array<{ p: THREE.Vector3; s: number }> = [];
+    for (let k = 1; k < nz - 1; k += 1)
+      for (let j = 1; j < ny - 1; j += 2)
+        for (let i = 1; i < nx - 1; i += 1) {
+          const [x, y, z] = cellCenter(i, j, k);
+          if (x < r.x || x > r.x + r.w || z < r.z || z > r.z + r.d) continue;
+          const v = sample(x, y, z);
+          if (!v.solid && v.speed > 0.004) cands.push({ p: new THREE.Vector3(x, y, z), s: v.speed });
+        }
+    cands.sort((a, b) => b.s - a.s);
+    for (const c of cands.slice(0, 6)) out.push(c.p);
+  }
   // Cap, keeping an even spread.
   if (out.length > maxSeeds) {
     const step = out.length / maxSeeds;
@@ -80,7 +102,7 @@ function seedPoints(built: Sim3D, sample: (x: number, y: number, z: number) => V
 
 export function buildStreamlinePaths(
   built: Sim3D,
-  opts: { maxSeeds?: number; color?: string; roofY?: number } = {},
+  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[] } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
   const colors: THREE.Color[] = [];
@@ -96,30 +118,48 @@ export function buildStreamlinePaths(
   const hot = new THREE.Color("#f3fbff");
   const SPEED_REF = 0.8;
   const step = dx * 0.75;
-  const maxSteps = 150;
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 46);
+  const maxSteps = 170;
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 46, opts.rooms ?? []);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
   const mid = new THREE.Vector3();
-  const stepVec = (p: THREE.Vector3, out: THREE.Vector3) => {
+  const lastDir = new THREE.Vector3();
+  // Weak air still moves: when the sampled velocity is tiny, coast along the
+  // previous direction at reduced pace (a stall budget per line) so lines keep
+  // flowing across slow rooms instead of stopping dead at the doorway.
+  const stepVec = (p: THREE.Vector3, out: THREE.Vector3): "ok" | "weak" | "dead" => {
     const v = sample(p.x, p.y, p.z);
     out.set(v.vx, v.vy, v.vz);
-    if (out.lengthSq() < 1e-6) return false;
-    out.setLength(step);
-    return true;
+    if (out.lengthSq() >= 1e-6) {
+      out.setLength(step);
+      return "ok";
+    }
+    if (lastDir.lengthSq() > 1e-8) {
+      out.copy(lastDir).setLength(step * 0.4);
+      return "weak";
+    }
+    return "dead";
   };
 
   for (const seed of seeds) {
     const p = seed.clone();
     const raw: THREE.Vector3[] = [p.clone()];
+    lastDir.set(0, 0, 0);
+    let stallBudget = 14;
     for (let n = 0; n < maxSteps; n++) {
       if (!inBounds(p) || sample(p.x, p.y, p.z).solid) break;
-      if (!stepVec(p, s1)) break; // RK2 midpoint
+      const q1 = stepVec(p, s1); // RK2 midpoint
+      if (q1 === "dead") break;
       mid.copy(p).addScaledVector(s1, 0.5);
-      if (!stepVec(mid, s2)) break;
+      const q2 = stepVec(mid, s2);
+      if (q2 === "dead") break;
+      if (q1 === "weak" || q2 === "weak") {
+        if (--stallBudget <= 0) break;
+      }
       const next = p.clone().add(s2);
       if (sample(next.x, next.y, next.z).solid) break;
+      lastDir.copy(s2);
       raw.push(next);
       p.copy(next);
     }
