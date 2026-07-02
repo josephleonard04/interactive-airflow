@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Edges } from "@react-three/drei";
-import type { ThreeEvent } from "@react-three/fiber";
+import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import type { Group } from "three";
 import type { PlacedItem } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
 import { Model } from "./models";
@@ -17,6 +18,18 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
   const setDragging = useSceneStore((s) => s.setDragging);
   const [hovered, setHovered] = useState(false);
   const selected = selectedId === item.id;
+
+  // An oscillating fan sweeps left–right like a real stand fan (faster at
+  // higher power). The sweep group sits inside the item's own yaw, so the
+  // user-set facing stays the sweep centre.
+  const sweepRef = useRef<Group>(null);
+  const sweeping = item.type === "fan" && !!item.oscillate && item.on !== false;
+  useFrame(({ clock }) => {
+    if (!sweepRef.current) return;
+    sweepRef.current.rotation.y = sweeping
+      ? Math.sin(clock.elapsedTime * (0.9 + (item.power ?? 2) * 0.35)) * 0.7
+      : 0;
+  });
 
   const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "select") return;
@@ -45,7 +58,9 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
         )}
       </mesh>
 
-      <Model type={item.type} size={item.size} />
+      <group ref={sweepRef}>
+        <Model type={item.type} size={item.size} />
+      </group>
     </group>
   );
 }

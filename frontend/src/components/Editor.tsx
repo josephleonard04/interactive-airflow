@@ -404,6 +404,38 @@ function FloorInteractor({ offset }: { offset: Vec3 }) {
   );
 }
 
+type ViewName = "top" | "iso" | "fit";
+
+// Applies a requested camera view inside the Canvas (runs when `seq` bumps).
+function ViewRig({
+  seq,
+  view,
+  span,
+  wallHeight,
+  orbitRef,
+}: {
+  seq: number;
+  view: ViewName;
+  span: number;
+  wallHeight: number;
+  orbitRef: { current: { target: THREE.Vector3; update: () => void } | null };
+}) {
+  const camera = useThree((s) => s.camera);
+  useEffect(() => {
+    if (seq === 0) return;
+    const target = new THREE.Vector3(0, view === "top" ? 0 : wallHeight / 3, 0);
+    if (view === "top") camera.position.set(0, span * 1.7, 0.001);
+    else if (view === "iso") camera.position.set(span * 0.85, span * 0.78, span * 1.05);
+    else camera.position.set(span * 0.6, span * 0.52, span * 0.76); // fit: framed closer
+    camera.lookAt(target);
+    if (orbitRef.current) {
+      orbitRef.current.target.copy(target);
+      orbitRef.current.update();
+    }
+  }, [seq]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
 export function Editor() {
   const plan = useSceneStore((s) => s.plan);
   const mode = useSceneStore((s) => s.mode);
@@ -422,6 +454,9 @@ export function Editor() {
   const offset: Vec3 = [-(bounds.x + bounds.w / 2), 0, -(bounds.z + bounds.d / 2)];
   const span = Math.max(bounds.w, bounds.d);
   const orbitRef = useRef<any>(null);
+  const [viewReq, setViewReq] = useState<{ view: ViewName; seq: number }>({ view: "iso", seq: 0 });
+  const [freeCam, setFreeCam] = useState(false);
+  const requestView = (view: ViewName) => setViewReq((v) => ({ view, seq: v.seq + 1 }));
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -461,6 +496,19 @@ export function Editor() {
   }, []);
 
   return (
+    <>
+      <div className="view-toolbar" aria-label="Camera views">
+        <button onClick={() => requestView("top")} title="Look straight down (floor-plan view)">Top</button>
+        <button onClick={() => requestView("iso")} title="Isometric view">Iso</button>
+        <button onClick={() => requestView("fit")} title="Frame the whole home">Fit</button>
+        <button
+          className={freeCam ? "active" : ""}
+          onClick={() => setFreeCam((v) => !v)}
+          title="Free camera: unlock angles; right-drag (or two fingers) to pan the house around the canvas"
+        >
+          Free
+        </button>
+      </div>
     <Canvas
       dpr={[1, 2]}
       gl={{ alpha: true, antialias: true }}
@@ -505,15 +553,19 @@ export function Editor() {
       <DragController offset={offset} />
       <OpeningDragController offset={offset} />
 
+      <ViewRig seq={viewReq.seq} view={viewReq.view} span={span} wallHeight={wallHeight} orbitRef={orbitRef} />
       <OrbitControls
         ref={orbitRef}
         makeDefault
         enableDamping
-        minPolarAngle={0.1}
-        maxPolarAngle={Math.PI / 2 - 0.04}
+        enablePan
+        screenSpacePanning
+        minPolarAngle={freeCam ? 0 : 0.1}
+        maxPolarAngle={freeCam ? Math.PI - 0.05 : Math.PI / 2 - 0.04}
         target={[0, wallHeight / 3, 0]}
         enabled={!draggingId && !draggingOpeningId && mode === "select"}
       />
     </Canvas>
+    </>
   );
 }
