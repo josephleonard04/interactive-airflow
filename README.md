@@ -1,86 +1,107 @@
-# Interactive Airflow — Intent-to-Physics Indoor Airflow Design
+# Interactive Airflow — Intent-to-Physics Indoor Airflow Design for Non-Experts
 
-Translating non-expert, natural-language comfort goals (e.g. *"keep my bed cool"*, *"keep the kitchen odor out of my bedroom"*) into **physical airflow objectives** — and evaluating them in real time with a GPU fluid simulator inside an interactive 3D room editor.
+Turn everyday comfort goals — *"keep my bedroom cool"*, *"keep the kitchen smell out of the bedroom"* — into physical airflow objectives, evaluated live inside an interactive 3D home editor, with an optional accurate CFD pass.
 
-> Research project. Advisors: Prof. Haoran Xie, Prof. Takeo Igarashi, Prof. Bo Zhu.
-> Presenter / author: Joseph Leonard.
+> Research project. Author: Joseph Leonard. Advisors: Prof. Haoran Xie (JAIST), Prof. Takeo Igarashi, Prof. Bo Zhu (Georgia Tech).
 
 ---
 
-## The contribution
+## Repository layout
 
-Prior work assumes the user can already express design goals as geometry, flow sketches, or quantitative physical objectives. This project provides the **missing front-end**: it turns everyday comfort goals into the physical objectives that airflow analysis and optimization require.
+| Path | What it is |
+|------|------------|
+| **[`frontend/`](frontend/)** | **The primary app.** Multi-room home editor + real-time airflow simulation + intent layer + optimizer + two-engine support. All current work happens here. |
+| [`app/`](app/) | Prof. Xie's original single-room "Living Room Airflow Designer" handoff (kept as reference; its UI/viz/two-engine ideas were merged into `frontend/`). |
+| [`backend/`](backend/) | Local FastAPI server for the **accurate engine**: runs an OpenFOAM case exported from the editor and streams the field back. Returns a labelled approximate preview when OpenFOAM isn't installed. |
+| [`bridge/`](bridge/), [`intent/`](intent/) | Earlier LFM (GPU simulator) bridge + notes. Not needed to run the app. |
+| [`docs/`](docs/) | Design docs: [two-engine architecture + OpenFOAM install](docs/openfoam-engine.md), meeting notes, related work, positioning. |
 
-```
-natural-language goal  ──▶  intent→physics layer  ──▶  physical objectives        ──▶  GPU fluid sim  ──▶  real-time
-"keep my bed cool"          (NL → region+scalar)       minimize T in {bed region}       (LFM)              flow feedback
-```
+## Quick start
 
-The three physical scalars in scope: **velocity**, **temperature**, and **CO₂ / contaminant concentration**, each tied to a **region** of the room and a **hard vs. soft constraint**.
-
-## The app (`app/`)
-
-The primary app is the **Living Room Airflow Designer** — an interactive 3D
-room with editable furniture/devices, the intent→language layer, plan-sketch
-input, zone metrics, and goal feedback. It runs **two simulation engines** over
-the same scene:
-
-- **Real-time** (default, always live): a CPU 3D Stable Fluids solver driving
-  velocity + temperature/humidity/PM2.5/CO₂/noise, visualized as streamlines,
-  particles, and heatmaps. Updates as you edit.
-- **Accurate** (on demand): exports the scene to an **OpenFOAM** CFD case and
-  runs it on a local backend (`backend/`), then renders the real velocity/
-  temperature field through the same visualization. Triggered by a **Run
-  accurate simulation** button.
-
-This matches the advisor guidance — OpenFOAM is *not* in the interactive loop;
-it is the optional accurate check, while a real-time solver drives live editing.
+Prerequisites: **Node.js 18+** (frontend) and optionally **Python 3.10+** (backend).
 
 ```sh
-cd app && npm install && npm run dev      # real-time engine, no backend needed
-# for the accurate engine, also run the backend (see docs/openfoam-engine.md)
+# 1) The app (everything except the OpenFOAM button works without the backend)
+cd frontend
+npm install
+npm run dev            # → http://localhost:5173
+
+# 2) Optional: the accurate-engine backend (second terminal)
+cd backend
+python -m venv .venv
+.venv\Scripts\activate         # Windows;  source .venv/bin/activate elsewhere
+pip install -r requirements.txt
+uvicorn app:app --host 127.0.0.1 --port 8000
+#   (Windows shortcut: .\run.ps1 does all of the above)
 ```
 
-See [`docs/openfoam-engine.md`](docs/openfoam-engine.md) for the two-engine
-architecture and OpenFOAM install steps.
+Real CFD needs OpenFOAM (WSL recommended) — full steps in [docs/openfoam-engine.md](docs/openfoam-engine.md). Until then the Accurate button returns an honest "preview (no OpenFOAM)" field.
 
-## System overview
+## Using the app
 
-A 3D interactive room (a 3D analogue of SketchFluid's Fig. 11) where:
+1. **Setup screen** — choose *Example layout* (furnished 4-room home) or *Start from scratch*, enter home size (m/ft).
+2. **Edit the home** — drag furniture/devices; **R** rotates 90° (or use the dial); *Add wall* draws walls on a grid; click a wall to add a door/window; click a door/window to open/close it. Camera: **Top / Iso / Fit / Free** buttons (top-right); right-drag pans.
+3. **Simulate** — press **▶ Simulate airflow**. Views: **Airflow** (particle dots *or* flowing streamlines), **Temp**, **Smell**, **Noise**. Fields are steady-state, carried by the computed airflow.
+4. **Presets** — Comfort / Cool down / Fresh air / Warm up / Circulate. Each one reconfigures the *whole home*: device on/off + power + fan sweep, doors & windows, **and relocates devices** via the optimizer.
+5. **Plain-language goals** — type e.g. *"keep my bedroom cool"* → **✨ Best solution** searches your actual layout with the simulator and applies the best configuration. Every change shows a **review card (Accept / Modify / Cancel)**.
+6. **Two engines** — ⚡ Real-time (always live, in-browser) vs 🧪 Accurate (exports the scene to an OpenFOAM `buoyantSimpleFoam` case, runs it on the local backend, renders the returned field in the same view; includes a flux-balance check).
 
-1. **Furniture / objects are movable** — by mouse *and* by a programmatic function-call API. Moving an object changes the flow's **boundary conditions**, hence the velocity / temperature / concentration fields.
-2. **The room layout is fixed**; what changes is object placement and the "AC" (supply-air) configuration.
-3. A **real-time GPU fluid simulator** (LFM) provides the interactive flow field — *not* OpenFOAM, which is too slow for this loop.
-4. An **intent→physics layer** maps natural-language goals to objectives over regions and scalars.
+## Architecture
 
-## Architecture (planned)
+```
+plain-language goal ──► intent→physics ──► objective {room, scalar, direction}
+                                              │
+       3D home (rooms/walls/doors/furniture/devices)
+                    │                         │
+                    ▼                         ▼
+        compileLfmScene / buildSim3D   searchOptimize (sim-scored placement search)
+                    │                         │
+        ┌───────────┴───────────┐             ▼
+        ▼                       ▼      best device layout + settings (review card)
+  Real-time Euler solver   OpenFOAM case → backend → sampled field
+        │                       │
+        └───────► same 3D visualization (streamlines / particles / heat layers)
+                                │
+                                ▼
+                 per-room levels → plain-language verdict
+```
 
-| Component | Path | Responsibility |
-|-----------|------|----------------|
-| **Primary app** (3D editor + 2 engines + intent) | [`app/`](app/) | Living Room Airflow Designer (from Prof. Xie's handoff, extended). Real-time Stable Fluids + accurate OpenFOAM export + intent layer + viz. |
-| OpenFOAM backend | [`backend/`](backend/) | Local FastAPI runner for the accurate engine; runs the CFD case and samples the field back (mock fallback when OpenFOAM is absent). |
-| Earlier 3D room editor | [`frontend/`](frontend/) | The original floor-plan editor + `exportBoundaryConditions` seam. Kept as reference. |
-| LFM simulator bridge | [`bridge/`](bridge/), [`simulator/`](simulator/) | Bridge to Yuchen Sun's LFM real-time GPU simulator (CUDA + Vulkan). GPU-blocked; see `docs/SESSION_HANDOFF.md`. |
-| Docs | [`docs/`](docs/) | Meeting notes, related-work, two-engine + LFM design. |
+### Code map (`frontend/src/`)
 
-## Key decisions (from 2026-06-20 advisor meeting)
+| Area | Files | Notes |
+|------|-------|-------|
+| **Floor plan model** | `floorplan/types.ts`, `home.ts`, `geometry.ts`, `catalog.ts`, `collision.ts`, `raster.ts` | Rooms/walls/openings/items; example-home generator; **collision.ts** = no-overlap + doorway keep-clear rules used everywhere |
+| **State** | `scene/store.ts` | Zustand store: plan, selection, undo/redo, sim state, presets, optimizer actions, engine state |
+| **3D editor & UI** | `components/Editor.tsx` (canvas, drag, walls, camera views), `Panel.tsx` (right panel + inspector), `SimPanel.tsx` (sim controls, presets, intent box, engine toggle), `SetupScreen.tsx`, `models.tsx` (all furniture/device meshes), `ItemMesh.tsx` (selection + fan sweep animation), `FlowField3D.tsx` (runs the sim, renders all field views) | **UI work starts here** — theme lives in `styles.css` (CSS variables at the top) |
+| **Solver** | `sim/euler3d.ts` (incompressible Euler, MAC grid, semi-Lagrangian advection, pressure projection, buoyancy), `sim/sim3d.ts` (voxelizes the home → solids/inlets/outlets/jets; `advectDiffuseFill` carries temp/smell along the converged flow), `sim/noise.ts` (appliance noise: dB falloff + per-wall attenuation) | Coarsened (~18k cells) to stay real-time single-threaded |
+| **Viz** | `viz/streamlines.ts` | RK2 integration, whole-house seeding, Catmull-Rom smoothing, speed colouring; drawn as animated dashed fat lines |
+| **Intent** | `intent/objectives.ts` (lexicon parse + room grounding → objective), `intent/evaluate.ts` (objective vs simulated field → verdict), `intent/optimize.ts` + `intent/searchOptimize.ts` (**derivative-free greedy search**: layout-derived candidates, constraint filter, each candidate scored by a coarse solver run, ~20 evals ≈ 1–2 s) | Not differentiable / no ML — deliberate; see slide notes |
+| **Accurate engine** | `engine/accurate.ts`, `bc/lfm.ts` (`compileLfmScene`: scene → domain grid + solids + flux-balanced inlets/outlets) | Talks to `backend/` at `http://127.0.0.1:8000` |
 
-- **Start in 3D directly** — skip the 2D prototype.
-- **Do not use OpenFOAM** — integrate the lab's real-time simulator instead.
-- **Support moving objects**, not just editing boundary conditions — moving an object *is* a boundary-condition change and is often the most useful control.
-- Build the interactive editor first, then wire in the simulator, then layer on the language/intent mapping.
-- **Target by next meeting:** a working prototype with interactive flow visualization in a 3D room.
+### Backend API (`backend/`)
 
-See [`docs/meeting-notes-2026-06-20.md`](docs/meeting-notes-2026-06-20.md) for the full notes and [`docs/related-work.md`](docs/related-work.md) for the literature positioning.
+- `GET /api/health` → `{ openfoam, version, mode }` — is OpenFOAM available?
+- `POST /api/run` → writes the exported case, runs `blockMesh → snappyHexMesh → topoSet → createPatch → buoyantSimpleFoam`, samples U/T at the viewer's grid points, returns `{ status: ok|mock|error, grid, log }`. `mock_engine.py` supplies the approximate preview when OpenFOAM is absent. Configure WSL/Docker via `OPENFOAM_RUN_CMD` (e.g. `wsl -e bash -lc`).
 
-## External dependency
+## Verifying changes
 
-- **LFM** — real-time GPU fluid simulator: https://github.com/yuchen-sun-cg/lfm (CUDA + Vulkan). Access provided by Yuchen Sun (Prof. Zhu's group).
+```sh
+cd frontend && npx tsc --noEmit     # typecheck (no test suite yet)
+```
+The sim modules are importable headlessly (Node or browser console):
+`buildSim3D(plan)` → `sim.step(dt)` loop → inspect fields; `searchOptimize(plan, goal, roomId, budget)` for the optimizer.
 
-## Status
+## Known limitations / notes
 
-✅ Interactive 3D app with a live real-time engine and an on-demand accurate
-OpenFOAM engine (local backend, mock fallback before OpenFOAM is installed).
-🚧 Next: install OpenFOAM and validate the generated case on a real run; add
-CO₂/PM2.5 passive-scalar transport to the accurate engine; LFM GPU integration
-remains pending a GPU machine (see `docs/SESSION_HANDOFF.md`).
+- Solver is a coarse prototype (real-time first); OpenFOAM path is generated but untested against a live install yet.
+- Scalar fields beyond temp/smell/noise (CO₂, humidity, PM2.5) are planned.
+- Intent parsing is a seed lexicon (deterministic, checkable); LLM parsing is future work.
+- The optimizer is greedy + budgeted, not globally optimal — every change is user-reviewable by design.
+- `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
+
+## Key documents
+
+- [docs/openfoam-engine.md](docs/openfoam-engine.md) — two-engine design + OpenFOAM install (WSL)
+- [docs/contribution-positioning.md](docs/contribution-positioning.md) — research question & what's-new
+- [docs/related-work.md](docs/related-work.md) — comparison matrix (Dai 2025, Zhang 2025, Liu 2017)
+- [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) — LFM (GPU solver) integration notes, currently parked
