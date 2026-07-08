@@ -9,6 +9,7 @@ import {
   rectContains,
 } from "../floorplan/geometry";
 import { generateEmpty, generateHome } from "../floorplan/home";
+import { autoNameRooms, recomputeRooms } from "../floorplan/detectRooms";
 import {
   checkBackendHealth,
   runAccurate as runAccurateEngine,
@@ -71,6 +72,8 @@ export interface SceneState {
 
   addItem: (type: string, position?: Vec3) => string | null;
   removeItem: (id: string) => void;
+  /** User rename of a room — sticks (auto-naming won't override it). */
+  renameRoom: (id: string, name: string) => void;
   addWall: (a: Vec2, b: Vec2) => void;
   removeWall: (id: string) => void;
 
@@ -529,7 +532,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const moved = dragSnapshot !== get().plan;
       const snap = dragSnapshot;
       dragSnapshot = null;
-      if (moved) set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [] }));
+      if (moved) {
+        // furniture defines room identity — re-name rooms after a move
+        set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [], plan: autoNameRooms(s.plan) }));
+      }
     }
     set({ draggingId: id });
   },
@@ -681,12 +687,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     };
     set((s) => ({
       ...snapshot(s),
-      plan: { ...s.plan, items: [...s.plan.items, item] },
+      plan: autoNameRooms({ ...s.plan, items: [...s.plan.items, item] }),
       selectedId: id,
       selectedWallId: null,
     }));
     return id;
   },
+
+  renameRoom: (id, name) =>
+    set((s) => ({
+      ...snapshot(s),
+      plan: {
+        ...s.plan,
+        rooms: s.plan.rooms.map((r) => (r.id === id ? { ...r, name: name.trim() || r.name, renamed: true } : r)),
+      },
+    })),
 
   removeItem: (id) =>
     set((s) => ({
@@ -724,7 +739,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             roomId: "custom",
             openings: [],
           };
-    set((s) => ({ ...snapshot(s), plan: { ...s.plan, walls: [...s.plan.walls, wall] } }));
+    // walls changed → re-derive rooms (a from-scratch home gains real rooms)
+    set((s) => ({ ...snapshot(s), plan: recomputeRooms({ ...s.plan, walls: [...s.plan.walls, wall] }) }));
   },
 
   removeWall: (id) =>
@@ -744,7 +760,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const we = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
         return Math.min(tE, we) - Math.max(tS, ws) <= 0.01;
       });
-      return { ...snapshot(s), plan: { ...s.plan, walls }, selectedWallId: null };
+      return { ...snapshot(s), plan: recomputeRooms({ ...s.plan, walls }), selectedWallId: null };
     }),
 
   addOpening: (wallId, kind) => {

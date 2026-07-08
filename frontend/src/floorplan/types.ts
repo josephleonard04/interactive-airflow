@@ -21,6 +21,8 @@ export interface RoomDef {
   type: RoomType;
   name: string;
   rect: Rect;
+  /** True when the user renamed this room — auto-naming won't override it. */
+  renamed?: boolean;
 }
 
 export type ItemCategory = "furniture" | "hvac";
