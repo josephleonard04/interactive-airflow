@@ -7,7 +7,7 @@ import type { FloorPlan, Rect, RoomType } from "../floorplan/types";
 // generalize beyond it, but every objective stays in this vocabulary so it is
 // always checkable against the solver.
 
-export type Scalar = "temperature" | "contaminant";
+export type Scalar = "temperature" | "contaminant" | "draft";
 export type Direction = "low" | "high";
 
 export interface Objective {
@@ -42,7 +42,35 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
   { words: ["cool", "cold", "chilly", "cooler", "chill"], scalar: "temperature", direction: "low" },
   { words: ["warm", "hot", "cozy", "cosy", "toasty", "warmer", "heat"], scalar: "temperature", direction: "high" },
   { words: ["smell", "odor", "odour", "stink", "stench", "fume", "fumes", "smoke", "stinky"], scalar: "contaminant", direction: "low" },
+  // draft / air movement on a spot — "no air blowing on my face", "too drafty"
+  { words: ["draft", "drafty", "draught", "breeze", "blowing", "blow", "wind"], scalar: "draft", direction: "low" },
 ];
+
+// Objects a draft goal can point at ("no air blowing on the bed"): the item's
+// footprint becomes the evaluation region. Matched before room words.
+const OBJECT_WORDS: Array<{ words: string[]; type: string }> = [
+  { words: ["bed"], type: "bed" },
+  { words: ["couch", "sofa"], type: "couch" },
+  { words: ["desk"], type: "desk" },
+  { words: ["table"], type: "table" },
+];
+
+/** Footprint rect (with margin) of the first item of a named type. */
+function objectRegion(t: string, plan: FloorPlan): { rect: Rect; name: string; roomId: string } | null {
+  for (const ow of OBJECT_WORDS) {
+    if (!ow.words.some((w) => t.includes(` ${w}`) || t.includes(`${w} `))) continue;
+    const it = plan.items.find((x) => x.type === ow.type);
+    if (!it) continue;
+    const m = 0.35; // margin: the zone a person occupies around the object
+    const [sw, , sd] = it.size;
+    return {
+      rect: { x: it.position[0] - sw / 2 - m, z: it.position[2] - sd / 2 - m, w: sw + 2 * m, d: sd + 2 * m },
+      name: `the ${ow.type}`,
+      roomId: it.roomId,
+    };
+  }
+  return null;
+}
 
 const NEGATERS = ["no", "not", "without", "keep out", "out of", "away", "avoid", "free of", "don't", "dont", "prevent"];
 
@@ -106,6 +134,21 @@ export function parseGoal(text: string, plan: FloorPlan, sketch?: Rect | null): 
         sourceId: source?.id ?? null,
         sourceName: source?.name ?? null,
         regionRect: useSketch ? sketch : null,
+      });
+    } else if (lex.scalar === "draft") {
+      // draft goals usually point at a spot: an object ("on the bed"), the
+      // sketched area, or a named room — in that priority order.
+      const obj = objectRegion(t, plan);
+      const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
+      const useSketch = !obj && sketchTarget && (deictic || !named);
+      const more = /\b(more|stronger|breezy|breezier)\b/.test(t) && !NEGATERS.some((n) => t.includes(n));
+      out.push({
+        raw: text,
+        scalar: "draft",
+        direction: more ? "high" : "low",
+        regionId: obj ? obj.roomId : useSketch ? sketchTarget!.id : named?.id ?? null,
+        regionName: obj ? obj.name : useSketch ? sketchTarget!.name : named?.name ?? null,
+        regionRect: obj ? obj.rect : useSketch ? sketch : null,
       });
     } else {
       const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
