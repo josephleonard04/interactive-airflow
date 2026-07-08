@@ -147,6 +147,34 @@ export function recomputeRooms(plan: FloorPlan): FloorPlan {
   const { bounds } = plan;
   const reg = findRegions(plan);
 
+  // Wall centerlines, for snapping room edges. Detected rects are built from
+  // AIR cells, so they stop short of walls; generated rooms' rects lie ON the
+  // wall centerlines (floors meet walls). Snap each edge outward to the
+  // nearest wall line so detected rooms render the same way — no gap.
+  const vLines: Array<{ x: number; z0: number; z1: number }> = [];
+  const hLines: Array<{ z: number; x0: number; x1: number }> = [];
+  for (const w of plan.walls) {
+    if (w.axis === "z") vLines.push({ x: w.a[0], z0: Math.min(w.a[1], w.b[1]), z1: Math.max(w.a[1], w.b[1]) });
+    else hLines.push({ z: w.a[1], x0: Math.min(w.a[0], w.b[0]), x1: Math.max(w.a[0], w.b[0]) });
+  }
+  const TOL = CELL + 0.18; // ≥ cell quantization + wall half-thickness
+  const snapRect = (r: { x: number; z: number; w: number; d: number }) => {
+    let { x, z } = r;
+    let x1 = x + r.w;
+    let z1 = z + r.d;
+    const spansZ = (l: { z0: number; z1: number }) => l.z1 > z + 0.05 && l.z0 < z1 - 0.05;
+    const spansX = (l: { x0: number; x1: number }) => l.x1 > x + 0.05 && l.x0 < x1 - 0.05;
+    const left = vLines.filter((l) => spansZ(l) && l.x <= x + 0.01 && l.x >= x - TOL).map((l) => l.x);
+    if (left.length) x = Math.max(...left);
+    const right = vLines.filter((l) => spansZ(l) && l.x >= x1 - 0.01 && l.x <= x1 + TOL).map((l) => l.x);
+    if (right.length) x1 = Math.min(...right);
+    const near = hLines.filter((l) => spansX(l) && l.z <= z + 0.01 && l.z >= z - TOL).map((l) => l.z);
+    if (near.length) z = Math.max(...near);
+    const far = hLines.filter((l) => spansX(l) && l.z >= z1 - 0.01 && l.z <= z1 + TOL).map((l) => l.z);
+    if (far.length) z1 = Math.min(...far);
+    return { x, z, w: x1 - x, d: z1 - z };
+  };
+
   // bounding rect + area per region
   const boxes = new Map<number, { c0: number; c1: number; r0: number; r1: number; n: number }>();
   for (let r = 0; r < reg.rows; r++)
@@ -172,12 +200,12 @@ export function recomputeRooms(plan: FloorPlan): FloorPlan {
   const rooms: RoomDef[] = [];
   for (const [g, b] of [...boxes.entries()].sort((p, q) => q[1].n - p[1].n)) {
     if (b.n * CELL * CELL < MIN_AREA) continue;
-    const rect = {
+    const rect = snapRect({
       x: bounds.x + b.c0 * CELL,
       z: bounds.z + b.r0 * CELL,
       w: (b.c1 - b.c0 + 1) * CELL,
       d: (b.r1 - b.r0 + 1) * CELL,
-    };
+    });
     const prev = prevByRegion.get(g);
     const id = prev?.id ?? `room-det-${++fresh}-${Date.now() % 100000}`;
     rooms.push({
