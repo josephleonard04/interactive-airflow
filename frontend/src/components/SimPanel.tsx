@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
+import { SketchCanvas } from "./SketchCanvas";
 
 const PRESET_IDS = Object.keys(PRESETS) as AirflowPreset[];
 
@@ -41,6 +42,8 @@ export function SimPanel() {
   const recheckGoal = useRef<string | null>(null);
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
+  const sketchRegion = useSceneStore((s) => s.sketchRegion);
+  const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
   useEffect(() => {
@@ -64,7 +67,7 @@ export function SimPanel() {
   // the matching view is shown so the user sees what's happening.
   const checkGoalText = (text: string) => {
     if (!text.trim()) return;
-    const evals = evaluateGoal(text, plan);
+    const evals = evaluateGoal(text, plan, sketchRegion);
     setResults(evals);
     const first = evals[0]?.objective;
     if (first) {
@@ -200,7 +203,21 @@ export function SimPanel() {
       )}
 
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>Ask in plain language</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>Ask in plain language</span>
+          <button
+            className={showSketch || sketchRegion ? "toggle on" : "toggle"}
+            onClick={() => setShowSketch((v) => !v)}
+            title="Draw the area a goal refers to — then say “keep this area cool”"
+          >
+            ✏️ Sketch an area
+          </button>
+        </div>
+        {(showSketch || sketchRegion != null) && (
+          <div style={{ marginBottom: 8 }}>
+            <SketchCanvas />
+          </div>
+        )}
         <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
@@ -215,6 +232,15 @@ export function SimPanel() {
               {t}
             </button>
           ))}
+          {sketchRegion && (
+            <button
+              className="chip"
+              style={{ fontSize: 11, borderColor: "var(--accent)" }}
+              onClick={() => { setGoal("Keep this area cool"); checkGoalText("Keep this area cool"); }}
+            >
+              Keep this area cool
+            </button>
+          )}
           <button
             className="primary"
             style={{ marginLeft: "auto" }}

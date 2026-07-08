@@ -24,6 +24,7 @@ import type {
   Opening,
   OpeningKind,
   PlacedItem,
+  Rect,
   StartMode,
   Vec2,
   Vec3,
@@ -111,6 +112,9 @@ export interface SceneState {
   applyBestSolution: (goalText: string) => boolean;
   /** true while the placement search is running the simulator. */
   optimizing: boolean;
+  /** User-sketched target region (world coords) for "this area" goals. */
+  sketchRegion: Rect | null;
+  setSketchRegion: (r: Rect | null) => void;
   /** Summary of the last change, pending Accept/Cancel. */
   pendingChange: PendingChange | null;
   acceptChange: () => void;
@@ -282,6 +286,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simSourceRoomId: null,
   simReady: false,
   airflowStyle: "dots",
+  sketchRegion: null,
+  setSketchRegion: (sketchRegion) => set({ sketchRegion }),
 
   toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
   setSimMode: (m) => set({ simMode: m }),
@@ -359,7 +365,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   applyBestSolution: (goalText) => {
     if (get().optimizing) return false;
-    const objs = parseGoal(goalText, get().plan);
+    const objs = parseGoal(goalText, get().plan, get().sketchRegion);
     const obj = objs[0];
     if (!obj) return false;
     const goal: OptimizeGoal =
@@ -427,6 +433,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   generate: (size, mode) =>
     set({
       plan: mode === "blank" ? generateEmpty(size) : generateHome(size),
+      sketchRegion: null,
       started: true,
       selectedId: null,
       selectedWallId: null,
