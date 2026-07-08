@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
@@ -42,6 +42,8 @@ export function Panel() {
   const removeItem = useSceneStore((s) => s.removeItem);
   const removeSelected = useSceneStore((s) => s.removeSelected);
   const updateItem = useSceneStore((s) => s.updateItem);
+  const renameRoom = useSceneStore((s) => s.renameRoom);
+  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
   const rotateItem = useSceneStore((s) => s.rotateItem);
   const setPosition = useSceneStore((s) => s.setPosition);
   const addItem = useSceneStore((s) => s.addItem);
@@ -297,7 +299,27 @@ export function Panel() {
               <div key={room.id} className="room-group">
                 <div className="room-head">
                   <span className="dot" style={{ background: ROOM_COLOR[room.type] }} />
-                  <span className="name">{room.name}</span>
+                  {editingRoomId === room.id ? (
+                    <input
+                      autoFocus
+                      defaultValue={room.name}
+                      style={{ flex: 1, minWidth: 0, background: "#fff", border: "1px solid var(--accent)", borderRadius: 6, padding: "2px 6px", font: "inherit", fontSize: 12 }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { renameRoom(room.id, (e.target as HTMLInputElement).value); setEditingRoomId(null); }
+                        if (e.key === "Escape") setEditingRoomId(null);
+                      }}
+                      onBlur={(e) => { renameRoom(room.id, e.target.value); setEditingRoomId(null); }}
+                    />
+                  ) : (
+                    <span className="name" style={{ flex: 1 }}>{room.name}</span>
+                  )}
+                  <button
+                    className="x"
+                    title="Rename this room (goals like 'keep the bedroom cool' match by name)"
+                    onClick={() => setEditingRoomId(editingRoomId === room.id ? null : room.id)}
+                  >
+                    ✏️
+                  </button>
                 </div>
                 <ul className="list">
                   {items.map((it) => (
