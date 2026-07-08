@@ -1,4 +1,4 @@
-import type { FloorPlan } from "../floorplan/types";
+import type { FloorPlan, Rect } from "../floorplan/types";
 import { computeRoomLevels } from "../sim/roomLevels";
 import { parseGoal, type Objective } from "./objectives";
 
@@ -26,7 +26,12 @@ function fmtTemp(v: number): string {
 
 export function evaluateObjective(obj: Objective, plan: FloorPlan): Evaluation {
   if (!obj.regionId) {
-    return { objective: obj, value: null, satisfied: null, summary: "I couldn't tell which room you mean — try naming it." };
+    return {
+      objective: obj,
+      value: null,
+      satisfied: null,
+      summary: "I couldn't tell which room you mean — name it, or sketch the area on the mini-map.",
+    };
   }
   const roomName = obj.regionName ?? "that room";
 
@@ -63,7 +68,8 @@ export function evaluateObjective(obj: Objective, plan: FloorPlan): Evaluation {
   };
 }
 
-/** Parse a plain-language goal and evaluate every objective it contains. */
-export function evaluateGoal(text: string, plan: FloorPlan): Evaluation[] {
-  return parseGoal(text, plan).map((o) => evaluateObjective(o, plan));
+/** Parse a plain-language goal and evaluate every objective it contains.
+ *  `sketch` grounds deictic goals ("this area") to a user-drawn region. */
+export function evaluateGoal(text: string, plan: FloorPlan, sketch?: Rect | null): Evaluation[] {
+  return parseGoal(text, plan, sketch).map((o) => evaluateObjective(o, plan));
 }

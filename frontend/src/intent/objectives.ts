@@ -1,4 +1,4 @@
-import type { FloorPlan, RoomType } from "../floorplan/types";
+import type { FloorPlan, Rect, RoomType } from "../floorplan/types";
 
 // Intent → physics: translate a non-expert's everyday comfort goal ("keep my
 // bedroom cool", "no kitchen smell in the bedroom") into a small, fixed set of
@@ -20,6 +20,21 @@ export interface Objective {
   /** For smell goals: the room the odor comes from, if named. */
   sourceId?: string | null;
   sourceName?: string | null;
+  /** Set when the region came from a user-sketched area (world coords). */
+  regionRect?: Rect | null;
+}
+
+// Deictic phrases that refer to a sketched area ("keep THIS AREA cool").
+const DEICTIC = /\b(this|that|the|marked) (area|spot|place|zone|corner|region)\b|\bhere\b/;
+
+/** The room containing the sketch's centre, so a sketched area inherits the
+ *  room-level physics of wherever it was drawn. */
+function sketchRoom(plan: FloorPlan, sketch: Rect) {
+  const cx = sketch.x + sketch.w / 2;
+  const cz = sketch.z + sketch.d / 2;
+  return plan.rooms.find(
+    (r) => cx >= r.rect.x && cx <= r.rect.x + r.rect.w && cz >= r.rect.z && cz <= r.rect.z + r.rect.d,
+  ) ?? null;
 }
 
 // word → (scalar, direction). First match wins.
@@ -53,11 +68,20 @@ function findRooms(text: string, plan: FloorPlan): Array<{ id: string; name: str
   return hits.sort((a, b) => a.at - b.at);
 }
 
-/** Parse one free-text comfort goal into objectives over the fixed vocabulary. */
-export function parseGoal(text: string, plan: FloorPlan): Objective[] {
+/** Parse one free-text comfort goal into objectives over the fixed vocabulary.
+ *  `sketch` is an optionally user-drawn area: deictic goals ("keep this area
+ *  cool") ground to it, and it is the fallback region when no room is named. */
+export function parseGoal(text: string, plan: FloorPlan, sketch?: Rect | null): Objective[] {
   const t = ` ${text.toLowerCase().trim()} `;
   const rooms = findRooms(t, plan);
   const out: Objective[] = [];
+
+  // Sketch grounding: "this area" (or no named room at all) → the sketched spot.
+  const deictic = DEICTIC.test(t);
+  const sk = sketch ? sketchRoom(plan, sketch) : null;
+  const sketchTarget = sk
+    ? { id: sk.id, name: `the area you marked (${sk.name})`, rect: sketch! }
+    : null;
 
   for (const lex of LEXICON) {
     const idx = lex.words.map((w) => t.indexOf(` ${w}`)).filter((i) => i >= 0);
@@ -69,7 +93,9 @@ export function parseGoal(text: string, plan: FloorPlan): Objective[] {
       // usually the one phrased as "my X" / "in X" / "out of X"; the source is a
       // smell-producing room named earlier (e.g. "kitchen smell").
       const negated = NEGATERS.some((n) => t.includes(n));
-      const target = pickTargetRoom(t, rooms, at);
+      const named = pickTargetRoom(t, rooms, at);
+      const useSketch = sketchTarget && (deictic || !named);
+      const target = useSketch ? sketchTarget : named;
       const source = rooms.find((r) => r.id !== target?.id && (r.type === "kitchen" || r.type === "bathroom")) ?? rooms.find((r) => r.id !== target?.id) ?? null;
       out.push({
         raw: text,
@@ -79,15 +105,19 @@ export function parseGoal(text: string, plan: FloorPlan): Objective[] {
         regionName: target?.name ?? null,
         sourceId: source?.id ?? null,
         sourceName: source?.name ?? null,
+        regionRect: useSketch ? sketch : null,
       });
     } else {
-      const region = nearestRoom(rooms, at) ?? rooms[0] ?? null;
+      const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
+      const useSketch = sketchTarget && (deictic || !named);
+      const region = useSketch ? sketchTarget : named;
       out.push({
         raw: text,
         scalar: "temperature",
         direction: lex.direction,
         regionId: region?.id ?? null,
         regionName: region?.name ?? null,
+        regionRect: useSketch ? sketch : null,
       });
     }
   }

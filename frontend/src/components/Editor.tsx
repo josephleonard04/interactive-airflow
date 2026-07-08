@@ -442,6 +442,7 @@ export function Editor() {
   const draggingId = useSceneStore((s) => s.draggingId);
   const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
   const simActive = useSceneStore((s) => s.simActive);
+  const sketchRegion = useSceneStore((s) => s.sketchRegion);
   const selectedId = useSceneStore((s) => s.selectedId);
   const clearSelection = useSceneStore((s) => s.clearSelection);
   const removeSelected = useSceneStore((s) => s.removeSelected);
@@ -548,6 +549,15 @@ export function Editor() {
           <ItemMesh key={it.id} item={it} />
         ))}
         {simActive && <FlowField3D />}
+        {sketchRegion && (
+          <mesh
+            position={[sketchRegion.x + sketchRegion.w / 2, 0.025, sketchRegion.z + sketchRegion.d / 2]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <planeGeometry args={[sketchRegion.w, sketchRegion.d]} />
+            <meshBasicMaterial color="#2a9d8f" transparent opacity={0.28} depthWrite={false} />
+          </mesh>
+        )}
       </group>
 
       <DragController offset={offset} />
