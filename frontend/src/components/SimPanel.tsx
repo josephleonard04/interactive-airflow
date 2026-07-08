@@ -43,6 +43,7 @@ export function SimPanel() {
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
   const sketchRegion = useSceneStore((s) => s.sketchRegion);
+  const logCount = useSceneStore((s) => s.sessionLog.length);
   const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
@@ -68,10 +69,15 @@ export function SimPanel() {
   const checkGoalText = (text: string) => {
     if (!text.trim()) return;
     const evals = evaluateGoal(text, plan, sketchRegion);
+    useSceneStore.getState().logEvent("check", {
+      text,
+      results: evals.map((e) => ({ summary: e.summary, satisfied: e.satisfied, value: e.value })),
+    });
     setResults(evals);
     const first = evals[0]?.objective;
     if (first) {
       if (first.scalar === "temperature") setSimMode("temperature");
+      else if (first.scalar === "draft") setSimMode("airflow");
       else { setSimMode("contamination"); if (first.sourceId) setSource(first.sourceId); }
     }
   };
@@ -321,6 +327,22 @@ export function SimPanel() {
         </p>
       )}
       <Legend mode={mode} />
+      <button
+        className="ghost"
+        style={{ marginTop: 10, fontSize: 11, width: "100%" }}
+        title="Download the session log (every goal, parse, review decision & change) as JSON — for the user study"
+        onClick={() => {
+          const log = useSceneStore.getState().sessionLog;
+          const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), events: log }, null, 2)], { type: "application/json" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = `airflow-session-${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }}
+      >
+        ⬇ Study log ({logCount} events)
+      </button>
     </div>
   );
 }

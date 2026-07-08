@@ -115,10 +115,22 @@ export interface SceneState {
   /** User-sketched target region (world coords) for "this area" goals. */
   sketchRegion: Rect | null;
   setSketchRegion: (r: Rect | null) => void;
+
+  /** Study session log (§6.5 of the study protocol): every utterance, parse,
+   *  review decision and plan change, timestamped, downloadable as JSON. */
+  sessionLog: LogEvent[];
+  logEvent: (kind: LogEvent["kind"], data: Record<string, unknown>) => void;
+
   /** Summary of the last change, pending Accept/Cancel. */
   pendingChange: PendingChange | null;
   acceptChange: () => void;
   cancelChange: () => void;
+}
+
+export interface LogEvent {
+  t: number; // ms since epoch
+  kind: "goal" | "check" | "preset" | "review" | "sketch" | "edit" | "engine";
+  data: Record<string, unknown>;
 }
 
 const PRESET_GOAL: Record<AirflowPreset, OptimizeGoal> = {
@@ -287,7 +299,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simReady: false,
   airflowStyle: "dots",
   sketchRegion: null,
-  setSketchRegion: (sketchRegion) => set({ sketchRegion }),
+  setSketchRegion: (sketchRegion) => {
+    get().logEvent("sketch", { region: sketchRegion });
+    set({ sketchRegion });
+  },
+
+  sessionLog: [],
+  logEvent: (kind, data) =>
+    set((s) => ({ sessionLog: [...s.sessionLog, { t: Date.now(), kind, data }] })),
 
   toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
   setSimMode: (m) => set({ simMode: m }),
@@ -351,6 +370,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         const result = searchOptimize(withOpenings, PRESET_GOAL[preset], null);
         const after: FloorPlan = { ...withOpenings, items: result.items };
         const lines = [...diffPlan(before, after), ...result.changes];
+        get().logEvent("preset", { preset, lines });
         set({
           ...snapshot(s),
           plan: after,
@@ -368,15 +388,27 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const objs = parseGoal(goalText, get().plan, get().sketchRegion);
     const obj = objs[0];
     if (!obj) return false;
+    // A calm-air goal ("no draft on the bed") wants LESS air movement — quiet
+    // the movers rather than searching for a stronger layout.
+    const calm = obj.scalar === "draft" && obj.direction === "low";
     const goal: OptimizeGoal =
-      obj.scalar === "temperature" ? (obj.direction === "low" ? "cool" : "warm") : "ventilate";
+      obj.scalar === "temperature"
+        ? obj.direction === "low"
+          ? "cool"
+          : "warm"
+        : obj.scalar === "draft"
+          ? "circulate"
+          : "ventilate";
     // Effective device settings for the goal.
-    const cfg: Record<string, { on: boolean; power: number; oscillate?: boolean }> =
-      goal === "cool"
+    const cfg: Record<string, { on: boolean; power: number; oscillate?: boolean }> = calm
+      ? { fan: { on: false, power: 1 }, supply: { on: true, power: 1 }, ac: { on: true, power: 1 } }
+      : goal === "cool"
         ? { ac: { on: true, power: 3 }, fan: { on: true, power: 2, oscillate: true } }
         : goal === "warm"
           ? { heater: { on: true, power: 3 }, fan: { on: true, power: 1, oscillate: true } }
-          : { supply: { on: true, power: 3 }, fan: { on: true, power: 3, oscillate: true } };
+          : goal === "circulate"
+            ? { fan: { on: true, power: 3, oscillate: true }, supply: { on: true, power: 2 } }
+            : { supply: { on: true, power: 3 }, fan: { on: true, power: 3, oscillate: true } };
     const targetId = obj.regionId;
     set({ optimizing: true });
     window.setTimeout(() => {
@@ -403,9 +435,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           windows: before.windows.map(setOpen),
           walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
         };
-        const result = searchOptimize(withOpenings, goal, targetId);
+        // calm goals: settings-only (quiet the movers); no relocation search
+        const result = calm
+          ? { items: withOpenings.items, changes: [`Quieted the air movers so ${obj.regionName ?? "the area"} stays calm`] }
+          : searchOptimize(withOpenings, goal, targetId);
         const after: FloorPlan = { ...withOpenings, items: result.items };
         const lines = [...diffPlan(before, after), ...result.changes];
+        get().logEvent("goal", { text: goalText, objective: obj, lines });
         set({
           ...snapshot(s),
           plan: after,
@@ -424,8 +460,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   optimizing: false,
   pendingChange: null,
-  acceptChange: () => set({ pendingChange: null }),
+  acceptChange: () => {
+    get().logEvent("review", { decision: "accept", title: get().pendingChange?.title });
+    set({ pendingChange: null });
+  },
   cancelChange: () => {
+    get().logEvent("review", { decision: "cancel", title: get().pendingChange?.title });
     get().undo();
     set({ pendingChange: null });
   },
