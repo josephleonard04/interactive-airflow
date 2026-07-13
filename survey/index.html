@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Home Comfort & Airflow — Short Study</title>
+<style>
+  :root{
+    --accent:#2a9d8f; --accent-dark:#1f7a70; --ink:#1f2937; --soft:#6b7280;
+    --bg:#eef1ea; --card:#ffffff; --line:#dfe4da; --warn:#b45309;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  .wrap{max-width:720px;margin:0 auto;padding:20px 16px 80px}
+  header{padding:26px 0 8px}
+  header h1{font-size:1.45rem;margin:0 0 4px}
+  header p{margin:0;color:var(--soft);font-size:.95rem}
+  .progress{height:6px;background:var(--line);border-radius:3px;margin:18px 0 22px;overflow:hidden}
+  .progress>div{height:100%;background:var(--accent);width:0%;transition:width .3s}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .card h2{margin:0 0 6px;font-size:1.15rem}
+  .card .sub{color:var(--soft);font-size:.92rem;margin:0 0 14px}
+  .instruction{background:#f3f8f6;border-left:4px solid var(--accent);padding:10px 14px;border-radius:0 8px 8px 0;font-style:italic;color:#3b544f;margin:0 0 18px;font-size:.95rem}
+  .q{margin:0 0 20px}
+  .q:last-child{margin-bottom:4px}
+  .q label.main{display:block;font-weight:600;margin-bottom:6px}
+  .q .note{font-weight:400;color:var(--soft);font-size:.88rem}
+  textarea,input[type=text],select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;color:var(--ink);background:#fff}
+  textarea{min-height:96px;resize:vertical}
+  textarea:focus,input:focus,select:focus{outline:2px solid var(--accent);border-color:var(--accent)}
+  .choices{display:flex;flex-direction:column;gap:8px}
+  .choice{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer;background:#fff}
+  .choice:hover{border-color:var(--accent)}
+  .choice input{margin-top:3px;accent-color:var(--accent)}
+  .scale{display:flex;gap:4px;flex-wrap:wrap}
+  .scale label{flex:1;min-width:34px;text-align:center;border:1px solid var(--line);border-radius:8px;padding:8px 2px;cursor:pointer;background:#fff;font-size:.9rem}
+  .scale input{display:none}
+  .scale label:has(input:checked){background:var(--accent);color:#fff;border-color:var(--accent)}
+  .scale-ends{display:flex;justify-content:space-between;color:var(--soft);font-size:.8rem;margin-top:4px}
+  .featrow{display:grid;grid-template-columns:1fr;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .featrow:last-child{border-bottom:none}
+  .featrow .fname{font-weight:600;font-size:.95rem}
+  .scenario{border:1px dashed var(--line);border-radius:10px;padding:14px;margin-bottom:14px;background:#fbfcf9}
+  .scenario h3{margin:0 0 10px;font-size:.95rem;color:var(--accent-dark)}
+  .scenario input,.scenario textarea{margin-bottom:8px}
+  .scenario textarea{min-height:64px}
+  .nav{display:flex;justify-content:space-between;gap:10px;margin-top:10px}
+  button{font:inherit;border:none;border-radius:10px;padding:12px 22px;cursor:pointer}
+  .primary{background:var(--accent);color:#fff;font-weight:600}
+  .primary:hover{background:var(--accent-dark)}
+  .ghost{background:transparent;color:var(--soft)}
+  .ghost:hover{color:var(--ink)}
+  .concept{background:#f3f8f6;border:1px solid var(--accent);border-radius:12px;padding:18px;margin-bottom:18px}
+  .concept p{margin:0 0 12px;font-size:1.02rem}
+  .floorplan{width:100%;height:auto;border-radius:8px;background:#fff;border:1px solid var(--line)}
+  .finish-box{background:#f3f8f6;border-radius:10px;padding:16px;margin:14px 0}
+  .finish-box ol{margin:8px 0 0;padding-left:20px}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .copied{color:var(--accent-dark);font-weight:600;font-size:.9rem;margin-top:8px;min-height:1.2em}
+  .req{color:var(--warn)}
+  .errmsg{color:var(--warn);font-size:.9rem;min-height:1.2em;margin-top:6px}
+  footer{color:var(--soft);font-size:.82rem;text-align:center;margin-top:28px}
+  @media(min-width:560px){ .featrow{grid-template-columns:220px 1fr;align-items:center} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Home Comfort &amp; Airflow — Short Study</h1>
+    <p>~12–15 minutes · anonymous · answers go directly to the researcher</p>
+  </header>
+  <div class="progress"><div id="bar"></div></div>
+  <main id="main"></main>
+  <footer>Questions? Contact Joseph Leonard · jleonard040621@gmail.com</footer>
+</div>
+
+<script>
+"use strict";
+const EMAIL = "jleonard040621@gmail.com";
+const LS_KEY = "airflow-formative-v1";
+const state = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+if (!state._pid) state._pid = "P-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+let step = state._step || 0;
+
+function save(){ state._step = step; localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- question helpers ---------- */
+function qText(id, label, note, multiline=true, ph=""){
+  return `<div class="q"><label class="main" for="${id}">${label}${note?` <span class="note">${note}</span>`:""}</label>
+  ${multiline
+    ? `<textarea id="${id}" data-k="${id}" placeholder="${esc(ph)}">${esc(state[id]||"")}</textarea>`
+    : `<input type="text" id="${id}" data-k="${id}" placeholder="${esc(ph)}" value="${esc(state[id]||"")}">`}</div>`;
+}
+function qRadio(id, label, options, note){
+  return `<div class="q"><label class="main">${label}${note?` <span class="note">${note}</span>`:""}</label>
+  <div class="choices">${options.map(o=>`
+    <label class="choice"><input type="radio" name="${id}" data-k="${id}" value="${esc(o)}" ${state[id]===o?"checked":""}><span>${esc(o)}</span></label>`).join("")}
+  </div></div>`;
+}
+function qCheck(id, label, options, note){
+  const cur = state[id] || [];
+  return `<div class="q"><label class="main">${label}${note?` <span class="note">${note}</span>`:""}</label>
+  <div class="choices">${options.map(o=>`
+    <label class="choice"><input type="checkbox" data-karr="${id}" value="${esc(o)}" ${cur.includes(o)?"checked":""}><span>${esc(o)}</span></label>`).join("")}
+  </div></div>`;
+}
+function qScale(id, label, lo, hi, note){
+  return `<div class="q"><label class="main">${label}${note?` <span class="note">${note}</span>`:""}</label>
+  <div class="scale">${[1,2,3,4,5,6,7].map(n=>`
+    <label><input type="radio" name="${id}" data-k="${id}" value="${n}" ${String(state[id])===String(n)?"checked":""}>${n}</label>`).join("")}</div>
+  <div class="scale-ends"><span>${lo}</span><span>${hi}</span></div></div>`;
+}
+
+const FLOORPLAN = `
+<svg class="floorplan" viewBox="0 0 460 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Example home floor plan">
+  <rect x="10" y="10" width="440" height="280" fill="#fdfdfb" stroke="#4b5563" stroke-width="4"/>
+  <line x1="250" y1="10" x2="250" y2="290" stroke="#4b5563" stroke-width="4"/>
+  <line x1="250" y1="150" x2="450" y2="150" stroke="#4b5563" stroke-width="4"/>
+  <line x1="10" y1="200" x2="250" y2="200" stroke="#4b5563" stroke-width="4"/>
+  <rect x="248" y="60" width="4" height="40" fill="#fdfdfb"/><rect x="247" y="60" width="6" height="40" fill="#a7d7d0"/>
+  <rect x="248" y="200" width="4" height="40" fill="#fdfdfb"/><rect x="247" y="200" width="6" height="40" fill="#a7d7d0"/>
+  <rect x="100" y="198" width="45" height="4" fill="#fdfdfb"/><rect x="100" y="197" width="45" height="6" fill="#a7d7d0"/>
+  <rect x="330" y="148" width="45" height="4" fill="#fdfdfb"/><rect x="330" y="147" width="45" height="6" fill="#a7d7d0"/>
+  <rect x="60" y="8" width="70" height="8" fill="#8fd0e8"/>
+  <rect x="300" y="8" width="70" height="8" fill="#8fd0e8"/>
+  <rect x="448" y="60" width="8" height="60" fill="#8fd0e8"/>
+  <rect x="60" y="284" width="70" height="8" fill="#8fd0e8"/>
+  <rect x="180" y="284" width="50" height="8" fill="#c9a86a"/>
+  <text x="125" y="105" font-size="17" fill="#374151" text-anchor="middle" font-family="sans-serif">Living room</text>
+  <text x="350" y="80" font-size="17" fill="#374151" text-anchor="middle" font-family="sans-serif">Bedroom</text>
+  <text x="350" y="225" font-size="17" fill="#374151" text-anchor="middle" font-family="sans-serif">Kitchen</text>
+  <text x="125" y="250" font-size="17" fill="#374151" text-anchor="middle" font-family="sans-serif">Bathroom</text>
+  <text x="205" y="278" font-size="11" fill="#92703d" text-anchor="middle" font-family="sans-serif">entrance</text>
+  <text x="95" y="30" font-size="11" fill="#4a90a4" font-family="sans-serif" text-anchor="middle">window</text>
+</svg>`;
+
+/* ---------- sections ---------- */
+const sections = [
+{ id:"consent", render(){ return `
+  <div class="card">
+    <h2>Before you start</h2>
+    <p>We are researching how people manage <strong>comfort at home</strong> — temperature, fresh air, drafts and smells. Your answers will help us design better tools.</p>
+    <ul>
+      <li>Takes about <strong>12–15 minutes</strong>. Free-text answers are the most valuable part.</li>
+      <li><strong>Anonymous</strong> — we don't ask for your name; your answers get a random ID (${state._pid}).</li>
+      <li>Participation is voluntary; you can stop at any time by closing this page.</li>
+      <li>At the end, your answers are sent <strong>by email</strong> to the researcher (nothing is uploaded automatically).</li>
+      <li>Data is used for research only, reported in aggregate, and stored de-identified.</li>
+    </ul>
+    <div class="choices">
+      <label class="choice"><input type="checkbox" data-karr="consent" value="I have read the information above and agree to take part" ${ (state.consent||[]).length?"checked":"" }>
+      <span><strong>I have read the information above and agree to take part.</strong></span></label>
+    </div>
+    <div class="errmsg" id="err"></div>
+  </div>`; },
+  validate(){ if(!(state.consent||[]).length) return "Please tick the consent box to continue."; } },
+
+{ id:"A", render(){ return `
+  <div class="card">
+    <h2>Part 1 of 6 — About you</h2>
+    <p class="sub">Just a few basics so we know who took part.</p>
+    ${qRadio("q1_age","Your age group",["18–24","25–34","35–44","45–54","55–64","65+"])}
+    ${qText("q1_occupation","Your occupation or field of study","", false)}
+    ${qRadio("q2_hometype","What kind of home do you live in?",["Apartment / flat","Detached or semi-detached house","Shared room / dormitory","Other"])}
+    ${qText("q2_household","How many rooms does it have, and who do you live with?","(e.g. “3 rooms, with my partner”)", false)}
+    ${qCheck("q3_devices","Which of these does your home have?",["Air conditioning","Electric fan(s)","Radiators / heaters","Windows you can open","Kitchen or bathroom extractor fan","Air purifier"],"(check all that apply)")}
+    ${qRadio("q4_expert","Have you ever studied or worked in HVAC / air-conditioning, mechanical engineering, architecture, or fluid dynamics?",["No","Yes"])}
+    ${qScale("q5_tech","How comfortable are you with technology in general?","not at all","very comfortable")}
+    <div class="errmsg" id="err"></div>
+  </div>`; },
+  validate(){
+    if(!state.q1_age) return "Please select your age group.";
+    if(!state.q4_expert) return "Please answer the question about your professional background.";
+  } },
+
+{ id:"B", render(){ return `
+  <div class="card">
+    <h2>Part 2 of 6 — Your recent experiences</h2>
+    <div class="instruction">Think of a <strong>specific, recent time</strong> — tell us what actually happened, step by step. There are no wrong answers; recent and ordinary is perfect.</div>
+    ${qText("q6_incident","Describe the most recent time you were uncomfortable at home because of temperature, stuffy air, a draft, or a smell. What was the situation, and what did you do about it, step by step? <span class='req'>*</span>","", true,"e.g. Last Tuesday evening my bedroom was too hot to sleep, so first I…")}
+    ${qText("q7_worked","Did what you tried actually fix it? How did you know? If it didn’t, what did you do next?")}
+    ${qText("q8_placement","Tell us about a time you decided where to put a fan, AC unit, heater, or piece of furniture because of heat, cold, or airflow. How did you decide? Are you happy with the result?")}
+    ${qText("q9_purchase","If you’ve ever bought a fan, AC, or air purifier: how did you choose the model and where to install it? What information did you wish you had?")}
+    ${qText("q10_tricks","Do you have any tricks you’ve invented for managing heat, cold, smells, or air at home?","(e.g. opening specific windows together, pointing a fan at a doorway…)")}
+    ${qText("q11_annoyance","Is there a spot in your home that is always too hot, cold, stuffy, or smelly? What have you tried?")}
+    <div class="errmsg" id="err"></div>
+  </div>`; },
+  validate(){ if(!(state.q6_incident||"").trim()) return "The first story (most recent discomfort) is the one answer we really need — a few sentences is enough."; } },
+
+{ id:"C", render(){ return `
+  <div class="card">
+    <h2>Part 3 of 6 — How you think about air</h2>
+    <p class="sub">There are no right answers here — we want your honest intuition.</p>
+    ${qText("q12_mental","When you want a room to cool down fast, what do you do first — and why do you think it works?")}
+    ${qText("q13_sense","Can you tell where air flows in your home? How?","(drafts you can feel, smells travelling, curtains moving, guessing…)")}
+    ${qText("q14_verify","When you adjust a fan, AC, or window, how do you know whether it worked?")}
+    <div class="errmsg" id="err"></div>
+  </div>`; } },
+
+{ id:"D", render(){ return `
+  <div class="card">
+    <h2>Part 4 of 6 — A tool idea</h2>
+    <div class="concept">
+      <p><strong>Now imagine this:</strong> a tool that simulates how air, temperature and smells move through a home — like the example floor plan below — and helps you decide what to change.</p>
+      ${FLOORPLAN}
+    </div>
+    ${qText("q15_asks","What would you want to <em>ask</em> such a tool? Write the first three requests that come to mind, in your own words.","", true,"1.\n2.\n3.")}
+    ${qText("q16_show_open","What would it need to <em>show</em> you so that you’d believe its answer?")}
+    ${qCheck("q16_show_pick","Which of these would help most?",["Moving particles showing the air","Arrows showing direction","A colour heat-map (warm/cool areas)","Exact numbers (temperature, air speed)","Before-vs-after pictures","A target picture to aim at","A plain-language explanation"],"(pick up to 3)")}
+    ${qRadio("q17_paradigm","Would you rather…",["Tell the tool my goal (“keep the bedroom cool”) and have it propose changes","Adjust fans/AC/windows myself and see what happens","Both, depending on the situation"])}
+    ${qText("q17_why","Why?","", true)}
+    ${qText("q18_trust","If the tool proposed a change (e.g. “move the fan next to the door and open the kitchen window”), what would make you trust — or distrust — that suggestion?")}
+    <div class="errmsg" id="err"></div>
+  </div>`; } },
+
+{ id:"E", render(){
+  const sc = i => `
+    <div class="scenario"><h3>Scenario ${i}${i===1?"":" (optional)"}</h3>
+      <input type="text" data-k="q19_s${i}_place" placeholder="Where are you? (room, time of day…)" value="${esc(state["q19_s"+i+"_place"]||"")}">
+      <input type="text" data-k="q19_s${i}_problem" placeholder="What's bothering you, or what do you want?" value="${esc(state["q19_s"+i+"_problem"]||"")}">
+      <textarea data-k="q19_s${i}_say" placeholder="What would you say to the tool, in your own words?">${esc(state["q19_s"+i+"_say"]||"")}</textarea>
+    </div>`;
+  return `
+  <div class="card">
+    <h2>Part 5 of 6 — Your situations</h2>
+    <div class="instruction">Invent <strong>2–3 situations from your own life</strong> where you would actually use this tool. For each: where are you, what’s bothering you (or what do you want), and what would you say to the tool?</div>
+    ${sc(1)}${sc(2)}${sc(3)}
+    ${qText("q20_matters","Which of your scenarios matters most to you, and why?","", true)}
+    ${qCheck("q21_net","Looking at this list — which would you realistically use it for?",["Cooling a bedroom for sleep","Keeping cooking smells contained","Deciding where to install an AC","Choosing which AC to buy","Saving energy while staying comfortable","Avoiding drafts","Improving air freshness","Arranging furniture for comfort"],"(check all that apply)")}
+    <div class="errmsg" id="err"></div>
+  </div>`; },
+  validate(){ if(!(state.q19_s1_place||"").trim() && !(state.q19_s1_problem||"").trim() && !(state.q19_s1_say||"").trim()) return "Please describe at least one scenario — it's the most important question in the study."; } },
+
+{ id:"F", render(){
+  const feats = [
+    ["f_goals","Describing my goal in plain language"],
+    ["f_sketch","Sketching an area on the floor plan"],
+    ["f_auto","Automatic “best placement / settings” suggestions"],
+    ["f_whatif","Trying changes myself and seeing the effect"],
+    ["f_buy","Buying advice (which AC, where to install it)"],
+    ["f_3d","A 3D animation of the airflow"],
+    ["f_verdict","A simple verdict: “goal met / not met”"],
+  ];
+  return `
+  <div class="card">
+    <h2>Part 6 of 6 — What matters most</h2>
+    <p class="sub">Rate how useful each feature would be <em>to you</em> (1 = useless, 7 = essential).</p>
+    ${feats.map(([id,name])=>`
+      <div class="featrow"><div class="fname">${name}</div>
+      <div><div class="scale">${[1,2,3,4,5,6,7].map(n=>`
+        <label><input type="radio" name="${id}" data-k="${id}" value="${n}" ${String(state[id])===String(n)?"checked":""}>${n}</label>`).join("")}</div></div></div>`).join("")}
+    <div style="height:14px"></div>
+    ${qText("q23_stop","What would stop you from using a tool like this?","(honesty helps: too much effort, wouldn't trust it, I already know my home…)")}
+    ${qText("q24_missing","Anything you expected us to ask but we didn’t?")}
+    <div class="errmsg" id="err"></div>
+  </div>`; } },
+
+{ id:"finish", render(){ return `
+  <div class="card">
+    <h2>Thank you! One last step 🙏</h2>
+    <p>Your answers are ready — they just need to reach the researcher. Because this survey stores nothing online, please send them by email:</p>
+    <div class="finish-box"><ol>
+      <li>Click <strong>“Open email”</strong> below — your answers are copied automatically and a pre-addressed email opens.</li>
+      <li><strong>Paste</strong> (Ctrl+V / Cmd+V) into the email body and press send.</li>
+    </ol></div>
+    <div class="btnrow">
+      <button class="primary" id="btn-mail">📧 Open email (answers are auto-copied)</button>
+      <button class="ghost" id="btn-copy">Copy answers only</button>
+      <button class="ghost" id="btn-dl">Download answers as a file</button>
+    </div>
+    <div class="copied" id="copymsg"></div>
+    <p class="sub" style="margin-top:14px">If the email button doesn't open your mail app: copy the answers, then email them to <strong>${EMAIL}</strong> — or download the file and attach it.</p>
+  </div>`; } },
+];
+
+/* ---------- summary building ---------- */
+const LABELS = {
+  q1_age:"Age group", q1_occupation:"Occupation", q2_hometype:"Home type", q2_household:"Rooms & household",
+  q3_devices:"Devices at home", q4_expert:"HVAC/engineering background", q5_tech:"Tech comfort (1-7)",
+  q6_incident:"Q6 Recent discomfort incident", q7_worked:"Q7 Did it work / how did you know",
+  q8_placement:"Q8 Placement decision story", q9_purchase:"Q9 Purchase decision story",
+  q10_tricks:"Q10 Invented tricks", q11_annoyance:"Q11 Persistent problem spot",
+  q12_mental:"Q12 Cooling a room fast (mental model)", q13_sense:"Q13 Sensing airflow at home", q14_verify:"Q14 How you verify a change",
+  q15_asks:"Q15 Three things you'd ask the tool", q16_show_open:"Q16 What it must show (open)",
+  q16_show_pick:"Q16 What it must show (picks)", q17_paradigm:"Q17 Goal vs manual", q17_why:"Q17 Why",
+  q18_trust:"Q18 Trust in proposed changes",
+  q19_s1_place:"Scenario 1 - place", q19_s1_problem:"Scenario 1 - problem", q19_s1_say:"Scenario 1 - what you'd say",
+  q19_s2_place:"Scenario 2 - place", q19_s2_problem:"Scenario 2 - problem", q19_s2_say:"Scenario 2 - what you'd say",
+  q19_s3_place:"Scenario 3 - place", q19_s3_problem:"Scenario 3 - problem", q19_s3_say:"Scenario 3 - what you'd say",
+  q20_matters:"Q20 Which scenario matters most", q21_net:"Q21 Realistic uses",
+  f_goals:"Feature: plain-language goals (1-7)", f_sketch:"Feature: sketch area (1-7)", f_auto:"Feature: auto best-placement (1-7)",
+  f_whatif:"Feature: manual what-if (1-7)", f_buy:"Feature: buying advice (1-7)", f_3d:"Feature: 3D animation (1-7)",
+  f_verdict:"Feature: simple verdict (1-7)",
+  q23_stop:"Q23 What would stop you", q24_missing:"Q24 Anything we should have asked",
+};
+function buildSummary(){
+  const lines = ["HOME COMFORT & AIRFLOW STUDY - RESPONSE", "Participant ID: " + state._pid, "Submitted: " + new Date().toISOString(), ""];
+  for (const [k,label] of Object.entries(LABELS)){
+    let v = state[k];
+    if (Array.isArray(v)) v = v.join("; ");
+    if (v === undefined || v === null || String(v).trim() === "") continue;
+    lines.push(label + ":", String(v).trim(), "");
+  }
+  return lines.join("\n");
+}
+
+/* ---------- render & events ---------- */
+const main = document.getElementById("main");
+function render(){
+  const s = sections[step];
+  const pct = Math.round(step / (sections.length - 1) * 100);
+  document.getElementById("bar").style.width = pct + "%";
+  main.innerHTML = s.render() + `
+    <div class="nav">
+      <button class="ghost" id="btn-back" ${step===0?"style='visibility:hidden'":""}>&larr; Back</button>
+      ${step < sections.length-1 ? `<button class="primary" id="btn-next">${step===0?"Start":"Next"} &rarr;</button>` : ""}
+    </div>`;
+  window.scrollTo(0,0);
+
+  main.querySelectorAll("[data-k]").forEach(el=>{
+    el.addEventListener("input", ()=>{ state[el.dataset.k] = el.value; save(); });
+    el.addEventListener("change", ()=>{ state[el.dataset.k] = el.value; save(); });
+  });
+  main.querySelectorAll("[data-karr]").forEach(el=>{
+    el.addEventListener("change", ()=>{
+      const k = el.dataset.karr; const cur = new Set(state[k]||[]);
+      el.checked ? cur.add(el.value) : cur.delete(el.value);
+      state[k] = [...cur]; save();
+    });
+  });
+  const back = document.getElementById("btn-back");
+  if (back) back.onclick = ()=>{ step=Math.max(0,step-1); save(); render(); };
+  const next = document.getElementById("btn-next");
+  if (next) next.onclick = ()=>{
+    const err = s.validate && s.validate();
+    const box = document.getElementById("err");
+    if (err){ if(box) box.textContent = err; return; }
+    step++; save(); render();
+  };
+  if (s.id === "finish"){
+    const msg = document.getElementById("copymsg");
+    const copy = async ()=>{
+      const text = buildSummary();
+      try { await navigator.clipboard.writeText(text); msg.textContent = "✓ Answers copied to clipboard."; }
+      catch(e){
+        const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta);
+        ta.select(); document.execCommand("copy"); ta.remove();
+        msg.textContent = "✓ Answers copied to clipboard.";
+      }
+      return text;
+    };
+    document.getElementById("btn-copy").onclick = copy;
+    document.getElementById("btn-mail").onclick = async ()=>{
+      await copy();
+      msg.textContent = "✓ Answers copied — paste them into the email body (Ctrl+V / Cmd+V).";
+      const subject = encodeURIComponent("Airflow study response " + state._pid);
+      const body = encodeURIComponent("Hi Joseph,\n\nMy survey answers are pasted below.\n\n[PASTE HERE - press Ctrl+V or Cmd+V]\n");
+      location.href = `mailto:${EMAIL}?subject=${subject}&body=${body}`;
+    };
+    document.getElementById("btn-dl").onclick = ()=>{
+      const blob = new Blob([buildSummary()], {type:"text/plain"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "airflow-study-" + state._pid + ".txt";
+      a.click(); URL.revokeObjectURL(a.href);
+      msg.textContent = "✓ File downloaded — please email it to " + EMAIL + ".";
+    };
+  }
+}
+render();
+</script>
+</body>
+</html>
