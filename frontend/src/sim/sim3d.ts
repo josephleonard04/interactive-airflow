@@ -137,23 +137,30 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   for (const it of plan.items) {
     const isAC = it.type === "ac";
     const isSupply = it.type === "supply";
+    const isReturn = it.type === "return";
     const isFan = it.type === "fan";
     const isHeater = it.type === "heater";
-    if (!isAC && !isSupply && !isFan && !isHeater) continue;
+    if (!isAC && !isSupply && !isReturn && !isFan && !isHeater) continue;
     if (it.on === false) continue;
     const mult = POWER[it.power ?? 2] ?? 1;
     const cells = cellsOf(itemAabb(it));
     if (isAC) markers.push({ pos: [...it.position] as [number, number, number], kind: "cold" });
     if (isHeater) markers.push({ pos: [...it.position] as [number, number, number], kind: "hot" });
 
-    if (isAC || isSupply || isFan) {
-      const dir: [number, number, number] = isSupply ? [0, -1, 0] : horizDir(it.rotationY); // ceiling vent blows down
-      const speed = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult;
+    if (isAC || isSupply || isReturn || isFan) {
+      // ceiling vents (supply/return) act vertically; AC blows along its facing.
+      const dir: [number, number, number] = isSupply || isReturn ? [0, -1, 0] : horizDir(it.rotationY);
+      // a RETURN vent sucks air OUT: same face, negated speed → air flows toward
+      // the vent instead of away, pulling room air (and odour) into it. Pair a
+      // supply in one room with a return in another and the air is drawn ACROSS
+      // the house through the open doors — whole-house circulation.
+      const mag = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult;
+      const speed = isReturn ? -mag : mag;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
         if (sim.solid[c]) sim.solid[c] = 0;
         // only AC / supply generate air → seed airflow particles here; a fan only
-        // pushes existing air, so it is not a particle source
+        // pushes existing air and a return only removes it, so neither seeds
         if (isAC || isSupply) seeds.push(cellCenter(i, j, k));
         if (isFan) {
           // recirculating: two opposite faces (net-zero mass)

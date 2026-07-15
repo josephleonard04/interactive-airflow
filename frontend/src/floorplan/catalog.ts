@@ -27,7 +27,8 @@ export const CATALOG: Record<string, ItemSpec> = {
   ac: { size: [0.85, 0.32, 0.22], category: "hvac", mount: "wall", flow: 0.25, label: "AC unit" },
   heater: { size: [0.8, 0.5, 0.18], category: "hvac", mount: "floor", flow: 0, label: "Heater" },
   fan: { size: [0.45, 1.3, 0.45], category: "hvac", mount: "floor", flow: 0, label: "Fan" },
-  supply: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Vent" },
+  supply: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Supply vent" },
+  return: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Return vent" },
   smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
 };
 
@@ -36,6 +37,6 @@ export const PALETTE: Array<{ group: string; types: string[] }> = [
   { group: "Furniture", types: ["bed", "desk", "closet", "table", "couch", "tv"] },
   { group: "Kitchen", types: ["fridge", "kitchen_sink"] },
   { group: "Bathroom", types: ["sink", "toilet", "bathtub"] },
-  { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply"] },
+  { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply", "return"] },
   { group: "Simulation", types: ["smell"] },
 ];
