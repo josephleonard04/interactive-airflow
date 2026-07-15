@@ -231,6 +231,83 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, seeds, markers };
 }
 
+// Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
+// sources through connected air. This replaces the slow diffusion relaxation
+// (which needed thousands of iterations to cross the house): a multi-source BFS
+// gives every cell its distance-to-source *through open doorways, blocked by
+// walls and closed doors*, and the value falls off exponentially with that
+// distance. So a heater/AC fills its whole connected part of the house (hot near
+// the source, cooler further away, nothing past a shut door), and smell reads
+// low near open windows / vents (fresh-air sinks). O(cells) — instant.
+export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Array } {
+  const { sim, nx, ny, nz, dx, ambient, ventDilute } = s;
+  const n3 = nx * ny * nz;
+  const idx = (i: number, j: number, k: number) => i + nx * (j + ny * k);
+
+  // multi-source BFS: geodesic distance (metres) through non-solid cells.
+  const bfs = (seeds: number[]): Float32Array => {
+    const dist = new Float32Array(n3).fill(Infinity);
+    const q = new Int32Array(n3);
+    let head = 0, tail = 0;
+    for (const c of seeds) if (!sim.solid[c] && dist[c] === Infinity) { dist[c] = 0; q[tail++] = c; }
+    while (head < tail) {
+      const c = q[head++];
+      const i = c % nx, j = ((c / nx) | 0) % ny, k = (c / (nx * ny)) | 0;
+      const nd = dist[c] + dx;
+      const nbr = [[i - 1, j, k], [i + 1, j, k], [i, j - 1, k], [i, j + 1, k], [i, j, k - 1], [i, j, k + 1]];
+      for (const [a, b, d] of nbr) {
+        if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
+        const cc = idx(a, b, d);
+        if (sim.solid[cc] || dist[cc] !== Infinity) continue;
+        dist[cc] = nd; q[tail++] = cc;
+      }
+    }
+    return dist;
+  };
+
+  const LAMBDA = 4.0; // decay length (m): large enough to fill a house, still a gradient
+  const SMELL_LAMBDA = 3.2;
+  const SINK_LAMBDA = 0.7; // smell only vanishes very close to a window/vent
+
+  // temperature: hot (heater) and cold (AC) sources, each with geodesic falloff
+  const hotSeeds: number[] = [], coldSeeds: number[] = [];
+  let hotMag = 0, coldMag = 0;
+  for (let c = 0; c < n3; c++) if (sim.tempFixed[c]) {
+    if (sim.tempVal[c] > 0) { hotSeeds.push(c); hotMag = Math.max(hotMag, sim.tempVal[c]); }
+    else if (sim.tempVal[c] < 0) { coldSeeds.push(c); coldMag = Math.max(coldMag, -sim.tempVal[c]); }
+  }
+  const dHot = hotSeeds.length ? bfs(hotSeeds) : null;
+  const dCold = coldSeeds.length ? bfs(coldSeeds) : null;
+  const temp = new Float32Array(n3);
+  for (let c = 0; c < n3; c++) {
+    if (sim.solid[c]) continue;
+    let t = 0;
+    if (dHot && dHot[c] !== Infinity) t += hotMag * Math.exp(-dHot[c] / LAMBDA);
+    if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / LAMBDA);
+    temp[c] = t;
+  }
+
+  // air quality: smell falls off from the source; near a window/vent sink it goes
+  // to ~0 (fresh air), and a shut door (unreachable) blocks it entirely.
+  const smellSeeds: number[] = [], sinkSeeds: number[] = [];
+  for (let c = 0; c < n3; c++) {
+    if (sim.sFixed[c]) smellSeeds.push(c);
+    if (ambient[c] || ventDilute[c]) sinkSeeds.push(c);
+  }
+  const smell = new Float32Array(n3);
+  if (smellSeeds.length) {
+    const dS = bfs(smellSeeds);
+    const dK = sinkSeeds.length ? bfs(sinkSeeds) : null;
+    for (let c = 0; c < n3; c++) {
+      if (sim.solid[c] || dS[c] === Infinity) continue;
+      let v = Math.exp(-dS[c] / SMELL_LAMBDA);
+      if (dK && dK[c] !== Infinity) v *= 1 - Math.exp(-dK[c] / SINK_LAMBDA);
+      smell[c] = v;
+    }
+  }
+  return { temp, smell };
+}
+
 // Steady-state scalar field carried by the AIRFLOW: advection along the converged
 // velocity field plus mixing (diffusion), so temperature / smell follow the air
 // currents and fill the whole connected house. Sources hold their value, exterior
