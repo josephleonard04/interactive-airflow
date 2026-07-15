@@ -52,51 +52,47 @@ function makeSampler(built: Sim3D) {
 }
 
 /**
- * Seed points across the WHOLE house: the vents/AC outlets (where air is born),
- * a sparse grid of moving cells, AND the fastest cells of EVERY room — so each
- * room shows its air motion, however gentle, not just the room with the AC.
+ * Seed a SMALL, MEANINGFUL set of points: the vents/AC outlets (where air is
+ * born) plus the few fastest cells of each room, keeping them spatially spread so
+ * lines don't bunch up. Deliberately no dense grid — that was the source of the
+ * "too many messy lines". We want a handful of clean streamlines per room that
+ * trace where the air actually goes.
  */
 function seedPoints(
   built: Sim3D,
   sample: (x: number, y: number, z: number) => Vel,
   maxSeeds: number,
   rooms: Rect[] = [],
+  minSpeed: number,
 ): THREE.Vector3[] {
+  const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
   for (const s of built.seeds) out.push(new THREE.Vector3(s[0], s[1], s[2]));
 
-  const { nx, ny, nz, cellCenter } = built;
-  const stride = Math.max(1, Math.round(Math.cbrt((nx * ny * nz) / (maxSeeds * 2))));
-  for (let k = 1; k < nz - 1; k += stride)
-    for (let j = 1; j < ny - 1; j += stride)
-      for (let i = 1; i < nx - 1; i += stride) {
-        const [x, y, z] = cellCenter(i, j, k);
-        const v = sample(x, y, z);
-        if (!v.solid && v.speed > 0.03) out.push(new THREE.Vector3(x, y, z));
-      }
-
-  // Guarantee per-room coverage: the ~6 fastest air cells of each room become
-  // seeds even when the whole room is slow (air still moves everywhere).
-  for (const r of rooms) {
+  // Per-room: pick the strongest-flow cells, but spaced apart (min separation)
+  // so we get a few representative lines, not a cluster on one jet.
+  const perRoom = rooms.length ? Math.max(2, Math.floor((maxSeeds - out.length) / rooms.length)) : 4;
+  const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
+  const rlist: Rect[] = rooms.length ? rooms : [{ x: built.origin[0], z: built.origin[2], w: nx * built.dx, d: nz * built.dx, y: 0, h: 0 } as unknown as Rect];
+  for (const r of rlist) {
     const cands: Array<{ p: THREE.Vector3; s: number }> = [];
-    for (let k = 1; k < nz - 1; k += 1)
+    for (let k = 1; k < nz - 1; k++)
       for (let j = 1; j < ny - 1; j += 2)
-        for (let i = 1; i < nx - 1; i += 1) {
+        for (let i = 1; i < nx - 1; i++) {
           const [x, y, z] = cellCenter(i, j, k);
           if (x < r.x || x > r.x + r.w || z < r.z || z > r.z + r.d) continue;
           const v = sample(x, y, z);
-          if (!v.solid && v.speed > 0.004) cands.push({ p: new THREE.Vector3(x, y, z), s: v.speed });
+          if (!v.solid && v.speed > minSpeed) cands.push({ p: new THREE.Vector3(x, y, z), s: v.speed });
         }
     cands.sort((a, b) => b.s - a.s);
-    for (const c of cands.slice(0, 6)) out.push(c.p);
+    const picked: THREE.Vector3[] = [];
+    for (const c of cands) {
+      if (picked.length >= perRoom) break;
+      if (picked.every((q) => q.distanceTo(c.p) > sep)) picked.push(c.p);
+    }
+    out.push(...picked);
   }
-  // Cap, keeping an even spread.
-  if (out.length > maxSeeds) {
-    const step = out.length / maxSeeds;
-    const kept: THREE.Vector3[] = [];
-    for (let i = 0; i < maxSeeds; i++) kept.push(out[Math.floor(i * step)]);
-    return kept;
-  }
+  if (out.length > maxSeeds) return out.slice(0, maxSeeds);
   return out;
 }
 
@@ -114,12 +110,12 @@ export function buildStreamlinePaths(
   const inBounds = (p: THREE.Vector3) =>
     p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1;
 
-  const base = new THREE.Color(opts.color ?? "#38bdf8");
-  const hot = new THREE.Color("#f3fbff");
-  const SPEED_REF = 0.8;
+  const white = new THREE.Color(opts.color ?? "#ffffff");
+  const MIN_SPEED = 0.05; // a line must carry real air somewhere, else it's noise
+  const MIN_POINTS = 6; // and trace a real path, not a stub
   const step = dx * 0.75;
   const maxSteps = 170;
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 46, opts.rooms ?? []);
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -146,9 +142,11 @@ export function buildStreamlinePaths(
     const p = seed.clone();
     const raw: THREE.Vector3[] = [p.clone()];
     lastDir.set(0, 0, 0);
-    let stallBudget = 14;
+    let stallBudget = 10;
+    let peak = 0;
     for (let n = 0; n < maxSteps; n++) {
       if (!inBounds(p) || sample(p.x, p.y, p.z).solid) break;
+      peak = Math.max(peak, sample(p.x, p.y, p.z).speed);
       const q1 = stepVec(p, s1); // RK2 midpoint
       if (q1 === "dead") break;
       mid.copy(p).addScaledVector(s1, 0.5);
@@ -163,20 +161,16 @@ export function buildStreamlinePaths(
       raw.push(next);
       p.copy(next);
     }
-    if (raw.length < 3) continue;
+    // meaningful only: a real path that carries real air somewhere
+    if (raw.length < MIN_POINTS || peak < MIN_SPEED) continue;
 
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);
     const smooth = curve.getPoints(divisions);
-    const c0 = new THREE.Color();
-    const c1 = new THREE.Color();
-    const colorAt = (q: THREE.Vector3, out: THREE.Color) => {
-      const norm = Math.min(1, sample(q.x, q.y, q.z).speed / SPEED_REF);
-      return out.copy(base).lerp(hot, norm * 0.78);
-    };
+    // single flat colour (white) — no speed gradient, so the view stays clean
     for (let i = 0; i < smooth.length - 1; i++) {
       points.push(smooth[i], smooth[i + 1]);
-      colors.push(colorAt(smooth[i], c0).clone(), colorAt(smooth[i + 1], c1).clone());
+      colors.push(white.clone(), white.clone());
     }
   }
 
