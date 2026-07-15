@@ -28,8 +28,13 @@ export interface Sim3D {
   worldToCell: (wx: number, wy: number, wz: number) => [number, number, number];
   cellCenter: (i: number, j: number, k: number) => [number, number, number];
   setSource: (rect: Rect | null) => void;
-  /** Exterior-opening cells (open windows/doors) — ambient sinks for the fill. */
+  /** Exterior-opening cells (open windows/doors) — sinks for BOTH temp and smell
+   *  (heat and odour both leave the house here). */
   ambient: Uint8Array;
+  /** Inflow-vent cells (AC / supply) — sink for SMELL ONLY: they blow clean air so
+   *  odour reads low near them, but they must NOT drain temperature (an AC vent is
+   *  cold, a supply vent neutral — zeroing heat here stops warm air from spreading). */
+  ventDilute: Uint8Array;
   hasTemperature: boolean;
   /** Points just in front of vents/AC/fans — where to seed airflow particles. */
   seeds: Array<[number, number, number]>;
@@ -92,12 +97,13 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       }
 
   const ambient = new Uint8Array(nx * ny * nz);
+  const ventDilute = new Uint8Array(nx * ny * nz);
   for (const p of scene.outlets)
     for (const [i, j, k] of cellsOf(p.world)) {
       const c = sim.cIdx(i, j, k);
       sim.solid[c] = 0;
       sim.open[c] = 1;
-      ambient[c] = 1; // exterior opening = ambient sink for the scalar fill
+      ambient[c] = 1; // exterior opening = sink for both temperature and smell
     }
 
   const itemAabb = (it: PlacedItem): Box => {
@@ -169,9 +175,11 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
           }
         } else {
           // ducted vent: free boundary cell + directed jet face. Inflow vents
-          // inject clean air, so they also dilute odour locally (smell sink).
+          // inject clean air, so they dilute odour locally (SMELL sink only —
+          // not a temperature sink, or the AC's own cold / a heater's warmth
+          // could never spread past the vent).
           sim.open[c] = 1;
-          ambient[c] = 1;
+          ventDilute[c] = 1;
           setFace(i, j, k, dir, speed);
         }
       }
@@ -220,7 +228,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, hasTemperature, seeds, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, seeds, markers };
 }
 
 // Steady-state scalar field carried by the AIRFLOW: advection along the converged
@@ -232,11 +240,12 @@ export function advectDiffuseFill(
   s: Sim3D,
   fixed: Uint8Array,
   val: Float32Array,
-  opts?: { iters?: number; kappa?: number; adv?: number },
+  opts?: { iters?: number; kappa?: number; adv?: number; extraSink?: Uint8Array },
 ): Float32Array {
   const { sim, nx, ny, nz, ambient } = s;
+  const extra = opts?.extraSink;
   const iters = opts?.iters ?? 320;
-  const kappa = opts?.kappa ?? 0.26; // mixing strength (higher = spreads further)
+  const kappa = opts?.kappa ?? 0.32; // mixing strength (higher = spreads further)
   const adv = opts?.adv ?? 0.95; // cells moved per (m/s) per iteration
   const n3 = nx * ny * nz;
   const f = new Float32Array(n3);
@@ -265,7 +274,7 @@ export function advectDiffuseFill(
           const c = idx(i, j, k);
           if (sim.solid[c]) continue;
           if (fixed[c]) { f[c] = val[c]; continue; }
-          if (ambient[c]) { f[c] = 0; continue; }
+          if (ambient[c] || (extra && extra[c])) { f[c] = 0; continue; }
           // advect: trace back along the air velocity
           const uc = 0.5 * (sim.u[sim.uIdx(i, j, k)] + sim.u[sim.uIdx(i + 1, j, k)]);
           const vc = 0.5 * (sim.v[sim.vIdx(i, j, k)] + sim.v[sim.vIdx(i, j + 1, k)]);

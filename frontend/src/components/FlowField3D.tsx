@@ -195,7 +195,7 @@ export function FlowField3D() {
         applyFieldToSim(built, accurate.field);
         fieldsRef.current = {
           temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
-          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal, { extraSink: built.ventDilute }),
           noise: computeNoiseField(plan, built),
         };
         converged.current = true;
@@ -210,7 +210,7 @@ export function FlowField3D() {
         // freeze and solve the airflow-carried temperature & smell fields once
         fieldsRef.current = {
           temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
-          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal),
+          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal, { extraSink: built.ventDilute }),
           noise: computeNoiseField(plan, built),
         };
         converged.current = true;
