@@ -223,7 +223,7 @@ function inletsFromItems(plan: FloorPlan): FlowPatch[] {
   for (const it of plan.items) {
     const isInlet = it.type === "ac" || it.type === "supply";
     const flux = it.flow ?? 0;
-    if (!isInlet || flux <= 0) continue;
+    if (!isInlet || it.on === false || flux <= 0) continue;
     const world = worldAABB(it);
     const normal = inwardNormal(it);
     const area = areaPerp(world, normal);
@@ -315,6 +315,27 @@ function mkOutlet(c: { o: Opening; normal: V3; area: number; world: Box }, flux:
   };
 }
 
+/** Return/exhaust vents: forced OUTLETS that extract air (part of the balance). */
+function returnsFromItems(plan: FloorPlan): FlowPatch[] {
+  const out: FlowPatch[] = [];
+  for (const it of plan.items) {
+    if (it.type !== "return" || it.on === false) continue;
+    const flux = it.flow ?? 0;
+    if (flux <= 0) continue;
+    const world = worldAABB(it);
+    const inN = inwardNormal(it);
+    const n: V3 = [-inN[0], -inN[1], -inN[2]]; // extraction points out of the room
+    const area = areaPerp(world, inN);
+    const speed = area > 0 ? flux / area : 0;
+    out.push({
+      id: `return-${it.id}`, source: it.id, kind: "return", role: "outlet",
+      world, normal: n, area, flux, speed,
+      velocity: [n[0] * speed, n[1] * speed, n[2] * speed],
+    });
+  }
+  return out;
+}
+
 function fansFromItems(plan: FloorPlan): FanSource[] {
   return plan.items
     .filter((it) => it.type === "fan")
@@ -337,7 +358,25 @@ export function compileLfmScene(plan: FloorPlan): LfmScene {
   const solids = solidsFromPlan(plan);
   const inlets = inletsFromItems(plan);
   const inflow = inlets.reduce((s, p) => s + p.flux, 0);
-  const { outlets, balance } = balancedOutlets(plan, inflow);
+  // Return vents extract air first; open windows/doors exhaust whatever is left.
+  const returns = returnsFromItems(plan);
+  const returnFlux = returns.reduce((s, p) => s + p.flux, 0);
+  const { outlets: windowOutlets, balance: winBal } = balancedOutlets(plan, Math.max(0, inflow - returnFlux));
+  const outlets = [...returns, ...windowOutlets];
+  const windowOut = windowOutlets.reduce((s, p) => s + p.flux, 0);
+  const outflow = returnFlux + windowOut;
+  const hasOutlet = returnFlux > 0 || windowOutlets.length > 0;
+  const balance: FluxBalance =
+    inflow <= 1e-9
+      ? { inflow: 0, outflow: 0, balanced: true, note: "No forced inflow — flow is buoyancy-driven only." }
+      : hasOutlet
+        ? {
+            inflow, outflow, balanced: true,
+            note: returnFlux > 0
+              ? `Return vent(s) extract ${returnFlux.toFixed(3)} m³/s${windowOut > 1e-6 ? `, the rest leaves via open windows/doors` : ""}.`
+              : undefined,
+          }
+        : { inflow, outflow: 0, balanced: false, note: winBal.note };
   const fans = fansFromItems(plan);
   const heatSources = heatSourcesFromItems(plan);
 

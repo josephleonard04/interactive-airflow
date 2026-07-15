@@ -327,6 +327,8 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Fan(size);
     case "supply":
       return Vent(size);
+    case "return":
+      return Vent(size);
     case "smell":
       return Smell(size);
     default:

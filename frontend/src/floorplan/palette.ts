@@ -29,6 +29,7 @@ const ITEM_COLOR: Record<string, string> = {
   toilet: "#eef3f6",
   bathtub: "#e4eef3",
   supply: "#3b82f6",
+  return: "#14b8a6",
   ac: "#aab6c4",
   fan: "#7b8794",
   heater: "#c47a55",

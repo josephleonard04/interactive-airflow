@@ -152,7 +152,7 @@ export function Panel() {
           <p className="muted-line">
             in {roomName(selected.roomId, plan.rooms)} · drag in the view to move
           </p>
-          {["ac", "fan", "heater"].includes(selected.type) && (
+          {["ac", "fan", "heater", "supply", "return"].includes(selected.type) && (
             <>
               <div className="field">
                 <span>power</span>
@@ -329,7 +329,7 @@ export function Panel() {
                       onClick={() => selectItem(it.id)}
                     >
                       <span className="swatch" style={{ background: itemColor(it.type) }} />
-                      <span className="name">{pretty(it.type === "supply" ? "vent" : it.type)}</span>
+                      <span className="name">{pretty(it.type === "supply" ? "supply vent" : it.type === "return" ? "return vent" : it.type)}</span>
                       <button
                         className="x"
                         title="Remove"
