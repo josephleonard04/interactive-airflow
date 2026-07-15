@@ -67,12 +67,17 @@ function seedPoints(
 ): THREE.Vector3[] {
   const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
-  for (const s of built.seeds) out.push(new THREE.Vector3(s[0], s[1], s[2]));
+  const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
+  // Vent seeds cluster on the AC/supply (many cells, one line each) → thin them
+  // by spacing so the source room isn't a tangle of lines.
+  for (const s of built.seeds) {
+    const p = new THREE.Vector3(s[0], s[1], s[2]);
+    if (out.every((q) => q.distanceTo(p) > sep * 0.8)) out.push(p);
+  }
 
   // Per-room: pick the strongest-flow cells, but spaced apart (min separation)
   // so we get a few representative lines, not a cluster on one jet.
   const perRoom = rooms.length ? Math.max(2, Math.floor((maxSeeds - out.length) / rooms.length)) : 4;
-  const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
   const rlist: Rect[] = rooms.length ? rooms : [{ x: built.origin[0], z: built.origin[2], w: nx * built.dx, d: nz * built.dx, y: 0, h: 0 } as unknown as Rect];
   for (const r of rlist) {
     const cands: Array<{ p: THREE.Vector3; s: number }> = [];
