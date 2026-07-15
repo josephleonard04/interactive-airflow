@@ -243,8 +243,9 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   const { sim, nx, ny, nz, dx, ambient, ventDilute } = s;
   const n3 = nx * ny * nz;
   const idx = (i: number, j: number, k: number) => i + nx * (j + ny * k);
+  const DIRS: [number, number, number][] = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
 
-  // multi-source BFS: geodesic distance (metres) through non-solid cells.
+  // Plain geodesic distance (metres) through connected air — used for sinks.
   const bfs = (seeds: number[]): Float32Array => {
     const dist = new Float32Array(n3).fill(Infinity);
     const q = new Int32Array(n3);
@@ -254,8 +255,8 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
       const c = q[head++];
       const i = c % nx, j = ((c / nx) | 0) % ny, k = (c / (nx * ny)) | 0;
       const nd = dist[c] + dx;
-      const nbr = [[i - 1, j, k], [i + 1, j, k], [i, j - 1, k], [i, j + 1, k], [i, j, k - 1], [i, j, k + 1]];
-      for (const [a, b, d] of nbr) {
+      for (const [di, dj, dk] of DIRS) {
+        const a = i + di, b = j + dj, d = k + dk;
         if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
         const cc = idx(a, b, d);
         if (sim.solid[cc] || dist[cc] !== Infinity) continue;
@@ -265,30 +266,79 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     return dist;
   };
 
-  const LAMBDA = 4.0; // decay length (m): large enough to fill a house, still a gradient
-  const SMELL_LAMBDA = 3.2;
-  const SINK_LAMBDA = 0.7; // smell only vanishes very close to a window/vent
+  // Airflow-WEIGHTED distance (Dijkstra): travel time from a source, where moving
+  // DOWNWIND is fast (the air carries heat/smell) and upwind slow. A base spread
+  // speed V0 (diffusion / gentle mixing) guarantees the whole connected house is
+  // still reached; the flow just biases how far the field is carried each way.
+  // Returns a time-like cost (s); combined with an exp falloff this is the
+  // steady-state ("very long time") distribution advected by the airflow.
+  const V0 = 0.6;    // base diffusive spread (m/s) — dominant, fills the house
+  const KADV = 0.5;  // airflow bias on top of the base spread (carries downwind)
+  const costFromSources = (seeds: number[]): Float32Array => {
+    const dist = new Float32Array(n3).fill(Infinity);
+    // binary min-heap over (cost, cell)
+    const hc = new Float64Array(n3 + 1);
+    const hi = new Int32Array(n3 + 1);
+    let hn = 0;
+    const push = (cost: number, cell: number) => {
+      let p = ++hn; hc[p] = cost; hi[p] = cell;
+      while (p > 1) { const q = p >> 1; if (hc[q] <= hc[p]) break; [hc[p], hc[q]] = [hc[q], hc[p]]; [hi[p], hi[q]] = [hi[q], hi[p]]; p = q; }
+    };
+    const pop = (): [number, number] => {
+      const rc = hc[1], rcell = hi[1];
+      hc[1] = hc[hn]; hi[1] = hi[hn]; hn--;
+      let p = 1;
+      for (;;) { let l = p << 1, r = l + 1, m = p;
+        if (l <= hn && hc[l] < hc[m]) m = l;
+        if (r <= hn && hc[r] < hc[m]) m = r;
+        if (m === p) break;
+        [hc[p], hc[m]] = [hc[m], hc[p]]; [hi[p], hi[m]] = [hi[m], hi[p]]; p = m; }
+      return [rc, rcell];
+    };
+    for (const c of seeds) if (!sim.solid[c] && dist[c] === Infinity) { dist[c] = 0; push(0, c); }
+    while (hn > 0) {
+      const [cost, c] = pop();
+      if (cost > dist[c]) continue;
+      const i = c % nx, j = ((c / nx) | 0) % ny, k = (c / (nx * ny)) | 0;
+      const [u, v, w] = sim.velocityAt(i, j, k);
+      for (const [di, dj, dk] of DIRS) {
+        const a = i + di, b = j + dj, d = k + dk;
+        if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
+        const cc = idx(a, b, d);
+        if (sim.solid[cc]) continue;
+        const vd = u * di + v * dj + w * dk; // flow component along the move
+        const speed = V0 + KADV * Math.max(0, vd);
+        const nc = cost + dx / speed;
+        if (nc < dist[cc]) { dist[cc] = nc; push(nc, cc); }
+      }
+    }
+    return dist;
+  };
 
-  // temperature: hot (heater) and cold (AC) sources, each with geodesic falloff
+  const TAU = 12;        // temperature decay time (s) — fills a house, keeps a gradient
+  const SMELL_TAU = 9;
+  const SINK_LAMBDA = 0.7; // smell drops to ~0 within ~3 cells of an open window/vent
+
+  // temperature: hot (heater) & cold (AC) sources carried by the airflow
   const hotSeeds: number[] = [], coldSeeds: number[] = [];
   let hotMag = 0, coldMag = 0;
   for (let c = 0; c < n3; c++) if (sim.tempFixed[c]) {
     if (sim.tempVal[c] > 0) { hotSeeds.push(c); hotMag = Math.max(hotMag, sim.tempVal[c]); }
     else if (sim.tempVal[c] < 0) { coldSeeds.push(c); coldMag = Math.max(coldMag, -sim.tempVal[c]); }
   }
-  const dHot = hotSeeds.length ? bfs(hotSeeds) : null;
-  const dCold = coldSeeds.length ? bfs(coldSeeds) : null;
+  const dHot = hotSeeds.length ? costFromSources(hotSeeds) : null;
+  const dCold = coldSeeds.length ? costFromSources(coldSeeds) : null;
   const temp = new Float32Array(n3);
   for (let c = 0; c < n3; c++) {
     if (sim.solid[c]) continue;
     let t = 0;
-    if (dHot && dHot[c] !== Infinity) t += hotMag * Math.exp(-dHot[c] / LAMBDA);
-    if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / LAMBDA);
+    if (dHot && dHot[c] !== Infinity) t += hotMag * Math.exp(-dHot[c] / TAU);
+    if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / TAU);
     temp[c] = t;
   }
 
-  // air quality: smell falls off from the source; near a window/vent sink it goes
-  // to ~0 (fresh air), and a shut door (unreachable) blocks it entirely.
+  // air quality: smell carried from the source by the airflow; near a window/vent
+  // sink it drops to ~0 (odour leaves, fresh air enters); a shut door blocks it.
   const smellSeeds: number[] = [], sinkSeeds: number[] = [];
   for (let c = 0; c < n3; c++) {
     if (sim.sFixed[c]) smellSeeds.push(c);
@@ -296,11 +346,11 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   }
   const smell = new Float32Array(n3);
   if (smellSeeds.length) {
-    const dS = bfs(smellSeeds);
+    const dS = costFromSources(smellSeeds);
     const dK = sinkSeeds.length ? bfs(sinkSeeds) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
-      let v = Math.exp(-dS[c] / SMELL_LAMBDA);
+      let v = Math.exp(-dS[c] / SMELL_TAU);
       if (dK && dK[c] !== Infinity) v *= 1 - Math.exp(-dK[c] / SINK_LAMBDA);
       smell[c] = v;
     }
