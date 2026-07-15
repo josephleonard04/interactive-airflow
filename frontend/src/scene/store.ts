@@ -300,7 +300,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simPaused: false,
   simSourceRoomId: null,
   simReady: false,
-  airflowStyle: "dots",
+  airflowStyle: "lines",
   sketchRegion: null,
   setSketchRegion: (sketchRegion) => {
     get().logEvent("sketch", { region: sketchRegion });
