@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
-import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
+import { buildSim3D, geodesicFields } from "../sim/sim3d";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
@@ -193,11 +193,8 @@ export function FlowField3D() {
       // field, then let the same scalar fill carry temperature/smell along it.
       if (useOpenFoam && accurate?.field) {
         applyFieldToSim(built, accurate.field);
-        fieldsRef.current = {
-          temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
-          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal, { extraSink: built.ventDilute }),
-          noise: computeNoiseField(plan, built),
-        };
+        { const gf = geodesicFields(built);
+          fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(plan, built) }; }
         converged.current = true;
         buildPaths();
         setReady(true);
@@ -207,10 +204,12 @@ export function FlowField3D() {
       for (let b = 0; b < BATCH; b++) sim.step(0.05);
       steps.current += BATCH;
       if (steps.current >= TARGET_STEPS) {
-        // freeze and solve the airflow-carried temperature & smell fields once
+        // temperature & air quality: per-grid geodesic fields (fill the whole
+        // connected house from the sources; walls / shut doors block)
+        const gf = geodesicFields(built);
         fieldsRef.current = {
-          temp: advectDiffuseFill(built, sim.tempFixed, sim.tempVal),
-          smell: advectDiffuseFill(built, sim.sFixed, sim.sVal, { extraSink: built.ventDilute }),
+          temp: gf.temp,
+          smell: gf.smell,
           noise: computeNoiseField(plan, built),
         };
         converged.current = true;
