@@ -406,6 +406,27 @@ function FloorInteractor({ offset }: { offset: Vec3 }) {
 
 type ViewName = "top" | "iso" | "fit";
 
+// When the sim panel overlays the left edge of the canvas, shift the rendered
+// view right by half the covered width so the house stays centred in the part
+// of the canvas the user can actually see (instead of hiding behind the panel).
+const SIM_PANEL_COVER = 330; // panel width 300 + left offset/margins
+function PanelOffset() {
+  const simActive = useSceneStore((s) => s.simActive);
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    (globalThis as unknown as { __editorCamera?: THREE.Camera }).__editorCamera = cam; // debug/scripting handle
+    if (simActive && size.width > SIM_PANEL_COVER * 2) {
+      cam.setViewOffset(size.width + SIM_PANEL_COVER, size.height, 0, 0, size.width, size.height);
+    } else {
+      cam.clearViewOffset();
+    }
+    return () => cam.clearViewOffset();
+  }, [camera, simActive, size.width, size.height]);
+  return null;
+}
+
 // Applies a requested camera view inside the Canvas (runs when `seq` bumps).
 function ViewRig({
   seq,
@@ -564,6 +585,7 @@ export function Editor() {
       <OpeningDragController offset={offset} />
 
       <ViewRig seq={viewReq.seq} view={viewReq.view} span={span} wallHeight={wallHeight} orbitRef={orbitRef} />
+      <PanelOffset />
       <OrbitControls
         ref={orbitRef}
         makeDefault
