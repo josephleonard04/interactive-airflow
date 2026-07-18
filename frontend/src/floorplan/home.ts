@@ -308,6 +308,10 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   placeDoor(walls, gen, byId("living"), byId("kitchen"), doors);
   placeDoor(walls, gen, byId("kitchen"), byId("bathroom"), doors);
   placeEntrance(walls, gen, byId("living"), doors);
+  // Basic preset: interior doors start OPEN so the simulation shows air moving
+  // through the whole home out of the box; the entrance (to outside) and the
+  // windows stay closed until the user opens them.
+  for (const d of doors) if (!d.rooms.includes("outside")) d.open = true;
 
   const windows = placeWindows(walls, gen, rooms);
   const items = resolveOverlaps(placeObjects(gen, rooms, [...doors, ...windows], H), rooms, [...doors, ...windows]);
