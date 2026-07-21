@@ -7,7 +7,7 @@ import { tempColor } from "../viz/temperature";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
-import { buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
+import { buildStreamlinePaths, speedColor, type StreamlinePaths } from "../viz/streamlines";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -84,10 +84,10 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          // Density is governed by the even-spacing rule in buildStreamlinePaths,
-          // not by this number — seeds are candidates, and crowded ones are
-          // dropped. More of them buys coverage in the still rooms.
-          maxSeeds: 40,
+          // Few, meaningful lines: seeds are allotted round-robin across the
+          // rooms, so this budget buys whole-house coverage rather than a
+          // thicket over the AC. 16 -> ~8 lines, every room represented.
+          maxSeeds: 16,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
@@ -278,8 +278,9 @@ export function FlowField3D() {
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
-      const t = Math.min(1, sp / 1.0);
-      headCol[p * 3] = 0.18 - 0.06 * t; headCol[p * 3 + 1] = 0.5 - 0.18 * t; headCol[p * 3 + 2] = 0.95;
+      // same blue speed ramp as the streamlines, so the two airflow views agree
+      const [cr, cg, cb] = speedColor(sp);
+      headCol[p * 3] = cr; headCol[p * 3 + 1] = cg; headCol[p * 3 + 2] = cb;
     }
     (headPts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
@@ -291,16 +292,16 @@ export function FlowField3D() {
     <group>
       {showStreamlines && (
         <group>
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.16} depthWrite={false} />
-          {/* faint continuous core so the path always reads */}
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.35} depthWrite={false} />
-          {/* animated dashes flowing along the line = moving air */}
+          {/* soft glow, then a continuous core, so the path reads on any backdrop */}
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.18} depthWrite={false} />
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.45} depthWrite={false} />
+          {/* animated dashes travelling downstream = the air actually moving */}
           <Line
             ref={dashRef}
             points={paths!.points}
             segments
             vertexColors={paths!.colors}
-            lineWidth={2.4}
+            lineWidth={2.6}
             transparent
             opacity={0.95}
             depthWrite={false}
