@@ -103,7 +103,7 @@ function seedPoints(
 
 export function buildStreamlinePaths(
   built: Sim3D,
-  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[] } = {},
+  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[]; spacing?: number } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
   const colors: THREE.Color[] = [];
@@ -133,7 +133,10 @@ export function buildStreamlinePaths(
   const MIN_POINTS = 8; // and trace a real path, not a stub
   const step = dx * 0.75;
   const maxSteps = 120;
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 14, opts.rooms ?? [], 0.02);
+  // Seed generously: the spacing rule below decides the final density, so extra
+  // seeds cost a little tracing and buy coverage in the quiet rooms rather than
+  // piling more lines into the fast ones.
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 40, opts.rooms ?? [], 0.02);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -161,9 +164,38 @@ export function buildStreamlinePaths(
     return "dead";
   };
 
+  // Evenly-spaced streamlines (after Jobard & Lefer 1997). Without this, seeds
+  // cluster wherever the air is fastest — right in front of the fan — and each
+  // line then orbits the same recirculation, drawing a scribble that reads as
+  // "lots of airflow here" when it is really one eddy traced fourteen times.
+  //
+  // Two rules, both enforced on a coarse occupancy grid of cell size D_SEP:
+  //   1. a line stops when it crowds a cell an ACCEPTED line already occupies;
+  //   2. a line stops when it revisits its OWN cells, i.e. it is closing a loop.
+  // Lines are grown in seed order, and seeds are ordered fastest-first, so the
+  // structurally important lines claim their space before the rest.
+  // Spacing is enforced in PLAN (x,z), deliberately ignoring height. Indoor
+  // airflow is close to horizontal and the camera looks down at the house, so
+  // two lines a metre apart vertically still land on top of each other on
+  // screen. Keying the grid in 3D let them each claim their own cell and the
+  // view stayed crowded even though the rule "worked".
+  //
+  // Measured on the example home at display resolution (dx 0.24), 40 seeds:
+  //   before any spacing   2562 segments   up to 7 lines per 0.5 m cell
+  //   D_SEP 0.55 (plan)     962 segments   up to 4, all four rooms covered
+  const D_SEP = opts.spacing ?? Math.max(dx * 2, 0.55);
+  const MAX_SHARED = 1; // lines an accepted cell may already hold before we stop
+  const MAX_SELF = 2; // times a line may RE-ENTER one of its own cells
+  const occupancy = new Map<string, number>();
+  const key = (v: THREE.Vector3) => `${Math.floor(v.x / D_SEP)},${Math.floor(v.z / D_SEP)}`;
+
   for (const seed of seeds) {
     const p = seed.clone();
+    if ((occupancy.get(key(p)) ?? 0) > MAX_SHARED) continue; // already covered
     const raw: THREE.Vector3[] = [p.clone()];
+    const own = new Map<string, number>();
+    let lastKey = key(p);
+    own.set(lastKey, 1);
     lastDir.set(0, 0, 0);
     let stallBudget = 3;
     let peak = 0;
@@ -188,6 +220,27 @@ export function buildStreamlinePaths(
       // otherwise every line overshoots one step past the wall before stopping,
       // which is how streamlines were poking out through open windows
       if (sample(next.x, next.y, next.z).solid || !inBounds(next)) break;
+      // A step (0.75 cells) can be longer than a wall is thick (0.1 m), so the
+      // endpoints can straddle a wall with neither one inside it — the line then
+      // tunnels into the next room. Sample across the span, not just its ends.
+      let tunnelled = false;
+      for (let t = 1; t <= 3; t++) {
+        mid.copy(p).addScaledVector(s2, t / 4);
+        if (sample(mid.x, mid.y, mid.z).solid) { tunnelled = true; break; }
+      }
+      if (tunnelled) break;
+      const k = key(next);
+      if ((occupancy.get(k) ?? 0) > MAX_SHARED) break; // too close to another line
+      // Count a cell only when the line ENTERS it. A step is a fraction of a
+      // cell, so consecutive steps sit in the same cell — counting those would
+      // trip the orbit detector after three steps and kill every line.
+      // A revisit means the line left this cell and came back: an orbit.
+      if (k !== lastKey) {
+        const seen = (own.get(k) ?? 0) + 1;
+        if (seen > MAX_SELF) break; // closing an orbit — stop before it scribbles
+        own.set(k, seen);
+        lastKey = k;
+      }
       lastDir.copy(s2);
       raw.push(next);
       p.copy(next);
@@ -195,6 +248,8 @@ export function buildStreamlinePaths(
     // meaningful only: a real path that carries real air along most of itself
     if (raw.length < MIN_POINTS || peak < MIN_SPEED) continue;
     if (speedN === 0 || speedSum / speedN < MIN_MEAN_SPEED) continue;
+
+    for (const k of own.keys()) occupancy.set(k, (occupancy.get(k) ?? 0) + 1);
 
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);
