@@ -36,6 +36,16 @@ export interface Sim3D {
    *  cold, a supply vent neutral — zeroing heat here stops warm air from spreading). */
   ventDilute: Uint8Array;
   hasTemperature: boolean;
+  /** 1 where the cell centre is INSIDE a room and below the roof. The solver
+   *  domain is padded past the exterior walls, so air that leaves through an
+   *  open window lands in cells that are outdoors — legitimate for the physics,
+   *  but they must not be drawn: the tool visualizes the home, not the garden. */
+  inside: Uint8Array;
+  /** Index into plan.rooms for each cell, or -1 outside every room. Drives the
+   *  per-room temperature readout. */
+  roomIndex: Int16Array;
+  /** Room ids in roomIndex order. */
+  roomIds: string[];
   /** Points just in front of vents/AC/fans — where to seed airflow particles. */
   seeds: Array<[number, number, number]>;
   /** Heat (red) / cold (blue) source locations, to anchor the temperature view. */
@@ -94,6 +104,24 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++) {
         if (origin[1] + (j + 0.5) * dx > plan.wallHeight) sim.solid[sim.cIdx(i, j, k)] = 1;
+      }
+
+  // Inside-the-home mask + per-room labels, from the room rectangles.
+  const roomIds = plan.rooms.map((r) => r.id);
+  const inside = new Uint8Array(nx * ny * nz);
+  const roomIndex = new Int16Array(nx * ny * nz).fill(-1);
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const [wx, wy, wz] = cellCenter(i, j, k);
+        if (wy > plan.wallHeight) continue;
+        const ri = plan.rooms.findIndex(
+          (r) => wx >= r.rect.x && wx <= r.rect.x + r.rect.w && wz >= r.rect.z && wz <= r.rect.z + r.rect.d,
+        );
+        if (ri < 0) continue;
+        const c = sim.cIdx(i, j, k);
+        inside[c] = 1;
+        roomIndex[c] = ri;
       }
 
   const ambient = new Uint8Array(nx * ny * nz);
@@ -243,7 +271,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, seeds, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, markers };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -371,6 +399,24 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     }
   }
   return { temp, smell };
+}
+
+/** Mean of a per-cell field over each room's interior air, keyed by room id.
+ *  Solid and outdoor cells are excluded, so this is the value a person standing
+ *  in the room would experience. */
+export function roomMeans(s: Sim3D, field: Float32Array): Map<string, number> {
+  const { sim, roomIndex, roomIds, inside } = s;
+  const sum = new Float64Array(roomIds.length);
+  const cnt = new Int32Array(roomIds.length);
+  for (let c = 0; c < field.length; c++) {
+    const r = roomIndex[c];
+    if (r < 0 || !inside[c] || sim.solid[c]) continue;
+    sum[r] += field[c];
+    cnt[r]++;
+  }
+  const out = new Map<string, number>();
+  for (let r = 0; r < roomIds.length; r++) if (cnt[r]) out.set(roomIds[r], sum[r] / cnt[r]);
+  return out;
 }
 
 // Steady-state scalar field carried by the AIRFLOW: advection along the converged

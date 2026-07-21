@@ -7,6 +7,7 @@ import {
   makeOpening,
   sharedEdge,
 } from "./geometry";
+import { VENT_SIZE, ventMountY } from "./catalog";
 import { rasterize } from "./raster";
 import { resolveOverlaps } from "./collision";
 import type { FloorPlan, HomeSize, Opening, PlacedItem, RoomDef, Vec3, WallSeg } from "./types";
@@ -178,6 +179,8 @@ interface PlaceOpts {
   mount?: "floor" | "wall" | "ceiling";
   y?: number;
   flow?: number;
+  /** HVAC: whether it starts running. Undefined = on. */
+  on?: boolean;
 }
 
 /** Place an item against a wall (back to the wall, facing into the room),
@@ -222,6 +225,49 @@ function against(
     rotationY: ROT[side],
     mount,
     flow: opts.flow,
+    ...(opts.on !== undefined ? { on: opts.on } : {}),
+    movable: true,
+  };
+}
+
+/** Place an item flush into a room CORNER: back against the `side` wall and
+ *  shoulder against the adjacent wall at `end` of that wall. Real kitchen
+ *  counters and wardrobes sit in corners, not floating along a wall mid-span. */
+function inCorner(
+  gen: IdGen,
+  room: RoomDef,
+  side: Side,
+  end: "start" | "end",
+  type: string,
+  size: Vec3,
+  opts: PlaceOpts = {},
+): PlacedItem {
+  const { x, z, w, d } = room.rect;
+  const [sw, sh, sd] = size;
+  const gap = 0.06;
+  // along = extent parallel to the wall, deep = extent into the room
+  const alongLo = (lo: number) => lo + sw / 2 + gap;
+  const alongHi = (hi: number) => hi - sw / 2 - gap;
+  let cx: number, cz: number;
+  if (side === "north" || side === "south") {
+    cz = side === "north" ? z + d - sd / 2 - gap : z + sd / 2 + gap;
+    cx = end === "start" ? alongLo(x) : alongHi(x + w);
+  } else {
+    cx = side === "east" ? x + w - sd / 2 - gap : x + sd / 2 + gap;
+    cz = end === "start" ? alongLo(z) : alongHi(z + d);
+  }
+  const mount = opts.mount ?? "floor";
+  return {
+    id: gen(type),
+    category: opts.category ?? "furniture",
+    type,
+    roomId: room.id,
+    position: [cx, mount === "floor" ? sh / 2 : opts.y ?? 1.1, cz],
+    size,
+    rotationY: ROT[side],
+    mount,
+    flow: opts.flow,
+    ...(opts.on !== undefined ? { on: opts.on } : {}),
     movable: true,
   };
 }
@@ -262,9 +308,6 @@ function centre(gen: IdGen, room: RoomDef, type: string, size: Vec3, opts: Place
 // in high-airtightness homes, but Type 3 is the default this preset models.)
 
 const AIR_CHANGES_PER_HOUR = 0.5;
-const VENT_SIZE: Vec3 = [0.3, 0.3, 0.12]; // ~150 mm louvre in its wall recess
-/** Height of the vent centre: just under the ceiling, like a real 給気口. */
-const ventY = (H: number) => H - 0.35;
 
 /** Per-vent flux (m³/s) so the whole home turns over at 0.5 ACH. */
 function ventFlux(rooms: RoomDef[], H: number, count: number): number {
@@ -280,7 +323,7 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
   // 2 supply inlets + 2 exhausts, so each carries a quarter of the 0.5-ACH flow
   // and Σsupply = Σexhaust (the Type-3 steady state).
   const vf = ventFlux(rooms, H, 2);
-  const ventOpts = (): PlaceOpts => ({ category: "hvac", mount: "wall", y: ventY(H), flow: vf });
+  const ventOpts = (): PlaceOpts => ({ category: "hvac", mount: "wall", y: ventMountY(H), flow: vf });
 
   // Bedroom: bed, desk, closet, and a standing floor fan in a corner.
   {
@@ -288,7 +331,10 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     const c = ctx("bedroom");
     items.push(against(gen, room, c, "west", 0.45, "bed", [1.5, 0.5, 2.0]));
     items.push(against(gen, room, c, "south", 0.72, "desk", [1.2, 0.75, 0.6]));
-    items.push(against(gen, room, c, "east", 0.3, "closet", [1.0, 2.0, 0.6]));
+    // wardrobe tucked into the north-east corner, the way one actually stands.
+    // (The south end of that wall is kept clear for the bedroom window, so the
+    // collision pass would push a closet placed there back off the corner.)
+    items.push(inCorner(gen, room, "east", "end", "closet", [1.0, 2.0, 0.6]));
     items.push(against(gen, room, c, "south", 0.16, "fan", [0.45, 1.3, 0.45], { category: "hvac", mount: "floor", flow: 0 }));
     // 給気口: passive fresh-air inlet, high on the exterior (west) wall
     items.push(against(gen, room, c, "west", 0.88, "supply", VENT_SIZE, ventOpts()));
@@ -304,7 +350,11 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     items.push(against(gen, room, c, "north", 0.22, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }));
     items.push(centre(gen, room, "table", [1.1, 0.45, 0.7]));
     items.push(against(gen, room, c, "east", 0.3, "ac", [0.85, 0.32, 0.22], { category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25 }));
-    items.push(against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0 }));
+    // Heater starts OFF. It and the AC are both temperature sources of equal
+    // magnitude in the same room, so leaving both running made them cancel and
+    // the whole Temp view read flat — nothing to see. Summer preset: AC on,
+    // heater idle. The "Warm up" preset turns it back on.
+    items.push(against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0, on: false }));
     // 給気口: passive fresh-air inlet, high on the exterior (west) wall
     items.push(against(gen, room, c, "west", 0.82, "supply", VENT_SIZE, ventOpts()));
   }
@@ -316,7 +366,8 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     const room = byId("kitchen");
     const c = ctx("kitchen");
     items.push(against(gen, room, c, "north", 0.82, "fridge", [0.7, 1.8, 0.7]));
-    items.push(against(gen, room, c, "north", 0.35, "kitchen_sink", [1.0, 0.9, 0.6]));
+    // counter run into the north-west corner, fridge at the far end of the wall
+    items.push(inCorner(gen, room, "north", "start", "kitchen_sink", [1.0, 0.9, 0.6]));
     items.push(against(gen, room, c, "north", 0.35, "return", VENT_SIZE, ventOpts()));
   }
 

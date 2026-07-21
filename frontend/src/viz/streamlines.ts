@@ -112,8 +112,16 @@ export function buildStreamlinePaths(
 
   const x0 = origin[0], y0 = origin[1], z0 = origin[2];
   const x1 = x0 + nx * dx, y1 = Math.min(y0 + ny * dx, opts.roofY ?? y0 + ny * dx), z1 = z0 + nz * dx;
+  // A line stops at the grid edge AND at the front door: past an open window the
+  // air is outdoors, and the tool visualizes the home. Without the `inside` test
+  // streamlines shot out of open windows and trailed across the garden.
+  const { inside, worldToCell, sim } = built;
+  const inHouse = (p: THREE.Vector3) => {
+    const [i, j, k] = worldToCell(p.x, p.y, p.z);
+    return inside[sim.cIdx(i, j, k)] === 1;
+  };
   const inBounds = (p: THREE.Vector3) =>
-    p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1;
+    p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1 && inHouse(p);
 
   const white = new THREE.Color(opts.color ?? "#ffffff");
   const MIN_SPEED = 0.05; // a line must carry real air somewhere, else it's noise
@@ -161,7 +169,10 @@ export function buildStreamlinePaths(
         if (--stallBudget <= 0) break;
       }
       const next = p.clone().add(s2);
-      if (sample(next.x, next.y, next.z).solid) break;
+      // test the point we are about to COMMIT, not just the one we came from —
+      // otherwise every line overshoots one step past the wall before stopping,
+      // which is how streamlines were poking out through open windows
+      if (sample(next.x, next.y, next.z).solid || !inBounds(next)) break;
       lastDir.copy(s2);
       raw.push(next);
       p.copy(next);

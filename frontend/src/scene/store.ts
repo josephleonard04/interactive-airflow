@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { CATALOG } from "../floorplan/catalog";
+import { CATALOG, ventMountY } from "../floorplan/catalog";
 import {
   DOOR_WIDTH,
   WALL_THICKNESS,
@@ -98,6 +98,20 @@ export interface SceneState {
   toggleSimPause: () => void;
   setSimSource: (id: string | null) => void;
   setSimReady: (v: boolean) => void;
+
+  /** Outdoor air temperature (°C). The house sits at this baseline and the
+   *  HVAC pushes it up or down, so it decides what "cool the bedroom" even
+   *  means — 22 °C outside needs no AC, 35 °C outside needs a lot. */
+  outdoorTemp: number;
+  setOutdoorTemp: (c: number) => void;
+  /** Room whose temperature the readout is pinned to (null = whole house). */
+  tempRoomId: string | null;
+  setTempRoom: (id: string | null) => void;
+  /** Per-room temperature as a DELTA from outdoor (°C), published by the solver.
+   *  Kept as a delta so changing the outdoor temperature is instant — the
+   *  readout and the colour ramp just re-add the new baseline, no re-solve. */
+  roomTempDeltas: Map<string, number>;
+  setRoomTemps: (m: Map<string, number>) => void;
 
   // Two engines: "realtime" = the in-browser Euler solver (live), "openfoam" =
   // an accurate CFD pass run on the local backend on demand.
@@ -317,6 +331,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
   setSimReady: (v) => set({ simReady: v }),
+
+  outdoorTemp: 30, // a warm summer day — the case the cooling goals are about
+  setOutdoorTemp: (c) => set({ outdoorTemp: c }),
+  tempRoomId: null,
+  setTempRoom: (id) => set({ tempRoomId: id }),
+  roomTempDeltas: new Map(),
+  setRoomTemps: (m) => set({ roomTempDeltas: m }),
 
   engine: "realtime",
   accurate: null,
@@ -670,8 +691,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const { plan } = get();
     const { bounds, wallHeight } = plan;
     const pos: Vec3 = position ?? [bounds.x + bounds.w / 2, 0, bounds.z + bounds.d / 2];
+    const isVent = type === "supply" || type === "return";
     const y =
-      spec.mount === "ceiling" ? wallHeight - 0.09 : spec.mount === "wall" ? 1.1 : spec.size[1] / 2;
+      spec.mount === "ceiling"
+        ? wallHeight - 0.09
+        : spec.mount === "wall"
+          ? isVent ? ventMountY(wallHeight) : 1.1 // vents sit high, like a real louvre
+          : spec.size[1] / 2;
     const id = `${type}-add${++customId}`;
     const item: PlacedItem = {
       id,

@@ -12,6 +12,15 @@ export interface ItemSpec {
   label: string;
 }
 
+/** Ventilation louvre: ~150 mm grille in its wall recess. Shared by the palette
+ *  and the example home so both create the same unit. */
+export const VENT_SIZE: Vec3 = [0.3, 0.3, 0.12];
+/** Default per-vent flux (m³/s). The example home overrides this with a value
+ *  derived from the actual house volume; this is the standalone-drop default. */
+export const VENT_FLOW = 0.012;
+/** Vents sit just under the ceiling, like a real 給気口. */
+export const ventMountY = (wallHeight: number) => wallHeight - 0.35;
+
 export const CATALOG: Record<string, ItemSpec> = {
   bed: { size: [1.5, 0.5, 2.0], category: "furniture", mount: "floor", label: "Bed" },
   desk: { size: [1.2, 0.75, 0.6], category: "furniture", mount: "floor", label: "Desk" },
@@ -27,8 +36,12 @@ export const CATALOG: Record<string, ItemSpec> = {
   ac: { size: [0.85, 0.32, 0.22], category: "hvac", mount: "wall", flow: 0.25, label: "AC unit" },
   heater: { size: [0.8, 0.5, 0.18], category: "hvac", mount: "floor", flow: 0, label: "Heater" },
   fan: { size: [0.45, 1.3, 0.45], category: "hvac", mount: "floor", flow: 0, label: "Fan" },
-  supply: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Supply vent" },
-  return: { size: [0.5, 0.14, 0.5], category: "hvac", mount: "ceiling", flow: 0.12, label: "Return vent" },
+  // 24-hour ventilation, Japanese "Type 3" (see floorplan/home.ts): supply and
+  // extract are separate units, both mounted high on a WALL — which is where the
+  // example home puts them, so the palette must create the same thing rather
+  // than the old mid-ceiling diffuser.
+  supply: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Fresh-air inlet" },
+  return: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Extract vent" },
   smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
 };
 
