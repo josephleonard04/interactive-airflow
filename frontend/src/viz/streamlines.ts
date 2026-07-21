@@ -24,30 +24,50 @@ interface Vel {
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
-/** Trilinear world-space velocity sampler over the sim's cell-centred field. */
+/** Trilinear world-space velocity sampler over the sim's cell-centred field.
+ *
+ *  Two rules matter for walls, and both were wrong before:
+ *
+ *  1. Solidity is decided by the cell the point is ACTUALLY in, not by the
+ *     interpolated solid fraction. An interior wall is one cell thick, so a
+ *     point genuinely inside a wall blends to a fraction well under 1 — with a
+ *     `> 0.5` test it was reported as open air, and every downstream wall check
+ *     (including the anti-tunnelling span test) silently passed through it.
+ *
+ *  2. The velocity blend skips solid cells and renormalises over the rest.
+ *     Including them mixed the air on BOTH sides of a one-cell wall into one
+ *     vector, which is precisely a velocity that points through the wall — the
+ *     tracer then followed it into the next room. Their zeros also dragged
+ *     near-wall speeds down, making the air look slacker than it is.
+ */
 function makeSampler(built: Sim3D) {
   const { sim, nx, ny, nz, dx, origin } = built;
-  const cell = (i: number, j: number, k: number): [number, number, number, number] => {
-    const c = sim.cIdx(i, j, k);
-    if (sim.solid[c]) return [0, 0, 0, 1];
-    const [u, v, w] = sim.velocityAt(i, j, k);
-    return [u, v, w, 0];
+  const cellOf = (x: number, y: number, z: number): number => {
+    const i = clamp(Math.floor((x - origin[0]) / dx), 0, nx - 1) | 0;
+    const j = clamp(Math.floor((y - origin[1]) / dx), 0, ny - 1) | 0;
+    const k = clamp(Math.floor((z - origin[2]) / dx), 0, nz - 1) | 0;
+    return sim.cIdx(i, j, k);
   };
   return (x: number, y: number, z: number): Vel => {
+    if (sim.solid[cellOf(x, y, z)]) return { vx: 0, vy: 0, vz: 0, speed: 0, solid: true };
     const gx = clamp((x - origin[0]) / dx - 0.5, 0, nx - 1.001);
     const gy = clamp((y - origin[1]) / dx - 0.5, 0, ny - 1.001);
     const gz = clamp((z - origin[2]) / dx - 0.5, 0, nz - 1.001);
     const i0 = Math.floor(gx), j0 = Math.floor(gy), k0 = Math.floor(gz);
     const tx = gx - i0, ty = gy - j0, tz = gz - k0;
-    let vx = 0, vy = 0, vz = 0, sol = 0;
+    let vx = 0, vy = 0, vz = 0, wSum = 0;
     for (let di = 0; di < 2; di++)
       for (let dj = 0; dj < 2; dj++)
         for (let dk = 0; dk < 2; dk++) {
+          const i = Math.min(nx - 1, i0 + di), j = Math.min(ny - 1, j0 + dj), k = Math.min(nz - 1, k0 + dk);
+          const c = sim.cIdx(i, j, k);
+          if (sim.solid[c]) continue; // never blend air across a wall
           const wgt = (di ? tx : 1 - tx) * (dj ? ty : 1 - ty) * (dk ? tz : 1 - tz);
-          const [u, v, w, s] = cell(Math.min(nx - 1, i0 + di), Math.min(ny - 1, j0 + dj), Math.min(nz - 1, k0 + dk));
-          vx += u * wgt; vy += v * wgt; vz += w * wgt; sol += s * wgt;
+          const [u, v, w] = sim.velocityAt(i, j, k);
+          vx += u * wgt; vy += v * wgt; vz += w * wgt; wSum += wgt;
         }
-    return { vx, vy, vz, speed: Math.hypot(vx, vy, vz), solid: sol > 0.5 };
+    if (wSum > 1e-6) { vx /= wSum; vy /= wSum; vz /= wSum; }
+    return { vx, vy, vz, speed: Math.hypot(vx, vy, vz), solid: false };
   };
 }
 
