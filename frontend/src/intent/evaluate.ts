@@ -1,6 +1,6 @@
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { computeRoomLevels } from "../sim/roomLevels";
-import { buildSim3D } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
 import { parseGoal, type Objective } from "./objectives";
 
 // Evaluate an intent objective against the simulation's steady-state result:
@@ -15,8 +15,14 @@ export interface Evaluation {
   summary: string;
 }
 
-const COOL_T = -1.5; // below-ambient counts as "cool"
-const WARM_T = 1.5;
+// Comfort targets in ABSOLUTE °C. The verdict used to be phrased against
+// computeRoomLevels, which returns the device's raw ±10×power source strength —
+// so a room "was cool (−16.0°)" because the AC was on high, regardless of what
+// the room actually reached. Worse, that is a different model from the one the
+// Temp view draws, so the verdict could claim success over a view showing 30 °C.
+// Both now read the same grid solve, in real degrees.
+const COOL_TARGET_C = 26; // at or below this counts as "cool"
+const WARM_TARGET_C = 21; // at or above this counts as "warm"
 const SMELL_OK = 0.12;
 const DRAFT_OK = 0.28; // mean air speed (m/s) below this = no noticeable draft
 const BREEZY = 0.35; // above this = clearly moving air
@@ -45,13 +51,39 @@ function meanAirSpeed(plan: FloorPlan, rect: Rect): number | null {
   return n > 0 ? sum / n : null;
 }
 
-function fmtTemp(v: number): string {
-  if (v > 0.2) return `+${v.toFixed(1)}° warmer`;
-  if (v < -0.2) return `${v.toFixed(1)}° cooler`;
-  return "about normal";
+/** Per-room air temperature in absolute °C, from the same grid solve and the
+ *  same geodesic transport the Temp view renders. */
+export function roomTemperaturesC(plan: FloorPlan, outdoorTemp: number): Map<string, number> {
+  const built = buildSim3D(plan, {
+    targetCells: REPORT_FIDELITY.targetCells,
+    iterations: REPORT_FIDELITY.iterations,
+  });
+  for (let s = 0; s < REPORT_FIDELITY.steps; s++) built.sim.step(0.05);
+  const deltas = roomMeans(built, geodesicFields(built).temp);
+  const out = new Map<string, number>();
+  for (const [id, d] of deltas) out.set(id, outdoorTemp + d);
+  return out;
 }
 
-export function evaluateObjective(obj: Objective, plan: FloorPlan): Evaluation {
+/** "25.4 °C (4.6 °C below the 30 °C outside)" — always with units, and always
+ *  relative to the outdoor baseline the user set, because that is what makes a
+ *  number mean anything here. */
+function fmtTempC(absC: number, outdoorTemp: number): string {
+  const d = absC - outdoorTemp;
+  const rel =
+    Math.abs(d) < 0.3
+      ? "same as outside"
+      : `${Math.abs(d).toFixed(1)} °C ${d < 0 ? "below" : "above"} the ${outdoorTemp.toFixed(0)} °C outside`;
+  return `${absC.toFixed(1)} °C (${rel})`;
+}
+
+export interface EvalContext {
+  outdoorTemp: number;
+  /** Precomputed per-room °C, so a compound goal solves the field once. */
+  roomTempsC?: Map<string, number>;
+}
+
+export function evaluateObjective(obj: Objective, plan: FloorPlan, ctx: EvalContext): Evaluation {
   if (!obj.regionId) {
     return {
       objective: obj,
@@ -63,20 +95,24 @@ export function evaluateObjective(obj: Objective, plan: FloorPlan): Evaluation {
   const roomName = obj.regionName ?? "that room";
 
   if (obj.scalar === "temperature") {
-    const levels = computeRoomLevels(plan, "temperature", null);
-    const v = levels.get(obj.regionId) ?? 0;
+    const temps = ctx.roomTempsC ?? roomTemperaturesC(plan, ctx.outdoorTemp);
+    const v = temps.get(obj.regionId);
+    if (v === undefined) {
+      return { objective: obj, value: null, satisfied: null, summary: `I couldn't measure the air in ${roomName}.` };
+    }
     const want = obj.direction === "low" ? "cool" : "warm";
-    const satisfied = obj.direction === "low" ? v <= COOL_T : v >= WARM_T;
+    const target = obj.direction === "low" ? COOL_TARGET_C : WARM_TARGET_C;
+    const satisfied = obj.direction === "low" ? v <= target : v >= target;
     const hint = obj.direction === "low"
-      ? "Add an AC there (or open a door to a cooler room)."
-      : "Add a heater there (or open a door to a warmer room).";
+      ? `Aim for ${COOL_TARGET_C} °C or below — add an AC there, raise its power, or open a door to a cooler room.`
+      : `Aim for ${WARM_TARGET_C} °C or above — add a heater there, raise its power, or open a door to a warmer room.`;
     return {
       objective: obj,
       value: v,
       satisfied,
       summary: satisfied
-        ? `✓ ${roomName} is ${want} (${fmtTemp(v)}).`
-        : `✗ ${roomName} is ${fmtTemp(v)}, not ${want} enough. ${hint}`,
+        ? `✓ ${roomName} is ${want}: ${fmtTempC(v, ctx.outdoorTemp)}.`
+        : `✗ ${roomName} is ${fmtTempC(v, ctx.outdoorTemp)} — not ${want} enough. ${hint}`,
     };
   }
 
@@ -125,6 +161,15 @@ export function evaluateObjective(obj: Objective, plan: FloorPlan): Evaluation {
 
 /** Parse a plain-language goal and evaluate every objective it contains.
  *  `sketch` grounds deictic goals ("this area") to a user-drawn region. */
-export function evaluateGoal(text: string, plan: FloorPlan, sketch?: Rect | null): Evaluation[] {
-  return parseGoal(text, plan, sketch).map((o) => evaluateObjective(o, plan));
+export function evaluateGoal(
+  text: string,
+  plan: FloorPlan,
+  opts: { sketch?: Rect | null; outdoorTemp: number },
+): Evaluation[] {
+  const objs = parseGoal(text, plan, opts.sketch ?? null);
+  // A compound goal ("cool the living room and the bedroom") is several
+  // objectives over the same field — solve it once and share.
+  const ctx: EvalContext = { outdoorTemp: opts.outdoorTemp };
+  if (objs.some((o) => o.scalar === "temperature")) ctx.roomTempsC = roomTemperaturesC(plan, opts.outdoorTemp);
+  return objs.map((o) => evaluateObjective(o, plan, ctx));
 }

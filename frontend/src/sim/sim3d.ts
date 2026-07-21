@@ -18,6 +18,11 @@ export interface Sim3DOptions {
   iterations?: number;
 }
 
+/** The fidelity every REPORTED temperature is computed at — the numbers on the
+ *  solution cards and the numbers in the goal verdict. They must be the same
+ *  fidelity or the tool promises one temperature and then reports another. */
+export const REPORT_FIDELITY = { targetCells: 4200, iterations: 8, steps: 22 };
+
 export interface Sim3D {
   sim: Euler3D;
   nx: number;
@@ -53,6 +58,32 @@ export interface Sim3D {
 }
 
 const clampi = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+/** Nearest non-solid cell to (i,j,k), searched in expanding shells. Returns the
+ *  cell index, or -1 if the whole neighbourhood is solid. */
+function nearestFreeCell(
+  sim: Euler3D,
+  nx: number,
+  ny: number,
+  nz: number,
+  i0: number,
+  j0: number,
+  k0: number,
+): number {
+  for (let r = 0; r <= 4; r++) {
+    for (let dj = -r; dj <= r; dj++)
+      for (let dk = -r; dk <= r; dk++)
+        for (let di = -r; di <= r; di++) {
+          // shell only: skip the interior already covered by a smaller r
+          if (r > 0 && Math.max(Math.abs(di), Math.abs(dj), Math.abs(dk)) !== r) continue;
+          const i = i0 + di, j = j0 + dj, k = k0 + dk;
+          if (i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz) continue;
+          const c = sim.cIdx(i, j, k);
+          if (!sim.solid[c]) return c;
+        }
+  }
+  return -1;
+}
 const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 const HEATER_T = 10; // heater (warm) and AC (cool) use equal magnitude
@@ -229,12 +260,28 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     }
     if (isAC || isHeater) {
       const dT = (isAC ? AC_T : HEATER_T) * mult;
+      let placed = 0;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
         if (sim.solid[c]) continue;
         sim.tempFixed[c] = 1;
         sim.tempVal[c] = dT;
         hasTemperature = true;
+        placed++;
+      }
+      // A heater is a thin panel pressed against a wall (0.18 m deep). On a
+      // coarse grid its whole footprint can land inside the wall's cells, and
+      // the heat source then vanishes without a trace — the optimizer was
+      // scoring "warm the living room" layouts that contained no heater at all.
+      // If nothing landed, snap the source to the nearest open cell instead.
+      if (placed === 0) {
+        const [ci, cj, ck] = worldToCell(it.position[0], it.position[1], it.position[2]);
+        const free = nearestFreeCell(sim, nx, ny, nz, ci, cj, ck);
+        if (free >= 0) {
+          sim.tempFixed[free] = 1;
+          sim.tempVal[free] = dT;
+          hasTemperature = true;
+        }
       }
     }
   }

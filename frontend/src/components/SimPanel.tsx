@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 import type { FloorPlan } from "../floorplan/types";
+import type { Solution } from "../intent/solutions";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { SketchCanvas } from "./SketchCanvas";
 
@@ -50,6 +51,11 @@ export function SimPanel() {
   const tempRoomId = useSceneStore((s) => s.tempRoomId);
   const setTempRoom = useSceneStore((s) => s.setTempRoom);
   const roomTempDeltas = useSceneStore((s) => s.roomTempDeltas);
+  const solutionOptions = useSceneStore((s) => s.solutionOptions);
+  const solutionGoal = useSceneStore((s) => s.solutionGoal);
+  const solutionTargets = useSceneStore((s) => s.solutionTargets);
+  const chooseSolution = useSceneStore((s) => s.chooseSolution);
+  const dismissSolutions = useSceneStore((s) => s.dismissSolutions);
   const logCount = useSceneStore((s) => s.sessionLog.length);
   const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
@@ -75,7 +81,11 @@ export function SimPanel() {
   // the matching view is shown so the user sees what's happening.
   const checkGoalText = (text: string) => {
     if (!text.trim()) return;
-    const evals = evaluateGoal(text, plan, sketchRegion);
+    // Read the plan from the store, not the render closure: this is called
+    // immediately after applying a solution, and the closed-over `plan` is still
+    // the pre-apply one — which made the verdict report the old temperatures.
+    const livePlan = useSceneStore.getState().plan;
+    const evals = evaluateGoal(text, livePlan, { sketch: sketchRegion, outdoorTemp });
     useSceneStore.getState().logEvent("check", {
       text,
       results: evals.map((e) => ({ summary: e.summary, satisfied: e.satisfied, value: e.value })),
@@ -261,11 +271,29 @@ export function SimPanel() {
             onClick={() => {
               if (goal.trim() && applyBestSolution(goal)) recheckGoal.current = goal;
             }}
-            title="Search your layout with the simulator for the most effective setup"
+            title="Search your layout with the simulator and offer the setups that work best"
           >
-            {optimizing ? "⏳ Optimizing…" : "✨ Best solution"}
+            {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
           </button>
         </div>
+        {solutionOptions.length > 0 && (
+          <SolutionOptions
+            options={solutionOptions}
+            goal={solutionGoal}
+            targets={solutionTargets}
+            rooms={plan.rooms}
+            outdoorTemp={outdoorTemp}
+            onChoose={(i) => {
+              const g = solutionGoal;
+              chooseSolution(i);
+              // Re-check straight away so the verdict reflects the layout just
+              // applied. (The optimizing-flag effect doesn't fire here — picking
+              // an already-computed option never sets it.)
+              if (g) checkGoalText(g);
+            }}
+            onDismiss={dismissSolutions}
+          />
+        )}
         {results.map((r, i) => (
           <div
             key={i}
@@ -361,6 +389,81 @@ export function SimPanel() {
       >
         ⬇ Study log ({logCount} events)
       </button>
+    </div>
+  );
+}
+
+/** The alternatives gallery: several complete configurations, best first, each
+ *  showing what it does and what the target rooms actually reach. The user picks
+ *  the trade-off — a single "best" answer hides the fact that there IS one. */
+function SolutionOptions({
+  options,
+  goal,
+  targets,
+  rooms,
+  outdoorTemp,
+  onChoose,
+  onDismiss,
+}: {
+  options: Solution[];
+  goal: string | null;
+  targets: string[];
+  rooms: FloorPlan["rooms"];
+  outdoorTemp: number;
+  onChoose: (i: number) => void;
+  onDismiss: () => void;
+}) {
+  const nameOf = (id: string) => rooms.find((r) => r.id === id)?.name ?? id;
+  return (
+    <div style={{ marginTop: 8, border: "1px solid var(--line)", borderRadius: 10, padding: 9, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 700 }}>
+          {options.length} option{options.length > 1 ? "s" : ""} for “{(goal ?? "").trim().slice(0, 32)}”
+        </span>
+        <button className="ghost" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onDismiss}>
+          ✕
+        </button>
+      </div>
+      {options.map((o, i) => (
+        <div
+          key={o.id}
+          style={{
+            marginBottom: 6, padding: "8px 9px", borderRadius: 9,
+            border: `1px solid ${i === 0 ? "var(--accent)" : "var(--line)"}`,
+            background: i === 0 ? "rgba(42,157,143,0.06)" : "transparent",
+          }}
+        >
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+            {i === 0 ? "★ " : ""}{o.label}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{o.detail.join(" · ")}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "6px 0 7px" }}>
+            {(targets.length ? targets : rooms.map((r) => r.id)).map((id) => {
+              const t = o.metrics.roomTempC.get(id);
+              return (
+                <span
+                  key={id}
+                  style={{
+                    fontSize: 11, padding: "2px 6px", borderRadius: 999,
+                    border: "1px solid var(--line)",
+                    background: t != null ? rgbCss(tempColor(t)) : "transparent",
+                    color: t != null && (t < 19 || t > 30) ? "#fff" : "inherit",
+                  }}
+                  title={`${nameOf(id)} — predicted air temperature`}
+                >
+                  {nameOf(id)} {t != null ? `${t.toFixed(1)} °C` : "—"}
+                </span>
+              );
+            })}
+          </div>
+          <button className={i === 0 ? "primary" : "tool"} style={{ width: "100%", fontSize: 11.5 }} onClick={() => onChoose(i)}>
+            Use this
+          </button>
+        </div>
+      ))}
+      <p className="muted-line" style={{ marginTop: 2 }}>
+        Predicted with the simulator at the outdoor {outdoorTemp.toFixed(0)} °C. Applying one still shows a review you can undo.
+      </p>
     </div>
   );
 }

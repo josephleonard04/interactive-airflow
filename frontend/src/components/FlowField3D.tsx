@@ -84,7 +84,9 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          maxSeeds: 30,
+          // 30 seeds produced a tangle you could not read a direction out of,
+          // especially in the living room where the AC seeds cluster.
+          maxSeeds: 14,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
