@@ -251,15 +251,30 @@ export function FlowField3D() {
       const boost = sp > 1e-4 ? Math.min(Math.max(1, 0.06 / sp), 12) : 0;
       const ue = u * boost, ve = v * boost, we = w * boost;
       ageA[p] += sp < 0.01 ? dt * 2.2 : dt; // stagnant particles recycle sooner
-      const cx = x + ue * dt * 1.8, cy = y + ve * dt * 1.8, cz = z + we * dt * 1.8;
-      const out = cx < ox || cx > ex || cy < oy || cy > ey || cz < oz || cz > ez;
+      const tx = x + ue * dt * 1.8, ty = y + ve * dt * 1.8, tz = z + we * dt * 1.8;
+      const out = tx < ox || tx > ex || ty < oy || ty > ey || tz < oz || tz > ez;
       if (!out) {
-        const [ci, cj, ck] = worldToCell(cx, cy, cz);
-        const cc = sim.cIdx(ci, cj, ck);
-        // recycle at an opening OR the moment the air leaves the house — the dot
-        // has done its job once it exits, and we don't draw the outdoors
-        if (sim.open[cc] || !inside[cc]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
-        else if (!sim.solid[cc]) { x = cx; y = cy; z = cz; }
+        // March in sub-steps no longer than half a cell. A boosted dot can move
+        // several cells per frame, and testing only the destination let it jump
+        // clean over a wall (0.1 m thick, cells are 0.24 m) and reappear in the
+        // next room. Walls have to be able to stop it mid-flight.
+        const dist = Math.hypot(tx - x, ty - y, tz - z);
+        const sub = Math.max(1, Math.min(8, Math.ceil(dist / (dx * 0.5))));
+        let px = x, py = y, pz = z, blocked = false, escaped = false;
+        for (let s = 1; s <= sub; s++) {
+          const f = s / sub;
+          const qx = x + (tx - x) * f, qy = y + (ty - y) * f, qz = z + (tz - z) * f;
+          const [ci, cj, ck] = worldToCell(qx, qy, qz);
+          const cc = sim.cIdx(ci, cj, ck);
+          if (sim.solid[cc]) { blocked = true; break; }
+          // recycle at an opening OR the moment the air leaves the house — the
+          // dot has done its job once it exits, and we don't draw the outdoors
+          if (sim.open[cc] || !inside[cc]) { escaped = true; break; }
+          px = qx; py = qy; pz = qz;
+        }
+        if (escaped) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+        else if (blocked) { ageA[p] += dt * 3; x = px; y = py; z = pz; } // pinned on a wall — retire it sooner
+        else { x = px; y = py; z = pz; }
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
