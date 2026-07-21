@@ -148,8 +148,16 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     if (isHeater) markers.push({ pos: [...it.position] as [number, number, number], kind: "hot" });
 
     if (isAC || isSupply || isReturn || isFan) {
-      // ceiling vents (supply/return) act vertically; AC blows along its facing.
-      const dir: [number, number, number] = isSupply || isReturn ? [0, -1, 0] : horizDir(it.rotationY);
+      // Direction follows how the unit is mounted (matches inwardNormal in
+      // bc/lfm.ts): a ceiling vent acts straight down, a floor vent straight up,
+      // and anything on a wall — AC, or a wall-mounted supply/exhaust vent —
+      // blows along its facing.
+      const dir: [number, number, number] =
+        (isSupply || isReturn) && it.mount === "ceiling"
+          ? [0, -1, 0]
+          : (isSupply || isReturn) && it.mount === "floor"
+            ? [0, 1, 0]
+            : horizDir(it.rotationY);
       // a RETURN vent sucks air OUT: same face, negated speed → air flows toward
       // the vent instead of away, pulling room air (and odour) into it. Pair a
       // supply in one room with a return in another and the air is drawn ACROSS

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Edges } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
+import { DOOR_SWING, DOOR_THICKNESS } from "../floorplan/geometry";
 import type { Opening } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
 
@@ -33,7 +34,7 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
   const base = vertical ? -Math.PI / 2 : 0;
 
   const sillY = kind === "door" ? 0 : sill;
-  const thickness = kind === "door" ? 0.045 : 0.03;
+  const thickness = kind === "door" ? DOOR_THICKNESS : 0.03;
   const isDoor = kind === "door";
 
   const onDown = (e: ThreeEvent<PointerEvent>) => {
@@ -77,7 +78,7 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
 
       {isDoor ? (
         /* door: a panel that swings open on a hinge */
-        <group position={[hingeX, sillY, hingeZ]} rotation={[0, base + (open ? 1.4 : 0), 0]}>
+        <group position={[hingeX, sillY, hingeZ]} rotation={[0, base + (open ? DOOR_SWING : 0), 0]}>
           <mesh position={[width / 2, height / 2, 0]} castShadow>
             <boxGeometry args={[width, height, thickness]} />
             <meshStandardMaterial color="#a07f57" roughness={0.7} />

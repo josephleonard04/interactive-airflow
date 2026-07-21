@@ -244,11 +244,43 @@ function centre(gen: IdGen, room: RoomDef, type: string, size: Vec3, opts: Place
   };
 }
 
+// ---- 24-hour ventilation (Japanese "Type 3" / 第三種換気) ----
+//
+// Since the 2003 Building Standards Act revision every new Japanese dwelling
+// must run continuous mechanical ventilation at ~0.5 air changes per hour. The
+// common residential implementation is *Type 3*: supply and exhaust are
+// SEPARATE, never one combined unit —
+//   · passive supply inlets (給気口) in each habitable room (bedroom, living),
+//     high on an EXTERIOR wall;
+//   · powered exhausts in the wet rooms (kitchen, bathroom), also high on a wall.
+// The exhaust fans hold the house slightly below outdoor pressure, which is what
+// draws fresh air in through the inlets — so in steady state Σsupply = Σexhaust,
+// which is exactly what the flux balance in bc/lfm.ts wants.
+//
+// Vents therefore go NEAR WALLS, several of them, never one in the middle of a
+// room. (Type 1 — powered supply *and* exhaust with heat recovery — also exists
+// in high-airtightness homes, but Type 3 is the default this preset models.)
+
+const AIR_CHANGES_PER_HOUR = 0.5;
+const VENT_SIZE: Vec3 = [0.3, 0.3, 0.12]; // ~150 mm louvre in its wall recess
+/** Height of the vent centre: just under the ceiling, like a real 給気口. */
+const ventY = (H: number) => H - 0.35;
+
+/** Per-vent flux (m³/s) so the whole home turns over at 0.5 ACH. */
+function ventFlux(rooms: RoomDef[], H: number, count: number): number {
+  const volume = rooms.reduce((s, r) => s + r.rect.w * r.rect.d * H, 0);
+  return (volume * AIR_CHANGES_PER_HOUR) / 3600 / Math.max(1, count);
+}
+
 function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: number): PlacedItem[] {
   const byId = (id: string) => rooms.find((r) => r.id === id)!;
   // furniture avoids BOTH doors and windows so it never blocks an opening
   const ctx = (id: string) => doorsForRoom(byId(id), openings);
   const items: PlacedItem[] = [];
+  // 2 supply inlets + 2 exhausts, so each carries a quarter of the 0.5-ACH flow
+  // and Σsupply = Σexhaust (the Type-3 steady state).
+  const vf = ventFlux(rooms, H, 2);
+  const ventOpts = (): PlaceOpts => ({ category: "hvac", mount: "wall", y: ventY(H), flow: vf });
 
   // Bedroom: bed, desk, closet, and a standing floor fan in a corner.
   {
@@ -258,6 +290,8 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     items.push(against(gen, room, c, "south", 0.72, "desk", [1.2, 0.75, 0.6]));
     items.push(against(gen, room, c, "east", 0.3, "closet", [1.0, 2.0, 0.6]));
     items.push(against(gen, room, c, "south", 0.16, "fan", [0.45, 1.3, 0.45], { category: "hvac", mount: "floor", flow: 0 }));
+    // 給気口: passive fresh-air inlet, high on the exterior (west) wall
+    items.push(against(gen, room, c, "west", 0.88, "supply", VENT_SIZE, ventOpts()));
   }
 
   // Living: couch (south) facing TV (north) across the room; table in the
@@ -271,24 +305,29 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     items.push(centre(gen, room, "table", [1.1, 0.45, 0.7]));
     items.push(against(gen, room, c, "east", 0.3, "ac", [0.85, 0.32, 0.22], { category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25 }));
     items.push(against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0 }));
-    items.push(centre(gen, room, "supply", [0.5, 0.14, 0.5], { category: "hvac", mount: "ceiling", y: H - 0.09, flow: 0.12 }));
+    // 給気口: passive fresh-air inlet, high on the exterior (west) wall
+    items.push(against(gen, room, c, "west", 0.82, "supply", VENT_SIZE, ventOpts()));
   }
 
-  // Kitchen: fridge + sink along the exterior (north) wall.
+  // Kitchen: fridge + kitchen unit (sink + cooktop) along the exterior (north)
+  // wall, with the extract vent high above the counter — the wet-room exhaust
+  // half of the Type-3 system.
   {
     const room = byId("kitchen");
     const c = ctx("kitchen");
     items.push(against(gen, room, c, "north", 0.82, "fridge", [0.7, 1.8, 0.7]));
-    items.push(against(gen, room, c, "north", 0.35, "sink", [0.7, 0.9, 0.55]));
+    items.push(against(gen, room, c, "north", 0.35, "kitchen_sink", [1.0, 0.9, 0.6]));
+    items.push(against(gen, room, c, "north", 0.35, "return", VENT_SIZE, ventOpts()));
   }
 
-  // Bathroom: bathtub, toilet, sink.
+  // Bathroom: bathtub, toilet, sink + the second wet-room exhaust.
   {
     const room = byId("bathroom");
     const c = ctx("bathroom");
     items.push(against(gen, room, c, "east", 0.5, "bathtub", [1.6, 0.6, 0.75]));
     items.push(against(gen, room, c, "west", 0.25, "toilet", [0.55, 0.75, 0.7]));
     items.push(against(gen, room, c, "west", 0.72, "sink", [0.7, 0.9, 0.55]));
+    items.push(against(gen, room, c, "east", 0.85, "return", VENT_SIZE, ventOpts()));
   }
 
   return items;
