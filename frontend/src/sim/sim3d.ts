@@ -382,13 +382,42 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   // steady-state ("very long time") distribution advected by the airflow.
   const V0 = 0.6;    // base diffusive spread (m/s) — dominant, fills the house
   const KADV = 0.5;  // airflow bias on top of the base spread (carries downwind)
-  const costFromSources = (seeds: number[]): Float32Array => {
-    const dist = new Float32Array(n3).fill(Infinity);
-    // binary min-heap over (cost, cell)
-    const hc = new Float64Array(n3 + 1);
-    const hi = new Int32Array(n3 + 1);
+  const costFromSources = (seeds: number[]): Float64Array => {
+    // Float64, NOT Float32. The heap carries full-precision costs while `dist`
+    // stored them rounded, and the staleness test compares the two:
+    //     dist[cc] = nc          // rounded to float32 on the way in
+    //     if (cost > dist[c]) continue;   // full-precision cost vs that rounding
+    // Whenever the rounding went DOWN, a perfectly current entry looked stale
+    // and was thrown away, killing that branch of the frontier. About half of
+    // every expansion was discarded, so the field died out a room or two from
+    // the source: the AC's own room was only partly cooled and any further room
+    // came back at exactly 0 — i.e. exactly outdoor temperature, no matter what
+    // the doors were doing. Both numbers must have the same precision.
+    const dist = new Float64Array(n3).fill(Infinity);
+    // Binary min-heap over (cost, cell), with lazy deletion: a cell is pushed
+    // again every time its distance improves, so the heap holds far MORE than
+    // one entry per cell — up to one per incoming edge.
+    //
+    // This was sized n3 + 1, i.e. one slot per cell. Past that, `hc[p] = cost`
+    // wrote beyond the end of a typed array, which JavaScript ignores silently:
+    // no error, no growth, the entry simply disappeared. The frontier stopped
+    // expanding partway through the house, every cell beyond it kept
+    // dist = Infinity, and geodesicFields turned that into a temperature delta
+    // of exactly 0. Result: the rooms nearest the AC were heated/cooled and the
+    // FAR rooms read as exactly outdoor temperature no matter what — so heat and
+    // cold never appeared to travel between rooms, the goal verdict for any
+    // non-adjacent room was wrong, and the optimizer was scoring layouts against
+    // a field that could not transport anything across the home.
+    let cap = n3 + 1;
+    let hc = new Float64Array(cap);
+    let hi = new Int32Array(cap);
     let hn = 0;
     const push = (cost: number, cell: number) => {
+      if (hn + 1 >= cap) {
+        cap *= 2;
+        const nc = new Float64Array(cap); nc.set(hc); hc = nc;
+        const ni = new Int32Array(cap); ni.set(hi); hi = ni;
+      }
       let p = ++hn; hc[p] = cost; hi[p] = cell;
       while (p > 1) { const q = p >> 1; if (hc[q] <= hc[p]) break; [hc[p], hc[q]] = [hc[q], hc[p]]; [hi[p], hi[q]] = [hi[q], hi[p]]; p = q; }
     };
