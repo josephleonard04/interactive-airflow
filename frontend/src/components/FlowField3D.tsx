@@ -84,9 +84,10 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          // 30 seeds produced a tangle you could not read a direction out of,
-          // especially in the living room where the AC seeds cluster.
-          maxSeeds: 14,
+          // Density is governed by the even-spacing rule in buildStreamlinePaths,
+          // not by this number — seeds are candidates, and crowded ones are
+          // dropped. More of them buys coverage in the still rooms.
+          maxSeeds: 40,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
