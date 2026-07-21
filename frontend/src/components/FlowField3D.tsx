@@ -90,10 +90,7 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          // Seeds are allotted round-robin across the rooms. Lines now run to
-          // their natural end rather than stopping at the first busy cell, so
-          // each seed covers more ground: 60 -> ~30 long lines, every room.
-          maxSeeds: 60,
+          maxSeeds: 30,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
@@ -200,10 +197,8 @@ export function FlowField3D() {
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
   useFrame((_, delta) => {
-    // Dashes travel downstream so the air visibly FLOWS along each line. This is
-    // the only cue that says which WAY the air is going, so it needs to be quick
-    // enough to read at a glance — 0.55 was a slow crawl.
-    if (dashRef.current) dashRef.current.material.dashOffset -= delta * 2.2;
+    // streamline dashes drift forward so the air visibly FLOWS along the lines
+    if (dashRef.current) dashRef.current.material.dashOffset -= delta * 0.55;
     // converge to steady state once
     if (!converged.current) {
       const sim = built.sim;
@@ -299,25 +294,23 @@ export function FlowField3D() {
     <group>
       {showStreamlines && (
         <group>
-          {/* soft glow, then a continuous core, so the path reads on any backdrop */}
-          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={5} transparent opacity={0.15} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
-          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={1.5} transparent opacity={0.3} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
-          {/* animated dashes travelling downstream = the air actually moving.
-              Short dashes with a wide gap read as distinct packets of air being
-              carried along, rather than a dotted line that happens to shimmer. */}
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.16} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          {/* faint continuous core so the path always reads */}
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.35} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          {/* animated dashes flowing along the line = moving air */}
           <Line
             ref={dashRef}
             points={paths!.points}
             segments
-            color={STREAMLINE_BLUE}
-            lineWidth={2.8}
+            vertexColors={paths!.colors}
+            lineWidth={2.4}
             transparent
-            opacity={0.98}
+            opacity={0.95}
             depthWrite={false}
             renderOrder={FLOW_RENDER_ORDER}
             dashed
-            dashSize={0.16}
-            gapSize={0.3}
+            dashSize={0.22}
+            gapSize={0.16}
           />
         </group>
       )}
