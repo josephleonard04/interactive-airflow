@@ -84,6 +84,23 @@ export function FlowField3D() {
     setSimReady(false);
   }, [built, sourceRoomId, plan.rooms, setSimReady, engine, accurate]);
 
+  // Points in every OPEN doorway and window, at a couple of heights. These are
+  // the routes air uses to move between rooms, so seeding them guarantees the
+  // whole-house paths are drawn instead of only whatever each room happens to be
+  // doing on its own.
+  const gateways = useMemo(() => {
+    const g: Array<[number, number, number]> = [];
+    for (const o of [...plan.doors, ...plan.windows]) {
+      if (!o.open) continue;
+      const cx = (o.a[0] + o.b[0]) / 2;
+      const cz = (o.a[1] + o.b[1]) / 2;
+      const lo = o.sill + o.height * 0.35;
+      const hi = o.sill + o.height * 0.7;
+      g.push([cx, lo, cz], [cx, hi, cz]);
+    }
+    return g;
+  }, [plan.doors, plan.windows]);
+
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
     () =>
@@ -92,9 +109,10 @@ export function FlowField3D() {
           roofY: plan.wallHeight,
           maxSeeds: 30,
           rooms: plan.rooms.map((r) => r.rect),
+          gateways,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms],
+    [built, plan.wallHeight, plan.rooms, gateways],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
