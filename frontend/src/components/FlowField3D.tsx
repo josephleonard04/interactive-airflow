@@ -7,7 +7,7 @@ import { tempColor } from "../viz/temperature";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
-import { buildStreamlinePaths, speedColor, type StreamlinePaths } from "../viz/streamlines";
+import { STREAMLINE_BLUE, buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -17,6 +17,11 @@ import { buildStreamlinePaths, speedColor, type StreamlinePaths } from "../viz/s
 //   - contamination → connected rooms filled violet from the source room
 // Temperature/smell use a room-connectivity model (open doors link rooms, open
 // windows vent to ambient) so "the whole house is affected if the doors are open".
+
+const DOT_RGB = (() => {
+  const c = new THREE.Color(STREAMLINE_BLUE);
+  return [c.r, c.g, c.b] as const;
+})();
 
 const MAX_HAZE = 16000;
 const NUM_PARTICLES = 850;
@@ -84,10 +89,10 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          // Few, meaningful lines: seeds are allotted round-robin across the
-          // rooms, so this budget buys whole-house coverage rather than a
-          // thicket over the AC. 16 -> ~8 lines, every room represented.
-          maxSeeds: 16,
+          // Seeds are allotted round-robin across the rooms, so a generous
+          // budget buys whole-house coverage rather than a thicket over the AC.
+          // 160 -> ~27 lines, every room well represented.
+          maxSeeds: 160,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
@@ -278,9 +283,8 @@ export function FlowField3D() {
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
-      // same blue speed ramp as the streamlines, so the two airflow views agree
-      const [cr, cg, cb] = speedColor(sp);
-      headCol[p * 3] = cr; headCol[p * 3 + 1] = cg; headCol[p * 3 + 2] = cb;
+      // the same single blue as the streamlines, so the two airflow views agree
+      headCol[p * 3] = DOT_RGB[0]; headCol[p * 3 + 1] = DOT_RGB[1]; headCol[p * 3 + 2] = DOT_RGB[2];
     }
     (headPts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
@@ -293,14 +297,14 @@ export function FlowField3D() {
       {showStreamlines && (
         <group>
           {/* soft glow, then a continuous core, so the path reads on any backdrop */}
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.18} depthWrite={false} />
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.45} depthWrite={false} />
+          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={5} transparent opacity={0.18} depthWrite={false} />
+          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={1.6} transparent opacity={0.45} depthWrite={false} />
           {/* animated dashes travelling downstream = the air actually moving */}
           <Line
             ref={dashRef}
             points={paths!.points}
             segments
-            vertexColors={paths!.colors}
+            color={STREAMLINE_BLUE}
             lineWidth={2.6}
             transparent
             opacity={0.95}
