@@ -172,16 +172,18 @@ export function buildStreamlinePaths(
   const MIN_SPEED = 0.06; // fastest point on the line
   const MIN_MEAN_SPEED = 0.03; // and its average, so a lucky cell isn't enough
   const MIN_POINTS = 8; // and trace a real path, not a stub
+  // Keep drawn lines off the floor plane. The lowest row of cell centres sits at
+  // dx/2, so air genuinely flows near the floor, but a smoothed curve dipping to
+  // y≈0 renders as passing THROUGH the floor slab.
+  const FLOOR_CLEARANCE = 0.09;
   const step = dx * 0.75;
   const maxSteps = 120;
-  // Seed budget, spread round-robin over the rooms. Measured on the example home
-  // at display resolution, with the spacing and orbit rules doing the thinning:
-  //     16 seeds ->  8 lines,  55 cells covered
-  //    160 seeds -> 27 lines, 128 cells covered, still median 2 lines per 0.5 m
-  // The knot this originally suffered from came from tracers orbiting the fan,
-  // not from the number of lines — that is handled by the orbit detector now, so
-  // the budget can be generous and the picture still reads.
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 160, opts.rooms ?? [], 0.02, opts.seedSpacing);
+  // Seed budget, spread round-robin over the rooms. Now that lines are allowed
+  // to grow to their natural end (see MAX_CROWD) each seed yields a much longer
+  // path, so fewer seeds cover more. Measured at display resolution:
+  //      60 seeds -> 30 lines, 111 cells covered, max 5 lines per 0.5 m cell
+  //     160 seeds -> 49 lines, 136 cells covered, max 10 — re-crowded
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 60, opts.rooms ?? [], 0.02, opts.seedSpacing);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -226,14 +228,22 @@ export function buildStreamlinePaths(
   // view stayed crowded even though the rule "worked".
   //
   const D_SEP = opts.spacing ?? Math.max(dx * 0.85, 0.2);
-  const MAX_SHARED = 1; // lines an accepted cell may already hold before we stop
+  // Two DIFFERENT thresholds, which is the point of the Jobard & Lefer scheme:
+  // a strict one for where a line may START, and a looser one for where a line
+  // must STOP. Using the same value for both is why lines ended abruptly in open
+  // air — a line was killed the moment it touched any cell another line had
+  // visited, which at this seed density happens within a few steps. Seeding
+  // stays strict so lines spread out; growth only gives up where the area is
+  // genuinely saturated.
+  const MAX_SEED_SHARE = 1; // don't start a line in a cell already this busy
+  const MAX_CROWD = 3; // but keep growing until a cell is this busy
   const MAX_SELF = 2; // times a line may RE-ENTER one of its own cells
   const occupancy = new Map<string, number>();
   const key = (v: THREE.Vector3) => `${Math.floor(v.x / D_SEP)},${Math.floor(v.z / D_SEP)}`;
 
   for (const seed of seeds) {
     const p = seed.clone();
-    if ((occupancy.get(key(p)) ?? 0) > MAX_SHARED) continue; // already covered
+    if ((occupancy.get(key(p)) ?? 0) > MAX_SEED_SHARE) continue; // already covered
     const raw: THREE.Vector3[] = [p.clone()];
     const own = new Map<string, number>();
     let lastKey = key(p);
@@ -272,7 +282,7 @@ export function buildStreamlinePaths(
       }
       if (tunnelled) break;
       const k = key(next);
-      if ((occupancy.get(k) ?? 0) > MAX_SHARED) break; // too close to another line
+      if ((occupancy.get(k) ?? 0) > MAX_CROWD) break; // area is saturated
       // Count a cell only when the line ENTERS it. A step is a fraction of a
       // cell, so consecutive steps sit in the same cell — counting those would
       // trip the orbit detector after three steps and kill every line.
@@ -297,13 +307,27 @@ export function buildStreamlinePaths(
     const divisions = Math.min(80, raw.length * 3);
     const smooth = curve.getPoints(divisions);
 
+    // Validate the SMOOTHED polyline, which is what actually gets drawn. Only
+    // the raw integration points were ever checked; Catmull-Rom then interpolates
+    // between them and can overshoot on a tight bend — under the floor, or
+    // clipping the corner of a wall. Emit only the runs of the curve that lie in
+    // real air, so the drawn geometry and the validated geometry are the same
+    // thing. A run that gets cut simply ends there rather than being dropped.
+    let run: THREE.Vector3[] = [];
+    const flush = () => {
+      if (run.length >= 2) {
+        for (let i = 0; i < run.length - 1; i++) points.push(run[i], run[i + 1]);
+        lineCount++;
+      }
+      run = [];
+    };
     for (const q of smooth) {
-      const s = sample(q.x, q.y, q.z).speed;
-      if (s > maxSpeed) maxSpeed = s;
+      const v = sample(q.x, q.y, q.z);
+      if (v.solid || !inBounds(q) || q.y < y0 + FLOOR_CLEARANCE) { flush(); continue; }
+      if (v.speed > maxSpeed) maxSpeed = v.speed;
+      run.push(q);
     }
-    for (let i = 0; i < smooth.length - 1; i++) points.push(smooth[i], smooth[i + 1]);
-
-    lineCount++;
+    flush();
   }
 
   return { points, maxSpeed, lineCount };

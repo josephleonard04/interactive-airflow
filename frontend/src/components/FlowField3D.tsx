@@ -89,10 +89,10 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          // Seeds are allotted round-robin across the rooms, so a generous
-          // budget buys whole-house coverage rather than a thicket over the AC.
-          // 160 -> ~27 lines, every room well represented.
-          maxSeeds: 160,
+          // Seeds are allotted round-robin across the rooms. Lines now run to
+          // their natural end rather than stopping at the first busy cell, so
+          // each seed covers more ground: 60 -> ~30 long lines, every room.
+          maxSeeds: 60,
           rooms: plan.rooms.map((r) => r.rect),
         }),
       ),
