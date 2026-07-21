@@ -18,6 +18,7 @@ import {
 } from "../engine/accurate";
 import { type OptimizeGoal } from "../intent/optimize";
 import { searchOptimize } from "../intent/searchOptimize";
+import { findSolutions, type Solution } from "../intent/solutions";
 import { parseGoal } from "../intent/objectives";
 import type {
   FloorPlan,
@@ -125,8 +126,17 @@ export interface SceneState {
 
   /** One-click device presets (set on/power + relocate devices + open/close doors). */
   applyAirflowPreset: (preset: AirflowPreset) => void;
-  /** Solve a plain-language goal into the most effective device layout + settings. */
+  /** Search a plain-language goal for SEVERAL good configurations to choose from. */
   applyBestSolution: (goalText: string) => boolean;
+  /** Candidate solutions from the last search, best first (empty = none yet). */
+  solutionOptions: Solution[];
+  /** The goal text those options answer, for the option-panel heading. */
+  solutionGoal: string | null;
+  /** Rooms the goal asked about, so the option cards can show their temperature. */
+  solutionTargets: string[];
+  /** Apply one of the offered solutions (index into solutionOptions). */
+  chooseSolution: (index: number) => void;
+  dismissSolutions: () => void;
   /** true while the placement search is running the simulator. */
   optimizing: boolean;
   /** User-sketched target region (world coords) for "this area" goals. */
@@ -407,11 +417,42 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }, 30);
   },
 
+  solutionOptions: [],
+  solutionGoal: null,
+  solutionTargets: [],
+  dismissSolutions: () => set({ solutionOptions: [], solutionGoal: null, solutionTargets: [] }),
+
+  chooseSolution: (index) => {
+    const s = get();
+    const sol = s.solutionOptions[index];
+    if (!sol) return;
+    const before = s.plan;
+    const lines = [...diffPlan(before, sol.plan), ...sol.detail];
+    s.logEvent("goal", { text: s.solutionGoal, chosen: sol.id, option: index, lines });
+    set({
+      ...snapshot(s),
+      plan: sol.plan,
+      pendingChange: {
+        title: `${sol.label} — for “${(s.solutionGoal ?? "").trim().slice(0, 40)}”`,
+        lines: lines.length ? lines : ["Already set — no change."],
+      },
+      solutionOptions: [],
+      solutionGoal: null,
+      solutionTargets: [],
+    });
+  },
+
   applyBestSolution: (goalText) => {
     if (get().optimizing) return false;
     const objs = parseGoal(goalText, get().plan, get().sketchRegion);
     const obj = objs[0];
     if (!obj) return false;
+    // Every room the goal named, not just the first. "Cool the living room and
+    // the bedroom" used to keep objs[0] and silently discard the rest, so the
+    // optimizer only ever worked on one of the two rooms the user asked about.
+    const targetIds = Array.from(
+      new Set(objs.filter((o) => o.scalar === obj.scalar && o.regionId).map((o) => o.regionId!)),
+    );
     // A calm-air goal ("no draft on the bed") wants LESS air movement — quiet
     // the movers rather than searching for a stronger layout.
     const calm = obj.scalar === "draft" && obj.direction === "low";
@@ -423,56 +464,39 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         : obj.scalar === "draft"
           ? "circulate"
           : "ventilate";
-    // Effective device settings for the goal.
-    const cfg: Record<string, { on: boolean; power: number; oscillate?: boolean }> = calm
-      ? { fan: { on: false, power: 1 }, supply: { on: true, power: 1 }, ac: { on: true, power: 1 } }
-      : goal === "cool"
-        ? { ac: { on: true, power: 3 }, fan: { on: true, power: 2, oscillate: true } }
-        : goal === "warm"
-          ? { heater: { on: true, power: 3 }, fan: { on: true, power: 1, oscillate: true } }
-          : goal === "circulate"
-            ? { fan: { on: true, power: 3, oscillate: true }, supply: { on: true, power: 2 } }
-            : { supply: { on: true, power: 3 }, fan: { on: true, power: 3, oscillate: true } };
-    const targetId = obj.regionId;
     set({ optimizing: true });
     window.setTimeout(() => {
       try {
         const s = get();
         const before = s.plan;
-        const items = before.items.map((it) => {
-          const d = cfg[it.type];
-          if (!d) return it;
-          return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
+        if (calm) {
+          // A calm-air goal ("no draft on the bed") wants LESS air movement —
+          // quiet the movers rather than searching for a stronger layout.
+          const items = before.items.map((it) =>
+            it.type === "fan" ? { ...it, on: false } : it.type === "ac" ? { ...it, power: 1 } : it,
+          );
+          const after: FloorPlan = { ...before, items };
+          const lines = [...diffPlan(before, after), `Quieted the air movers so ${obj.regionName ?? "the area"} stays calm`];
+          get().logEvent("goal", { text: goalText, objective: obj, lines });
+          set({
+            ...snapshot(s),
+            plan: after,
+            pendingChange: { title: `Calm air — “${goalText.trim().slice(0, 40)}”`, lines },
+            optimizing: false,
+          });
+          return;
+        }
+        const options = findSolutions(before, goal, targetIds, { outdoorTemp: s.outdoorTemp, want: 3 });
+        get().logEvent("goal", {
+          text: goalText,
+          objective: obj,
+          targets: targetIds,
+          offered: options.map((o) => ({ id: o.id, label: o.label, score: o.score })),
         });
-        const setOpen = (o: Opening): Opening => {
-          const ext = o.rooms.includes("outside");
-          if (o.kind === "door" && ext) return o; // never auto-open the entrance
-          let open = o.open;
-          if (!ext && o.kind === "door") open = true; // open interior doors so the effect spreads
-          else if (ext && goal === "ventilate") open = targetId ? o.rooms.includes(targetId) : true;
-          return open === o.open ? o : { ...o, open };
-        };
-        const withOpenings: FloorPlan = {
-          ...before,
-          items,
-          doors: before.doors.map(setOpen),
-          windows: before.windows.map(setOpen),
-          walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
-        };
-        // calm goals: settings-only (quiet the movers); no relocation search
-        const result = calm
-          ? { items: withOpenings.items, changes: [`Quieted the air movers so ${obj.regionName ?? "the area"} stays calm`] }
-          : searchOptimize(withOpenings, goal, targetId);
-        const after: FloorPlan = { ...withOpenings, items: result.items };
-        const lines = [...diffPlan(before, after), ...result.changes];
-        get().logEvent("goal", { text: goalText, objective: obj, lines });
         set({
-          ...snapshot(s),
-          plan: after,
-          pendingChange: {
-            title: `Best for “${goalText.trim().slice(0, 40)}”`,
-            lines: lines.length ? lines : ["Already optimal — no change."],
-          },
+          solutionOptions: options,
+          solutionGoal: goalText,
+          solutionTargets: targetIds,
           optimizing: false,
         });
       } catch {

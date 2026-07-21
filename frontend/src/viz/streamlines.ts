@@ -124,23 +124,33 @@ export function buildStreamlinePaths(
     p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1 && inHouse(p);
 
   const white = new THREE.Color(opts.color ?? "#ffffff");
-  const MIN_SPEED = 0.05; // a line must carry real air somewhere, else it's noise
-  const MIN_POINTS = 6; // and trace a real path, not a stub
+  // A line has to carry real air along MOST of its length, not just touch one
+  // fast cell somewhere. Peak-only was letting through lines that were mostly
+  // coasted (see stallBudget below) — they read as confident airflow in rooms
+  // where the air is essentially still.
+  const MIN_SPEED = 0.06; // fastest point on the line
+  const MIN_MEAN_SPEED = 0.03; // and its average, so a lucky cell isn't enough
+  const MIN_POINTS = 8; // and trace a real path, not a stub
   const step = dx * 0.75;
-  const maxSteps = 170;
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02);
+  const maxSteps = 120;
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 14, opts.rooms ?? [], 0.02);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
   const mid = new THREE.Vector3();
   const lastDir = new THREE.Vector3();
   // Weak air still moves: when the sampled velocity is tiny, coast along the
-  // previous direction at reduced pace (a stall budget per line) so lines keep
-  // flowing across slow rooms instead of stopping dead at the doorway.
+  // previous direction at reduced pace so a line can cross a slow patch (a
+  // doorway threshold) instead of stopping dead. But the coast is INVENTED
+  // motion — the solver says the air is not moving there — so the allowance is
+  // small and the threshold is a real speed, not "numerically zero". Coasting
+  // 10 steps below 0.001 m/s is what drew confident streamlines through a still
+  // bedroom.
+  const COAST_BELOW = 0.02; // m/s — under this the flow is not meaningfully moving
   const stepVec = (p: THREE.Vector3, out: THREE.Vector3): "ok" | "weak" | "dead" => {
     const v = sample(p.x, p.y, p.z);
     out.set(v.vx, v.vy, v.vz);
-    if (out.lengthSq() >= 1e-6) {
+    if (out.length() >= COAST_BELOW) {
       out.setLength(step);
       return "ok";
     }
@@ -155,11 +165,16 @@ export function buildStreamlinePaths(
     const p = seed.clone();
     const raw: THREE.Vector3[] = [p.clone()];
     lastDir.set(0, 0, 0);
-    let stallBudget = 10;
+    let stallBudget = 3;
     let peak = 0;
+    let speedSum = 0;
+    let speedN = 0;
     for (let n = 0; n < maxSteps; n++) {
       if (!inBounds(p) || sample(p.x, p.y, p.z).solid) break;
-      peak = Math.max(peak, sample(p.x, p.y, p.z).speed);
+      const sp = sample(p.x, p.y, p.z).speed;
+      peak = Math.max(peak, sp);
+      speedSum += sp;
+      speedN++;
       const q1 = stepVec(p, s1); // RK2 midpoint
       if (q1 === "dead") break;
       mid.copy(p).addScaledVector(s1, 0.5);
@@ -177,8 +192,9 @@ export function buildStreamlinePaths(
       raw.push(next);
       p.copy(next);
     }
-    // meaningful only: a real path that carries real air somewhere
+    // meaningful only: a real path that carries real air along most of itself
     if (raw.length < MIN_POINTS || peak < MIN_SPEED) continue;
+    if (speedN === 0 || speedSum / speedN < MIN_MEAN_SPEED) continue;
 
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);

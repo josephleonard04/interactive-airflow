@@ -72,6 +72,9 @@ function objectRegion(t: string, plan: FloorPlan): { rect: Rect; name: string; r
   return null;
 }
 
+/** Joins two rooms into one compound goal: "living room and bedroom", "X & Y". */
+const CONJOINED = /\band\b|&|,|\bboth\b|\bplus\b/;
+
 const NEGATERS = ["no", "not", "without", "keep out", "out of", "away", "avoid", "free of", "don't", "dont", "prevent"];
 
 const ROOM_WORDS: Array<{ words: string[]; type: RoomType }> = [
@@ -153,6 +156,23 @@ export function parseGoal(text: string, plan: FloorPlan, sketch?: Rect | null): 
     } else {
       const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
       const useSketch = sketchTarget && (deictic || !named);
+      if (!useSketch && rooms.length > 1 && CONJOINED.test(t)) {
+        // "cool the living room AND the bedroom" is two goals, not one. Emitting
+        // only the nearest room silently dropped the other one — the optimizer
+        // then cooled a single room and the verdict reported success while the
+        // other room was untouched.
+        for (const r of rooms) {
+          out.push({
+            raw: text,
+            scalar: "temperature",
+            direction: lex.direction,
+            regionId: r.id,
+            regionName: r.name,
+            regionRect: null,
+          });
+        }
+        continue;
+      }
       const region = useSketch ? sketchTarget : named;
       out.push({
         raw: text,

@@ -37,7 +37,7 @@ export interface SearchResult {
   targetName: string;
 }
 
-interface Candidate {
+export interface Candidate {
   position: Vec3;
   rotationY: number;
   roomId: string;
@@ -53,7 +53,7 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 /** Candidate spots for a device type in one room: each wall + the centre,
  *  facing into the room — derived from the room's actual geometry. Wall
  *  devices carry the axis of THEIR wall so they can only slide along it. */
-function candidateSpots(room: { id: string; name: string; rect: Rect }, type: string, wallHeight: number): Candidate[] {
+export function candidateSpots(room: { id: string; name: string; rect: Rect }, type: string, wallHeight: number): Candidate[] {
   const { x, z, w, d } = room.rect;
   const cx = x + w / 2;
   const cz = z + d / 2;
