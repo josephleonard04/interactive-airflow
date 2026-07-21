@@ -175,7 +175,7 @@ export function buildStreamlinePaths(
   // Keep drawn lines off the floor plane. The lowest row of cell centres sits at
   // dx/2, so air genuinely flows near the floor, but a smoothed curve dipping to
   // y≈0 renders as passing THROUGH the floor slab.
-  const FLOOR_CLEARANCE = 0.09;
+  const FLOOR_CLEARANCE = 0.16;
   const step = dx * 0.75;
   const maxSteps = 120;
   // Seed budget, spread round-robin over the rooms. Now that lines are allowed

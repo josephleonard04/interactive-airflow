@@ -8,6 +8,7 @@ import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
 import { STREAMLINE_BLUE, buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
+import { FLOW_RENDER_ORDER } from "../viz/layers";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -199,8 +200,10 @@ export function FlowField3D() {
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
   useFrame((_, delta) => {
-    // streamline dashes drift forward so the air visibly FLOWS along the lines
-    if (dashRef.current) dashRef.current.material.dashOffset -= delta * 0.55;
+    // Dashes travel downstream so the air visibly FLOWS along each line. This is
+    // the only cue that says which WAY the air is going, so it needs to be quick
+    // enough to read at a glance — 0.55 was a slow crawl.
+    if (dashRef.current) dashRef.current.material.dashOffset -= delta * 2.2;
     // converge to steady state once
     if (!converged.current) {
       const sim = built.sim;
@@ -297,21 +300,24 @@ export function FlowField3D() {
       {showStreamlines && (
         <group>
           {/* soft glow, then a continuous core, so the path reads on any backdrop */}
-          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={5} transparent opacity={0.18} depthWrite={false} />
-          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={1.6} transparent opacity={0.45} depthWrite={false} />
-          {/* animated dashes travelling downstream = the air actually moving */}
+          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={5} transparent opacity={0.15} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          <Line points={paths!.points} segments color={STREAMLINE_BLUE} lineWidth={1.5} transparent opacity={0.3} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          {/* animated dashes travelling downstream = the air actually moving.
+              Short dashes with a wide gap read as distinct packets of air being
+              carried along, rather than a dotted line that happens to shimmer. */}
           <Line
             ref={dashRef}
             points={paths!.points}
             segments
             color={STREAMLINE_BLUE}
-            lineWidth={2.6}
+            lineWidth={2.8}
             transparent
-            opacity={0.95}
+            opacity={0.98}
             depthWrite={false}
+            renderOrder={FLOW_RENDER_ORDER}
             dashed
-            dashSize={0.22}
-            gapSize={0.16}
+            dashSize={0.16}
+            gapSize={0.3}
           />
         </group>
       )}
@@ -323,7 +329,7 @@ export function FlowField3D() {
         <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.2} opacity={0.62} />
       </points>
 
-      <points ref={headRef} frustumCulled={false} visible={false}>
+      <points ref={headRef} frustumCulled={false} visible={false} renderOrder={FLOW_RENDER_ORDER}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[head, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[headCol, 3]} usage={THREE.DynamicDrawUsage} />
