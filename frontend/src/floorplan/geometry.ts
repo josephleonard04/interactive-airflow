@@ -13,6 +13,11 @@ export const WALL_THICKNESS = 0.1;
 export const GRID = 0.25;
 export const DOOR_WIDTH = 0.9;
 export const DOOR_HEIGHT = 2.05;
+/** How far a door panel swings when open (radians, ~80°). Shared by the 3D leaf
+ *  (components/OpeningLeaf) and the solver, which treats the swung panel as a
+ *  solid obstacle — so air must flow AROUND the leaf, not through it. */
+export const DOOR_SWING = 1.4;
+export const DOOR_THICKNESS = 0.045;
 export const WINDOW_WIDTH = 1.2;
 export const WINDOW_HEIGHT = 1.2;
 export const WINDOW_SILL = 0.9;

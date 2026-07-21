@@ -1,4 +1,4 @@
-import { WALL_THICKNESS, wallPieces } from "../floorplan/geometry";
+import { DOOR_SWING, DOOR_THICKNESS, WALL_THICKNESS, wallPieces } from "../floorplan/geometry";
 import type { FloorPlan, Opening, PlacedItem } from "../floorplan/types";
 
 // Compile the editor's home into an LFM-ready scene description.
@@ -22,10 +22,11 @@ export interface Box {
   max: V3;
 }
 
-/** A solid obstacle (no-slip): wall piece, filled-in closed opening, or furniture. */
+/** A solid obstacle (no-slip): wall piece, filled-in closed opening, the swung
+ *  panel of an open door, or furniture. */
 export interface SolidBox {
   id: string;
-  kind: "wall" | "closed-opening" | "furniture";
+  kind: "wall" | "closed-opening" | "door-leaf" | "furniture";
   world: Box;
 }
 
@@ -193,11 +194,61 @@ function solidsFromPlan(plan: FloorPlan): SolidBox[] {
     }
     for (const o of wall.openings) {
       if (!o.open) out.push({ id: `${o.id}-shut`, kind: "closed-opening", world: openingBox(o, wall.thickness) });
+      else out.push(...doorLeafSolids(o));
     }
   }
 
   for (const it of plan.items) {
     if (it.category === "furniture") out.push({ id: it.id, kind: "furniture", world: worldAABB(it) });
+  }
+  return out;
+}
+
+/** The swung panel of an OPEN door, as a staircase of small axis-aligned boxes.
+ *
+ *  An open doorway is a hole in the wall, but the door itself hasn't vanished —
+ *  it is standing in the room at ~80° to the wall. Without this the solver saw
+ *  only the hole and streamlines ran straight through the panel. Emitting the
+ *  leaf as a solid makes air go *around* it and out through the clear part of
+ *  the doorway, which is what actually happens (and is why an open door steers
+ *  a draught the way it does).
+ *
+ *  Geometry mirrors components/OpeningLeaf: the panel hinges at one end of the
+ *  span and rotates by DOOR_SWING about +Y. Three.js Ry(θ) maps the local +x
+ *  axis to (cos θ, 0, −sin θ), so that is the direction the leaf points. The
+ *  panel is oblique, and the solver's solids are axis-aligned boxes, so we
+ *  approximate it by overlapping cubes along its length — at simulation
+ *  resolution (cells ≫ the 45 mm panel) this is exactly a one-cell-thick wall.
+ */
+function doorLeafSolids(o: Opening): SolidBox[] {
+  if (o.kind !== "door" || !o.open) return [];
+  const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+  const line = vertical ? o.a[0] : o.a[1];
+  const lo = vertical ? Math.min(o.a[1], o.b[1]) : Math.min(o.a[0], o.b[0]);
+  const hi = vertical ? Math.max(o.a[1], o.b[1]) : Math.max(o.a[0], o.b[0]);
+  const width = hi - lo;
+  if (width <= 1e-3) return [];
+
+  // hinge end + closed-state orientation, exactly as the renderer computes them
+  const hingeX = vertical ? line : lo;
+  const hingeZ = vertical ? lo : line;
+  const theta = (vertical ? -Math.PI / 2 : 0) + DOOR_SWING;
+  const dirX = Math.cos(theta);
+  const dirZ = -Math.sin(theta);
+
+  const step = 0.08; // sampling pitch along the panel
+  const n = Math.max(3, Math.ceil(width / step));
+  const half = Math.max(width / (2 * n), DOOR_THICKNESS / 2) + 0.02; // keep samples overlapping
+  const out: SolidBox[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = ((i + 0.5) / n) * width;
+    const px = hingeX + dirX * t;
+    const pz = hingeZ + dirZ * t;
+    out.push({
+      id: `${o.id}-leaf${i}`,
+      kind: "door-leaf",
+      world: { min: [px - half, o.sill, pz - half], max: [px + half, o.sill + o.height, pz + half] },
+    });
   }
   return out;
 }
@@ -365,18 +416,25 @@ export function compileLfmScene(plan: FloorPlan): LfmScene {
   const outlets = [...returns, ...windowOutlets];
   const windowOut = windowOutlets.reduce((s, p) => s + p.flux, 0);
   const outflow = returnFlux + windowOut;
-  const hasOutlet = returnFlux > 0 || windowOutlets.length > 0;
+  // Balanced means the numbers actually match, not merely that *some* outlet
+  // exists: the 24-hour vents extract only ~0.02 m³/s, so a running AC can still
+  // have nowhere to go even though returns are present. Reporting that as
+  // balanced would hide the one thing the user needs to be told — open a window.
+  const deficit = inflow - outflow;
   const balance: FluxBalance =
     inflow <= 1e-9
       ? { inflow: 0, outflow: 0, balanced: true, note: "No forced inflow — flow is buoyancy-driven only." }
-      : hasOutlet
+      : deficit > 1e-6
         ? {
+            inflow, outflow, balanced: false,
+            note: `${inflow.toFixed(3)} m³/s supplied but only ${outflow.toFixed(3)} m³/s can leave (${returnFlux.toFixed(3)} m³/s via the extract vents) — open a window or exterior door so the remaining ${deficit.toFixed(3)} m³/s can exhaust (the solver is incompressible).`,
+          }
+        : {
             inflow, outflow, balanced: true,
             note: returnFlux > 0
-              ? `Return vent(s) extract ${returnFlux.toFixed(3)} m³/s${windowOut > 1e-6 ? `, the rest leaves via open windows/doors` : ""}.`
-              : undefined,
-          }
-        : { inflow, outflow: 0, balanced: false, note: winBal.note };
+              ? `Extract vent(s) remove ${returnFlux.toFixed(3)} m³/s${windowOut > 1e-6 ? `, the rest leaves via open windows/doors` : ""}.`
+              : winBal.note,
+          };
   const fans = fansFromItems(plan);
   const heatSources = heatSourcesFromItems(plan);
 
