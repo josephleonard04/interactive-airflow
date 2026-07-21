@@ -4,6 +4,7 @@ import { evaluateGoal, type Evaluation } from "../intent/evaluate";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
+import { SPEED_RAMP_MAX, speedGradientCss } from "../viz/streamlines";
 import { SketchCanvas } from "./SketchCanvas";
 
 const PRESET_IDS = Object.keys(PRESETS) as AirflowPreset[];
@@ -616,9 +617,19 @@ function Legend({ mode, outdoorTemp }: { mode: SimMode; outdoorTemp: number }) {
     );
   }
   return (
-    <p className="muted-line" style={{ marginTop: 10 }}>
-      Dots show air streaming from the AC; it travels through open doors and leaves by open windows &amp; the entrance.
-    </p>
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Air speed (m/s)</div>
+      <div style={{ height: 11, borderRadius: 6, background: speedGradientCss() }} />
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
+        <span>0 still</span>
+        <span>{(SPEED_RAMP_MAX / 2).toFixed(1)}</span>
+        <span>≥{SPEED_RAMP_MAX.toFixed(1)} jet</span>
+      </div>
+      <p className="muted-line" style={{ marginTop: 6 }}>
+        Each line is one path the air actually takes; the moving dashes travel the way it flows.
+        Air passes through open doors and leaves by open windows &amp; the entrance — nothing crosses a wall.
+      </p>
+    </div>
   );
 }
 
