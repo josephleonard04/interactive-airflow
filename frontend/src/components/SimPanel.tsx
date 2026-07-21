@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
 import { evaluateGoal, type Evaluation } from "../intent/evaluate";
+import type { FloorPlan } from "../floorplan/types";
+import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { SketchCanvas } from "./SketchCanvas";
 
 const PRESET_IDS = Object.keys(PRESETS) as AirflowPreset[];
@@ -43,6 +45,11 @@ export function SimPanel() {
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
   const sketchRegion = useSceneStore((s) => s.sketchRegion);
+  const outdoorTemp = useSceneStore((s) => s.outdoorTemp);
+  const setOutdoorTemp = useSceneStore((s) => s.setOutdoorTemp);
+  const tempRoomId = useSceneStore((s) => s.tempRoomId);
+  const setTempRoom = useSceneStore((s) => s.setTempRoom);
+  const roomTempDeltas = useSceneStore((s) => s.roomTempDeltas);
   const logCount = useSceneStore((s) => s.sessionLog.length);
   const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
@@ -295,6 +302,17 @@ export function SimPanel() {
           </button>
         </div>
       )}
+      {mode === "temperature" && (
+        <TempControls
+          rooms={plan.rooms}
+          outdoorTemp={outdoorTemp}
+          setOutdoorTemp={setOutdoorTemp}
+          tempRoomId={tempRoomId}
+          setTempRoom={setTempRoom}
+          deltas={roomTempDeltas}
+          ready={ready}
+        />
+      )}
       {mode === "contamination" && (
         <div style={{ marginTop: 8 }}>
           <div className="btn-row">
@@ -326,7 +344,7 @@ export function SimPanel() {
           ⏳ Computing the steady state…
         </p>
       )}
-      <Legend mode={mode} />
+      <Legend mode={mode} outdoorTemp={outdoorTemp} />
       <button
         className="ghost"
         style={{ marginTop: 10, fontSize: 11, width: "100%" }}
@@ -347,17 +365,124 @@ export function SimPanel() {
   );
 }
 
-function Legend({ mode }: { mode: SimMode }) {
+/** Outdoor temperature + the per-room readout. Outdoor temperature is a real
+ *  design input, not decoration: "keep my bedroom cool" is a different problem
+ *  at 22 °C outside than at 35 °C, and the answer (open a window vs. run the AC)
+ *  flips between them. */
+function TempControls({
+  rooms,
+  outdoorTemp,
+  setOutdoorTemp,
+  tempRoomId,
+  setTempRoom,
+  deltas,
+  ready,
+}: {
+  rooms: FloorPlan["rooms"];
+  outdoorTemp: number;
+  setOutdoorTemp: (c: number) => void;
+  tempRoomId: string | null;
+  setTempRoom: (id: string | null) => void;
+  deltas: Map<string, number>;
+  ready: boolean;
+}) {
+  const absOf = (id: string) => (deltas.has(id) ? outdoorTemp + deltas.get(id)! : null);
+  const selected = tempRoomId ? rooms.find((r) => r.id === tempRoomId) ?? null : null;
+  const selectedT = selected ? absOf(selected.id) : null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div className="field">
+        <span>outdoor air</span>
+        <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{outdoorTemp.toFixed(0)} °C</span>
+      </div>
+      <input
+        type="range"
+        min={-5}
+        max={40}
+        step={1}
+        value={outdoorTemp}
+        onChange={(e) => setOutdoorTemp(Number(e.target.value))}
+        style={{ width: "100%", marginTop: 2 }}
+        title="Outdoor air temperature — the baseline the whole house sits at"
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
+        <span>−5 °C winter</span>
+        <span>40 °C heatwave</span>
+      </div>
+
+      <div className="field" style={{ marginTop: 8 }}>
+        <span>show room</span>
+        <select value={tempRoomId ?? ""} onChange={(e) => setTempRoom(e.target.value || null)} style={{ maxWidth: 140 }}>
+          <option value="">All rooms</option>
+          {rooms.map((r) => (
+            <option key={r.id} value={r.id}>{r.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {!ready ? (
+        <p className="muted-line" style={{ marginTop: 6 }}>Waiting for the steady state…</p>
+      ) : selected ? (
+        <div
+          style={{
+            marginTop: 6, padding: "9px 11px", borderRadius: 10,
+            border: "1px solid var(--line)", background: "#fff",
+            borderLeft: `4px solid ${selectedT != null ? rgbCss(tempColor(selectedT)) : "var(--muted)"}`,
+          }}
+        >
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+            {selected.name}: {selectedT != null ? `${selectedT.toFixed(1)} °C` : "—"}
+          </div>
+          {selectedT != null && (
+            <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+              {tempLabel(selectedT)} · {(selectedT - outdoorTemp >= 0 ? "+" : "") + (selectedT - outdoorTemp).toFixed(1)} °C vs outside
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
+          {rooms.map((r) => {
+            const t = absOf(r.id);
+            return (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
+                <span
+                  style={{
+                    width: 12, height: 12, borderRadius: 3, flex: "0 0 auto",
+                    background: t != null ? rgbCss(tempColor(t)) : "var(--line)",
+                    border: "1px solid rgba(0,0,0,0.14)",
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                  {t != null ? `${t.toFixed(1)} °C` : "—"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Legend({ mode, outdoorTemp }: { mode: SimMode; outdoorTemp: number }) {
   if (mode === "temperature") {
+    const ticks = [TEMP_MIN_C, 18, TEMP_NEUTRAL_C, 30, TEMP_MAX_C];
     return (
       <div style={{ marginTop: 10 }}>
-        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Air temperature</div>
-        <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#1f5fe0,#bcd0f0,#f4efe8,#f0a06a,#d63b22)" }} />
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>Cooler</span>
-          <span>Warmer</span>
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Air temperature (°C)</div>
+        <div style={{ height: 11, borderRadius: 6, background: tempGradientCss() }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
+          {ticks.map((t) => (
+            <span key={t}>{t === TEMP_MIN_C ? `≤${t}` : t === TEMP_MAX_C ? `≥${t}` : t}</span>
+          ))}
         </div>
-        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls.</p>
+        <p className="muted-line" style={{ marginTop: 6 }}>
+          Absolute temperature on a fixed scale, so the same colour always means the same reading.
+          The house starts at the outdoor {outdoorTemp.toFixed(0)} °C; heating and cooling are carried
+          from there by the airflow, through open doors and blocked by walls.
+        </p>
       </div>
     );
   }

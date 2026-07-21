@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
-import { buildSim3D, geodesicFields } from "../sim/sim3d";
+import { buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
+import { tempColor } from "../viz/temperature";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
@@ -44,6 +45,8 @@ export function FlowField3D() {
   const engine = useSceneStore((s) => s.engine);
   const accurate = useSceneStore((s) => s.accurate);
   const airflowStyle = useSceneStore((s) => s.airflowStyle);
+  const outdoorTemp = useSceneStore((s) => s.outdoorTemp);
+  const setRoomTemps = useSceneStore((s) => s.setRoomTemps);
 
   const built = useMemo(() => buildSim3D(plan), [plan]);
   const soft = useMemo(makeSoftTexture, []);
@@ -126,17 +129,19 @@ export function FlowField3D() {
     if (!haze) return;
     const F = fieldsRef.current;
     if (mode === "airflow" || !F) { haze.visible = false; return; }
-    const { sim, nx, ny, nz, cellCenter } = built;
-    const ambient = built.ambient;
+    const { sim, nx, ny, nz, cellCenter, inside } = built;
     const field = mode === "temperature" ? F.temp : mode === "noise" ? F.noise : F.smell;
-    // column average over height → a 2D (x,z) map
+    // column average over height → a 2D (x,z) map. Only cells INSIDE the home
+    // count: the domain extends past the exterior walls, and with a window open
+    // the air (and the heat and odour it carries) genuinely spills into those
+    // outdoor cells — physically right, but we draw the home, not the outdoors.
     const colSum = new Float64Array(nx * nz);
     const colN = new Int32Array(nx * nz);
     for (let k = 0; k < nz; k++)
       for (let j = 0; j < ny; j++)
         for (let i = 0; i < nx; i++) {
           const c = sim.cIdx(i, j, k);
-          if (sim.solid[c] || ambient[c]) continue;
+          if (sim.solid[c] || !inside[c]) continue;
           const q = i + nx * k;
           colSum[q] += field[c];
           colN[q]++;
@@ -150,22 +155,24 @@ export function FlowField3D() {
       for (let i = 0; i < nx && n < MAX_HAZE; i++) {
         const q = i + nx * k;
         if (!colN[q]) continue;
-        const t = colSum[q] / colN[q] / mx; // normalized −1..1 (temp) or 0..1 (smell)
         let r: number, g: number, b: number;
         if (mode === "temperature") {
-          let a = Math.abs(t);
-          if (a < 0.02) continue;
-          a = Math.sqrt(a); // perceptual boost so even mild differences read
-          if (t > 0) { r = 0.96; g = 0.60 - 0.5 * a; b = 0.32 - 0.24 * a; } // light orange → deep red
-          else { r = 0.30 - 0.22 * a; g = 0.55 - 0.12 * a; b = 0.96; } // light blue → deep blue
+          // Absolute °C = outdoor baseline + the solver's delta, through a fixed
+          // comfort-anchored ramp. EVERY interior column is drawn — a room at the
+          // baseline is not "no data", it is a real temperature the user wants to
+          // see. (The old code skipped near-zero deltas, which is why most of the
+          // house showed nothing.)
+          const c = tempColor(outdoorTemp + colSum[q] / colN[q]);
+          r = c.r; g = c.g; b = c.b;
         } else if (mode === "noise") {
+          const t = colSum[q] / colN[q] / mx;
           let a = t;
           if (a < 0.04) continue;
           a = Math.sqrt(a); // green (quiet) → yellow → red (loud)
           if (a < 0.5) { const u = a / 0.5; r = 0.13 + 0.85 * u; g = 0.77 + 0.03 * u; b = 0.37 - 0.29 * u; }
           else { const u = (a - 0.5) / 0.5; r = 0.98 - 0.12 * u; g = 0.80 - 0.65 * u; b = 0.08 + 0.06 * u; }
         } else {
-          let a = t;
+          let a = colSum[q] / colN[q] / mx;
           if (a < 0.02) continue;
           a = Math.sqrt(a);
           r = 0.80 - 0.50 * a; g = 0.52 - 0.45 * a; b = 0.96 - 0.06 * a; // light lavender → deep violet
@@ -179,7 +186,7 @@ export function FlowField3D() {
     haze.geometry.setDrawRange(0, n);
     (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-  }, [built, mode, hazePos, hazeCol]);
+  }, [built, mode, hazePos, hazeCol, outdoorTemp]);
 
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 
@@ -194,7 +201,8 @@ export function FlowField3D() {
       if (useOpenFoam && accurate?.field) {
         applyFieldToSim(built, accurate.field);
         { const gf = geodesicFields(built);
-          fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(plan, built) }; }
+          fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(plan, built) };
+          setRoomTemps(roomMeans(built, gf.temp)); }
         converged.current = true;
         buildPaths();
         setReady(true);
@@ -212,6 +220,7 @@ export function FlowField3D() {
           smell: gf.smell,
           noise: computeNoiseField(plan, built),
         };
+        setRoomTemps(roomMeans(built, gf.temp));
         converged.current = true;
         buildPaths();
         setReady(true);
@@ -224,7 +233,7 @@ export function FlowField3D() {
     const showAir = mode === "airflow" && airflowStyle === "dots";
     if (headPts) headPts.visible = showAir;
     if (!showAir || !headPts) return;
-    const { sim, nx, ny, nz, dx, origin, worldToCell } = built;
+    const { sim, nx, ny, nz, dx, origin, worldToCell, inside } = built;
     const dt = Math.min(delta, 0.05);
     const roofY = plan.wallHeight;
     const ox = origin[0], oy = origin[1], oz = origin[2];
@@ -244,7 +253,9 @@ export function FlowField3D() {
       if (!out) {
         const [ci, cj, ck] = worldToCell(cx, cy, cz);
         const cc = sim.cIdx(ci, cj, ck);
-        if (sim.open[cc]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
+        // recycle at an opening OR the moment the air leaves the house — the dot
+        // has done its job once it exits, and we don't draw the outdoors
+        if (sim.open[cc] || !inside[cc]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
         else if (!sim.solid[cc]) { x = cx; y = cy; z = cz; }
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
