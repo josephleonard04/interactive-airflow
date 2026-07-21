@@ -82,10 +82,26 @@ function seedPoints(
   maxSeeds: number,
   rooms: Rect[] = [],
   minSpeed: number,
+  gateways: Array<[number, number, number]> = [],
 ): THREE.Vector3[] {
   const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
   const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
+
+  // DOORWAYS FIRST. Seeding only inside rooms produced lines that mostly
+  // circulated within the room they started in, so the picture answered "what is
+  // the air doing in here?" but never "how does air get from here to there?".
+  // A doorway is exactly where the between-room flow passes, so a line seeded in
+  // one is the whole-house path — and because lines are traced in both
+  // directions from their seed, it reaches back into the room the air came from
+  // and forward into the one it is going to.
+  for (const g of gateways) {
+    const p = new THREE.Vector3(g[0], g[1], g[2]);
+    const v = sample(p.x, p.y, p.z);
+    if (v.solid) continue;
+    if (out.every((q) => q.distanceTo(p) > sep * 0.5)) out.push(p);
+  }
+
   // Vent seeds cluster on the AC/supply (many cells, one line each) → thin them
   // by spacing so the source room isn't a tangle of lines.
   for (const s of built.seeds) {
@@ -121,7 +137,15 @@ function seedPoints(
 
 export function buildStreamlinePaths(
   built: Sim3D,
-  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[] } = {},
+  opts: {
+    maxSeeds?: number;
+    color?: string;
+    roofY?: number;
+    rooms?: Rect[];
+    /** World points in the open doorways — seeded first so the between-room
+     *  paths are always represented, not left to chance. */
+    gateways?: Array<[number, number, number]>;
+  } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
   const colors: THREE.Color[] = [];
@@ -146,7 +170,7 @@ export function buildStreamlinePaths(
   const MIN_POINTS = 6; // and trace a real path, not a stub
   const step = dx * 0.75;
   const maxSteps = 170;
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02);
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02, opts.gateways ?? []);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -155,9 +179,9 @@ export function buildStreamlinePaths(
   // Weak air still moves: when the sampled velocity is tiny, coast along the
   // previous direction at reduced pace (a stall budget per line) so lines keep
   // flowing across slow rooms instead of stopping dead at the doorway.
-  const stepVec = (p: THREE.Vector3, out: THREE.Vector3): "ok" | "weak" | "dead" => {
+  const stepVec = (p: THREE.Vector3, out: THREE.Vector3, sign: number): "ok" | "weak" | "dead" => {
     const v = sample(p.x, p.y, p.z);
-    out.set(v.vx, v.vy, v.vz);
+    out.set(v.vx * sign, v.vy * sign, v.vz * sign);
     if (out.lengthSq() >= 1e-6) {
       out.setLength(step);
       return "ok";
@@ -169,7 +193,8 @@ export function buildStreamlinePaths(
     return "dead";
   };
 
-  for (const seed of seeds) {
+  /** Integrate from a seed, downstream (sign +1) or upstream (sign −1). */
+  const trace = (seed: THREE.Vector3, sign: number): { raw: THREE.Vector3[]; peak: number } => {
     const p = seed.clone();
     const raw: THREE.Vector3[] = [p.clone()];
     lastDir.set(0, 0, 0);
@@ -178,10 +203,10 @@ export function buildStreamlinePaths(
     for (let n = 0; n < maxSteps; n++) {
       if (!inBounds(p) || sample(p.x, p.y, p.z).solid) break;
       peak = Math.max(peak, sample(p.x, p.y, p.z).speed);
-      const q1 = stepVec(p, s1); // RK2 midpoint
+      const q1 = stepVec(p, s1, sign); // RK2 midpoint
       if (q1 === "dead") break;
       mid.copy(p).addScaledVector(s1, 0.5);
-      const q2 = stepVec(mid, s2);
+      const q2 = stepVec(mid, s2, sign);
       if (q2 === "dead") break;
       if (q1 === "weak" || q2 === "weak") {
         if (--stallBudget <= 0) break;
@@ -195,15 +220,40 @@ export function buildStreamlinePaths(
       raw.push(next);
       p.copy(next);
     }
+    return { raw, peak };
+  };
+
+  for (const seed of seeds) {
+    // Trace BOTH ways from the seed. Forward alone answers "where does this air
+    // go?"; the upstream half answers "where did it come from?", and it is the
+    // upstream half that reaches back through the doorway into the previous
+    // room. Together one line is a whole path across the home rather than a
+    // fragment starting wherever the seed happened to land.
+    const fwd = trace(seed, 1);
+    const back = trace(seed, -1);
+    const raw = [...back.raw.slice(1).reverse(), ...fwd.raw];
+    const peak = Math.max(fwd.peak, back.peak);
     // meaningful only: a real path that carries real air somewhere
     if (raw.length < MIN_POINTS || peak < MIN_SPEED) continue;
 
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);
     const smooth = curve.getPoints(divisions);
-    // single flat colour — no speed gradient, so the view stays clean
+    // single flat colour — no speed gradient, so the view stays clean.
+    // The integration never steps into a wall, but Catmull-Rom then interpolates
+    // BETWEEN those valid points and can cut the corner on a tight bend, which
+    // draws a segment clipping through a wall. Drop any segment whose midpoint
+    // is solid: the line simply has a hairline gap there instead of crossing.
     for (let i = 0; i < smooth.length - 1; i++) {
-      points.push(smooth[i], smooth[i + 1]);
+      const a = smooth[i], b = smooth[i + 1];
+      let clipped = false;
+      for (let t = 1; t <= 3; t++) {
+        const f = t / 4;
+        mid.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f);
+        if (sample(mid.x, mid.y, mid.z).solid) { clipped = true; break; }
+      }
+      if (clipped) continue;
+      points.push(a, b);
       colors.push(lineColor.clone(), lineColor.clone());
     }
   }
