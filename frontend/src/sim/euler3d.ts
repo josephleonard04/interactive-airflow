@@ -49,6 +49,16 @@ export class Euler3D {
   sFixed: Uint8Array; sVal: Float32Array;
   tempFixed: Uint8Array; tempVal: Float32Array;
 
+  // Body forces on the faces (m/s per second). Unlike the *Fixed arrays these do
+  // not PRESCRIBE a velocity — they accelerate whatever air is there and are
+  // then subject to the pressure projection like everything else. That is the
+  // difference between a fan and a vent: a vent supplies air at a set speed, a
+  // fan can only push the air already in the room, and it slows down when the
+  // flow it is pushing into resists.
+  uForce: Float32Array;
+  vForce: Float32Array;
+  wForce: Float32Array;
+
   constructor(o: Euler3DOptions) {
     this.nx = o.nx; this.ny = o.ny; this.nz = o.nz; this.dx = o.dx;
     this.iterations = o.iterations ?? 30;
@@ -74,6 +84,9 @@ export class Euler3D {
     this.wFixed = new Uint8Array(this.w.length); this.wVal = new Float32Array(this.w.length);
     this.sFixed = new Uint8Array(c); this.sVal = new Float32Array(c);
     this.tempFixed = new Uint8Array(c); this.tempVal = new Float32Array(c);
+    this.uForce = new Float32Array(this.u.length);
+    this.vForce = new Float32Array(this.v.length);
+    this.wForce = new Float32Array(this.w.length);
   }
 
   cIdx(i: number, j: number, k: number): number { return i + this.nx * (j + this.ny * k); }
@@ -111,6 +124,7 @@ export class Euler3D {
     this.applyBC();
     this.advectVelocity(dt);
     this.addBuoyancy(dt);
+    this.addForces(dt);
     this.applyBC();
     this.project();
     this.advectScalar(this.s, this.sFixed, this.sVal, dt, true);
@@ -137,6 +151,36 @@ export class Euler3D {
     for (let k = 0; k <= nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
       const id = this.wIdx(i, j, k);
       if (!this.wFixed[id] && (this.isSolid(i, j, k - 1) || this.isSolid(i, j, k))) this.w[id] = 0;
+    }
+  }
+
+  /** Apply body forces (fans). Accelerates the air that is present; the
+   *  projection immediately afterwards conserves mass, so no air is created —
+   *  a fan pushes, it does not supply. Faces against a solid stay at rest, and
+   *  the speed is capped so a fan cannot spin the air up without limit. */
+  private addForces(dt: number): void {
+    const { nx, ny, nz } = this;
+    const CAP = 3.0; // m/s — a domestic fan's jet, not a wind tunnel
+    for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i <= nx; i++) {
+      const id = this.uIdx(i, j, k);
+      const f = this.uForce[id];
+      if (f === 0 || this.uFixed[id]) continue;
+      if (this.isSolid(i - 1, j, k) || this.isSolid(i, j, k)) continue;
+      this.u[id] = clamp(this.u[id] + f * dt, -CAP, CAP);
+    }
+    for (let k = 0; k < nz; k++) for (let j = 0; j <= ny; j++) for (let i = 0; i < nx; i++) {
+      const id = this.vIdx(i, j, k);
+      const f = this.vForce[id];
+      if (f === 0 || this.vFixed[id]) continue;
+      if (this.isSolid(i, j - 1, k) || this.isSolid(i, j, k)) continue;
+      this.v[id] = clamp(this.v[id] + f * dt, -CAP, CAP);
+    }
+    for (let k = 0; k <= nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const id = this.wIdx(i, j, k);
+      const f = this.wForce[id];
+      if (f === 0 || this.wFixed[id]) continue;
+      if (this.isSolid(i, j, k - 1) || this.isSolid(i, j, k)) continue;
+      this.w[id] = clamp(this.w[id] + f * dt, -CAP, CAP);
     }
   }
 

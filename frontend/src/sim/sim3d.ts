@@ -89,6 +89,11 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 const HEATER_T = 10; // heater (warm) and AC (cool) use equal magnitude
 const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
+/** Fan thrust as an acceleration on the air in its cells (m/s²). Tuned so a
+ *  medium fan settles at roughly 1 m/s in front of it in open air — about what
+ *  a domestic pedestal fan does — while still being able to stall when it has
+ *  nowhere to push. */
+const FAN_FORCE = 14;
 
 export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   const scene = compileLfmScene(plan);
@@ -230,21 +235,34 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         // pushes existing air and a return only removes it, so neither seeds
         if (isAC || isSupply) seeds.push(cellCenter(i, j, k));
         if (isFan) {
-          // recirculating: two opposite faces (net-zero mass)
-          if (dir[0] !== 0) { const a = sim.uIdx(i, j, k), b = sim.uIdx(i + 1, j, k); sim.uFixed[a] = sim.uFixed[b] = 1; sim.uVal[a] = sim.uVal[b] = dir[0] * speed; }
-          else { const a = sim.wIdx(i, j, k), b = sim.wIdx(i, j, k + 1); sim.wFixed[a] = sim.wFixed[b] = 1; sim.wVal[a] = sim.wVal[b] = dir[2] * speed; }
-          // an oscillating fan sweeps side-to-side: also push air out laterally so
-          // it covers a wide arc instead of a single direction (more room coverage)
+          // A FAN IS NOT A SOURCE OF AIR. It was modelled with fixed-velocity
+          // faces, which PRESCRIBE the flow: the solver was ordered to hold
+          // 1 m/s there no matter what the surrounding air was doing, so the fan
+          // behaved like a vent that manufactures a jet and never loads up.
+          // It is now a body force — it accelerates the air that is already in
+          // the room, and the pressure projection routes the return path around
+          // it. Blocked in, it stalls; in open air, it throws a jet. Nothing is
+          // created, which is exactly the physical distinction.
+          const F = FAN_FORCE * mult;
+          if (dir[0] !== 0) {
+            sim.uForce[sim.uIdx(i, j, k)] += dir[0] * F;
+            sim.uForce[sim.uIdx(i + 1, j, k)] += dir[0] * F;
+          } else {
+            sim.wForce[sim.wIdx(i, j, k)] += dir[2] * F;
+            sim.wForce[sim.wIdx(i, j, k + 1)] += dir[2] * F;
+          }
+          // An oscillating fan sweeps side to side. Averaged over the sweep that
+          // is a broader, weaker push, so spread part of the force laterally
+          // rather than adding more of it — a sweeping fan does not move MORE
+          // air than a fixed one, it spreads the same air over a wider arc.
           if (it.oscillate) {
-            const lat = speed * 0.55;
+            const lat = F * 0.45;
             if (dir[0] !== 0) {
-              const f = sim.wIdx(i, j, k + 1), b = sim.wIdx(i, j, k);
-              sim.wFixed[f] = 1; sim.wVal[f] = lat;
-              sim.wFixed[b] = 1; sim.wVal[b] = -lat;
+              sim.wForce[sim.wIdx(i, j, k + 1)] += lat;
+              sim.wForce[sim.wIdx(i, j, k)] -= lat;
             } else {
-              const f = sim.uIdx(i + 1, j, k), b = sim.uIdx(i, j, k);
-              sim.uFixed[f] = 1; sim.uVal[f] = lat;
-              sim.uFixed[b] = 1; sim.uVal[b] = -lat;
+              sim.uForce[sim.uIdx(i + 1, j, k)] += lat;
+              sim.uForce[sim.uIdx(i, j, k)] -= lat;
             }
           }
         } else {
