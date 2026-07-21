@@ -10,48 +10,16 @@ import type { Rect } from "../floorplan/types";
 export interface StreamlinePaths {
   /** Segment endpoint pairs (even length) for a fat-line in segments mode. */
   points: THREE.Vector3[];
-  /** Per-vertex colours (blue speed gradient) matching `points`. */
-  colors: THREE.Color[];
   /** Fastest speed on any drawn line (m/s). */
   maxSpeed: number;
   /** How many separate lines were drawn. */
   lineCount: number;
 }
 
-// Blue speed ramp. Slow air is a deep, receding navy; fast air is bright cyan.
-// Lightness climbs with speed, so the ramp still reads as "more" on a greyscale
-// print and for a viewer who cannot separate blue from cyan by hue alone.
-const SPEED_STOPS: Array<{ s: number; c: [number, number, number] }> = [
-  { s: 0.0, c: [0.11, 0.20, 0.48] }, // near-still — deep navy
-  { s: 0.15, c: [0.13, 0.35, 0.75] }, // drifting
-  { s: 0.35, c: [0.20, 0.55, 0.93] }, // moving
-  { s: 0.7, c: [0.25, 0.78, 0.97] }, // brisk
-  { s: 1.2, c: [0.65, 0.95, 1.0] }, // jet — near-white cyan
-];
-
-/** Colour for an air speed in m/s, on the blue ramp. */
-export function speedColor(sp: number): [number, number, number] {
-  if (sp <= SPEED_STOPS[0].s) return SPEED_STOPS[0].c;
-  const last = SPEED_STOPS[SPEED_STOPS.length - 1];
-  if (sp >= last.s) return last.c;
-  for (let i = 1; i < SPEED_STOPS.length; i++) {
-    const b = SPEED_STOPS[i];
-    if (sp > b.s) continue;
-    const a = SPEED_STOPS[i - 1];
-    const t = (sp - a.s) / (b.s - a.s);
-    return [a.c[0] + (b.c[0] - a.c[0]) * t, a.c[1] + (b.c[1] - a.c[1]) * t, a.c[2] + (b.c[2] - a.c[2]) * t];
-  }
-  return last.c;
-}
-
-/** The ramp as a CSS gradient, for the legend. */
-export function speedGradientCss(): string {
-  const max = SPEED_STOPS[SPEED_STOPS.length - 1].s;
-  const f = (c: [number, number, number]) =>
-    `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})`;
-  return `linear-gradient(90deg,${SPEED_STOPS.map((s) => `${f(s.c)} ${((s.s / max) * 100).toFixed(1)}%`).join(",")})`;
-}
-export const SPEED_RAMP_MAX = SPEED_STOPS[SPEED_STOPS.length - 1].s;
+/** The one colour every airflow line is drawn in. Flat, not a gradient: the
+ *  shape of the path is what carries the meaning here, and a per-vertex speed
+ *  ramp only made the lines look like they were fading in and out. */
+export const STREAMLINE_BLUE = "#2f7ff0";
 
 interface Vel {
   vx: number;
@@ -123,10 +91,11 @@ function seedPoints(
   maxSeeds: number,
   rooms: Rect[] = [],
   minSpeed: number,
+  seedSep?: number,
 ): THREE.Vector3[] {
   const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
-  const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
+  const sep = seedSep ?? Math.max(built.dx * 0.75, 0.18); // metres between seeds
   // Vent seeds cluster on the AC/supply (many cells, one line each) → thin them
   // by spacing so the source room isn't a tangle of lines.
   for (const s of built.seeds) {
@@ -175,10 +144,9 @@ function seedPoints(
 
 export function buildStreamlinePaths(
   built: Sim3D,
-  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[]; spacing?: number } = {},
+  opts: { maxSeeds?: number; color?: string; roofY?: number; rooms?: Rect[]; spacing?: number; seedSpacing?: number } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
-  const colors: THREE.Color[] = [];
   let maxSpeed = 0;
   let lineCount = 0;
   const sample = makeSampler(built);
@@ -206,12 +174,14 @@ export function buildStreamlinePaths(
   const MIN_POINTS = 8; // and trace a real path, not a stub
   const step = dx * 0.75;
   const maxSteps = 120;
-  // A small seed budget, spread evenly over the rooms. Measured on the example
-  // home at display resolution: 16 seeds yields 8 lines covering all four rooms
-  // (2-4 each) — few enough to follow one at a time, enough to show where the
-  // air goes everywhere in the house. 40 seeds gave 15 lines, which reads as a
-  // thicket rather than a diagram.
-  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 16, opts.rooms ?? [], 0.02);
+  // Seed budget, spread round-robin over the rooms. Measured on the example home
+  // at display resolution, with the spacing and orbit rules doing the thinning:
+  //     16 seeds ->  8 lines,  55 cells covered
+  //    160 seeds -> 27 lines, 128 cells covered, still median 2 lines per 0.5 m
+  // The knot this originally suffered from came from tracers orbiting the fan,
+  // not from the number of lines — that is handled by the orbit detector now, so
+  // the budget can be generous and the picture still reads.
+  const seeds = seedPoints(built, sample, opts.maxSeeds ?? 160, opts.rooms ?? [], 0.02, opts.seedSpacing);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -255,10 +225,7 @@ export function buildStreamlinePaths(
   // screen. Keying the grid in 3D let them each claim their own cell and the
   // view stayed crowded even though the rule "worked".
   //
-  // Measured on the example home at display resolution (dx 0.24), 40 seeds:
-  //   before any spacing   2562 segments   up to 7 lines per 0.5 m cell
-  //   D_SEP 0.55 (plan)     962 segments   up to 4, all four rooms covered
-  const D_SEP = opts.spacing ?? Math.max(dx * 2, 0.55);
+  const D_SEP = opts.spacing ?? Math.max(dx * 0.85, 0.2);
   const MAX_SHARED = 1; // lines an accepted cell may already hold before we stop
   const MAX_SELF = 2; // times a line may RE-ENTER one of its own cells
   const occupancy = new Map<string, number>();
@@ -330,22 +297,14 @@ export function buildStreamlinePaths(
     const divisions = Math.min(80, raw.length * 3);
     const smooth = curve.getPoints(divisions);
 
-    // Per-vertex colour from the LOCAL air speed, so the line itself reports how
-    // fast the air is moving along its length — a flat colour could only say
-    // "air went here", not how it was flowing.
-    const spAt = smooth.map((q) => sample(q.x, q.y, q.z).speed);
-    for (const s of spAt) if (s > maxSpeed) maxSpeed = s;
-    const col = (i: number) => {
-      const [r, g, bl] = speedColor(spAt[i]);
-      return new THREE.Color(r, g, bl);
-    };
-    for (let i = 0; i < smooth.length - 1; i++) {
-      points.push(smooth[i], smooth[i + 1]);
-      colors.push(col(i), col(i + 1));
+    for (const q of smooth) {
+      const s = sample(q.x, q.y, q.z).speed;
+      if (s > maxSpeed) maxSpeed = s;
     }
+    for (let i = 0; i < smooth.length - 1; i++) points.push(smooth[i], smooth[i + 1]);
 
     lineCount++;
   }
 
-  return { points, colors, maxSpeed, lineCount };
+  return { points, maxSpeed, lineCount };
 }
