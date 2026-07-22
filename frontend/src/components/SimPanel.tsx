@@ -58,6 +58,7 @@ export function SimPanel() {
   const chooseSolution = useSceneStore((s) => s.chooseSolution);
   const dismissSolutions = useSceneStore((s) => s.dismissSolutions);
   const logCount = useSceneStore((s) => s.sessionLog.length);
+  const scenarioId = useSceneStore((s) => s.scenarioId);
   const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
@@ -340,6 +341,7 @@ export function SimPanel() {
           setTempRoom={setTempRoom}
           deltas={roomTempDeltas}
           ready={ready}
+          locked={scenarioId !== null}
         />
       )}
       {mode === "contamination" && (
@@ -481,6 +483,7 @@ function TempControls({
   setTempRoom,
   deltas,
   ready,
+  locked,
 }: {
   rooms: FloorPlan["rooms"];
   outdoorTemp: number;
@@ -489,6 +492,7 @@ function TempControls({
   setTempRoom: (id: string | null) => void;
   deltas: Map<string, number>;
   ready: boolean;
+  locked: boolean;
 }) {
   const absOf = (id: string) => (deltas.has(id) ? outdoorTemp + deltas.get(id)! : null);
   const selected = tempRoomId ? rooms.find((r) => r.id === tempRoomId) ?? null : null;
@@ -500,20 +504,29 @@ function TempControls({
         <span>outdoor air</span>
         <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{outdoorTemp.toFixed(0)} °C</span>
       </div>
-      <input
-        type="range"
-        min={-5}
-        max={40}
-        step={1}
-        value={outdoorTemp}
-        onChange={(e) => setOutdoorTemp(Number(e.target.value))}
-        style={{ width: "100%", marginTop: 2 }}
-        title="Outdoor air temperature — the baseline the whole house sits at"
-      />
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
-        <span>−5 °C winter</span>
-        <span>40 °C heatwave</span>
-      </div>
+      {locked ? (
+        // In a study task the weather is part of the scenario. Leaving the
+        // slider live would let a participant "solve" a cooling task by dragging
+        // the outdoor temperature down.
+        <p className="muted-line" style={{ margin: "2px 0 0" }}>Today's weather — fixed for this task.</p>
+      ) : (
+        <>
+          <input
+            type="range"
+            min={-5}
+            max={40}
+            step={1}
+            value={outdoorTemp}
+            onChange={(e) => setOutdoorTemp(Number(e.target.value))}
+            style={{ width: "100%", marginTop: 2 }}
+            title="Outdoor air temperature — the baseline the whole house sits at"
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
+            <span>−5 °C winter</span>
+            <span>40 °C heatwave</span>
+          </div>
+        </>
+      )}
 
       <div className="field" style={{ marginTop: 8 }}>
         <span>show room</span>

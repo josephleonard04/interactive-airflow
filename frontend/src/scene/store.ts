@@ -552,6 +552,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       plan: sc.build(),
       scenarioId: id,
       tools: sc.tools,
+      outdoorTemp: sc.outdoorTemp, // fixed by the task; the UI locks the control
       sketchRegion: null,
       started: true,
       selectedId: null,
