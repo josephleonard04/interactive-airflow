@@ -4,6 +4,7 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import type { Group } from "three";
 import type { PlacedItem } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
+import { canMove } from "../floorplan/scenarios";
 import { Model } from "./models";
 
 // One placed item: a composite furniture/HVAC model plus an invisible click
@@ -31,8 +32,14 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
       : 0;
   });
 
+  // In a study scenario only the task's own devices are draggable. The rest of
+  // the home is scenery: it is there because a real room has furniture in it,
+  // not because the participant is meant to rearrange it.
+  const tools = useSceneStore((s) => s.tools);
+  const draggable = canMove(tools, item.type);
+
   const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "select") return;
+    if (mode !== "select" || !draggable) return;
     e.stopPropagation();
     selectItem(item.id);
     setDragging(item.id);
@@ -44,6 +51,7 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
       rotation={[0, item.rotationY, 0]}
       onPointerDown={onPointerDown}
       onPointerOver={(e) => {
+        if (!draggable) return; // no hover affordance on scenery
         e.stopPropagation();
         setHovered(true);
       }}

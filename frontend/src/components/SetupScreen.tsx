@@ -2,6 +2,7 @@ import { useState } from "react";
 import { MIN_HEIGHT, MIN_LENGTH, MIN_WIDTH } from "../floorplan/home";
 import type { StartMode } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
+import { SCENARIOS, SCENARIO_ORDER } from "../floorplan/scenarios";
 
 // First screen: the homeowner enters their home's footprint (length × width ×
 // height) in metres or feet. On submit we generate the rooms, walls, windows,
@@ -50,6 +51,7 @@ function Field({
 
 export function SetupScreen() {
   const generate = useSceneStore((s) => s.generate);
+  const startScenario = useSceneStore((s) => s.startScenario);
   const [mode, setMode] = useState<StartMode>("example");
   const [unit, setUnit] = useState<Unit>("m");
   const [l, setL] = useState(DEFAULTS.m.l);
@@ -106,6 +108,19 @@ export function SetupScreen() {
           {mode === "blank" ? "Start designing →" : "Create my home →"}
         </button>
         <p className="setup-foot">You can change the size later, or edit walls and furniture anytime.</p>
+
+        {/* Facilitator entry point for the user study. Each scenario loads its
+            own prebuilt home and shows only the controls that task is about. */}
+        <div className="setup-scenarios">
+          <div className="setup-scenarios-label">Study scenarios</div>
+          <div className="setup-scenario-row">
+            {SCENARIO_ORDER.map((id) => (
+              <button key={id} className="setup-scenario" onClick={() => startScenario(id)} title={SCENARIOS[id].brief}>
+                {SCENARIOS[id].title}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

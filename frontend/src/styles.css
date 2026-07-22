@@ -660,3 +660,17 @@ button.setup-go:active {
   background: var(--accent-soft);
   color: var(--accent-ink-soft);
 }
+
+/* Study-scenario launcher on the setup screen */
+.setup-scenarios { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.setup-scenarios-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+}
+.setup-scenario-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.setup-scenario {
+  flex: 1 1 30%; padding: 8px 10px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--line); border-radius: 9px; background: #fff;
+  color: var(--ink); cursor: pointer; text-align: left; line-height: 1.35;
+}
+.setup-scenario:hover { border-color: var(--accent); background: rgba(42,157,143,0.06); }
