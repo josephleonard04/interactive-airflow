@@ -254,7 +254,7 @@ function doorLeafSolids(o: Opening): SolidBox[] {
 }
 
 /** The void box of an opening (the hole it cuts), thickened across the wall. */
-function openingBox(o: Opening, thickness: number): Box {
+export function openingBox(o: Opening, thickness: number): Box {
   const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // constant x → spans z
   const t = thickness / 2 + 0.02;
   if (vertical) {

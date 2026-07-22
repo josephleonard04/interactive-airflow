@@ -1,4 +1,5 @@
-import { compileLfmScene, type Box } from "../bc/lfm";
+import { compileLfmScene, openingBox, type Box } from "../bc/lfm";
+import { WALL_THICKNESS } from "../floorplan/geometry";
 import type { FloorPlan, PlacedItem, Rect } from "../floorplan/types";
 import { Euler3D } from "./euler3d";
 
@@ -133,6 +134,24 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   };
 
   for (const s of scene.solids) for (const [i, j, k] of cellsOf(s.world)) sim.solid[sim.cIdx(i, j, k)] = 1;
+
+  // An OPEN opening is a hole, and it must stay a hole. Carve every open door
+  // and window back out after the solids are stamped.
+  //
+  // Without this the door's own swung leaf could seal the doorway it belongs to.
+  // A leaf is ~0.9 m long; on the coarse grid the optimizer and the goal verdict
+  // run at (dx = 0.4 m) that is ~2 cells, and it lands directly in front of a
+  // doorway that is itself only 2 cells wide — so the one open cell led straight
+  // into the leaf and the rooms were disconnected. Rooms beyond an open door
+  // then read as completely unreachable: no airflow, and a temperature of
+  // exactly the outdoor value however the doors were set.
+  //
+  // The leaf is still solid everywhere it actually stands, which is beside the
+  // doorway; it just cannot plug the gap it swings out of.
+  for (const o of [...plan.doors, ...plan.windows]) {
+    if (!o.open) continue;
+    for (const [i, j, k] of cellsOf(openingBox(o, WALL_THICKNESS))) sim.solid[sim.cIdx(i, j, k)] = 0;
+  }
 
   // solid ceiling at the roof line so air stays inside the house (no escaping
   // above the roof; warm air pools under the ceiling, which is correct)

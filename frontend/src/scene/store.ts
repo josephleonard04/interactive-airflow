@@ -9,6 +9,7 @@ import {
   rectContains,
 } from "../floorplan/geometry";
 import { generateEmpty, generateHome } from "../floorplan/home";
+import { FREE_TOOLS, SCENARIOS, type ScenarioId, type ScenarioTools } from "../floorplan/scenarios";
 import { autoNameRooms, recomputeRooms } from "../floorplan/detectRooms";
 import {
   checkBackendHealth,
@@ -53,6 +54,13 @@ export interface SceneState {
   future: FloorPlan[];
 
   generate: (size: HomeSize, mode: StartMode) => void;
+
+  /** Active study scenario, or null for the normal unrestricted app. */
+  scenarioId: ScenarioId | null;
+  /** Which controls the active scenario allows (all of them when null). */
+  tools: ScenarioTools;
+  startScenario: (id: ScenarioId) => void;
+  exitScenario: () => void;
   openSetup: () => void;
   setMode: (mode: EditMode) => void;
   undo: () => void;
@@ -523,6 +531,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       plan: mode === "blank" ? generateEmpty(size) : generateHome(size),
       sketchRegion: null,
       started: true,
+      scenarioId: null,
+      tools: FREE_TOOLS,
       selectedId: null,
       selectedWallId: null,
       selectedOpeningId: null,
@@ -532,6 +542,37 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       past: [],
       future: [],
     }),
+
+  scenarioId: null,
+  tools: FREE_TOOLS,
+
+  startScenario: (id) => {
+    const sc = SCENARIOS[id];
+    set({
+      plan: sc.build(),
+      scenarioId: id,
+      tools: sc.tools,
+      sketchRegion: null,
+      started: true,
+      selectedId: null,
+      selectedWallId: null,
+      selectedOpeningId: null,
+      draggingId: null,
+      draggingOpeningId: null,
+      mode: "select",
+      simActive: false,
+      simReady: false,
+      solutionOptions: [],
+      solutionGoal: null,
+      solutionTargets: [],
+      pendingChange: null,
+      sessionLog: [{ t: Date.now(), kind: "preset", data: { scenario: id, title: sc.title } }],
+      past: [],
+      future: [],
+    });
+  },
+
+  exitScenario: () => set({ scenarioId: null, tools: FREE_TOOLS, started: false }),
 
   openSetup: () => set({ started: false }),
 

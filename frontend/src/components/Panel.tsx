@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
+import { SCENARIOS } from "../floorplan/scenarios";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
@@ -51,6 +52,17 @@ export function Panel() {
   const removeOpening = useSceneStore((s) => s.removeOpening);
   const toggleOpening = useSceneStore((s) => s.toggleOpening);
 
+  const scenarioId = useSceneStore((s) => s.scenarioId);
+  const tools = useSceneStore((s) => s.tools);
+  const scenario = scenarioId ? SCENARIOS[scenarioId] : null;
+
+  // Palette filtered to whatever this task is about. Outside a scenario
+  // `addable` is empty, which means "no restriction" — the full palette.
+  const palette = useMemo(() => {
+    if (tools.addable.length === 0) return scenarioId ? [] : PALETTE;
+    return [{ group: "For this task", types: tools.addable.filter((t) => CATALOG[t]) }];
+  }, [tools.addable, scenarioId]);
+
   const selected = plan.items.find((it) => it.id === selectedId) ?? null;
   const openings = useMemo(() => [...plan.doors, ...plan.windows], [plan.doors, plan.windows]);
   const selectedOpening = openings.find((o) => o.id === selectedOpeningId) ?? null;
@@ -100,9 +112,11 @@ export function Panel() {
           <span>
             {length.toFixed(1)} × {width.toFixed(1)} × {height.toFixed(1)} m
           </span>
-          <button className="ghost" onClick={openSetup}>
-            Change size
-          </button>
+          {tools.resize && (
+            <button className="ghost" onClick={openSetup}>
+              Change size
+            </button>
+          )}
         </div>
         <div className="legend">
           {plan.rooms.map((r) => (
@@ -114,18 +128,32 @@ export function Panel() {
         </div>
       </section>
 
+      {/* The brief stays on screen for the whole task — participants should not
+          have to remember it, and re-reading it is not a finding. */}
+      {scenario && (
+        <section className="selected-box" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <h2 style={{ marginBottom: 4 }}>{scenario.title}</h2>
+          <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 6px" }}>{scenario.brief}</p>
+          <p className="muted-line" style={{ margin: 0 }}>
+            <b>You can change:</b> {scenario.youCanChange}
+          </p>
+        </section>
+      )}
+
       <section>
         <h2>Edit the space</h2>
         <div className="tools">
           <button className={mode === "select" ? "tool active" : "tool"} onClick={() => setMode("select")}>
             ✋ Move / select
           </button>
-          <button
-            className={mode === "draw-wall" ? "tool active" : "tool"}
-            onClick={() => setMode(mode === "draw-wall" ? "select" : "draw-wall")}
-          >
-            ➕ Add wall
-          </button>
+          {tools.walls && (
+            <button
+              className={mode === "draw-wall" ? "tool active" : "tool"}
+              onClick={() => setMode(mode === "draw-wall" ? "select" : "draw-wall")}
+            >
+              ➕ Add wall
+            </button>
+          )}
         </div>
         <div className="tools" style={{ marginTop: 6 }}>
           <button className="tool" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
@@ -235,23 +263,29 @@ export function Panel() {
         </section>
       )}
 
-      <section>
-        <h2>Add furniture &amp; air</h2>
-        {PALETTE.map((group) => (
-          <div key={group.group} className="palette-group">
-            <div className="palette-label">{group.group}</div>
-            <div className="chips">
-              {group.types.map((t) => (
-                <button key={t} className="chip" onClick={() => addItem(t)} title={`Add ${CATALOG[t].label}`}>
-                  <span className="swatch" style={{ background: itemColor(t) }} />
-                  {CATALOG[t].label}
-                </button>
-              ))}
+      {/* In a study scenario the home is already built and furnished, so the
+          palette is filtered to the few things the task is actually about —
+          offering "add a bed" in a task about vent placement is noise the
+          participant has to read past. Empty allowlist hides it entirely. */}
+      {palette.length > 0 && (
+        <section>
+          <h2>{scenarioId ? "Add" : "Add furniture & air"}</h2>
+          {palette.map((group) => (
+            <div key={group.group} className="palette-group">
+              {!scenarioId && <div className="palette-label">{group.group}</div>}
+              <div className="chips">
+                {group.types.map((t) => (
+                  <button key={t} className="chip" onClick={() => addItem(t)} title={`Add ${CATALOG[t].label}`}>
+                    <span className="swatch" style={{ background: itemColor(t) }} />
+                    {CATALOG[t].label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-        <p className="muted-line">New items drop in the centre — drag them where you want.</p>
-      </section>
+          ))}
+          <p className="muted-line">New items drop in the centre — drag them where you want.</p>
+        </section>
+      )}
 
       <section>
         <h2>Doors &amp; windows</h2>

@@ -21,10 +21,10 @@ export const MIN_LENGTH = 5;
 export const MIN_WIDTH = 4;
 export const MIN_HEIGHT = 2.3;
 
-type Side = "north" | "south" | "east" | "west";
-type IdGen = (p: string) => string;
+export type Side = "north" | "south" | "east" | "west";
+export type IdGen = (p: string) => string;
 
-function idGen(): IdGen {
+export function idGen(): IdGen {
   const c: Record<string, number> = {};
   return (p) => `${p}-${(c[p] = (c[p] ?? 0) + 1)}`;
 }
@@ -81,7 +81,7 @@ function freeIntervals(w: WallSeg): Array<[number, number]> {
   return out;
 }
 
-function placeDoor(walls: WallSeg[], gen: IdGen, a: RoomDef, b: RoomDef, doors: Opening[]): void {
+export function placeDoor(walls: WallSeg[], gen: IdGen, a: RoomDef, b: RoomDef, doors: Opening[]): void {
   const e = sharedEdge(a, b);
   if (!e) return;
   const mid = (e.start + e.end) / 2;
@@ -91,7 +91,7 @@ function placeDoor(walls: WallSeg[], gen: IdGen, a: RoomDef, b: RoomDef, doors: 
   doors.push(door);
 }
 
-function placeEntrance(walls: WallSeg[], gen: IdGen, room: RoomDef, doors: Opening[]): void {
+export function placeEntrance(walls: WallSeg[], gen: IdGen, room: RoomDef, doors: Opening[]): void {
   const ext = walls
     .filter((w) => w.roomId === room.id && w.exterior && wallLen(w) >= DOOR_WIDTH + 0.5)
     .sort((p, q) => wallLen(q) - wallLen(p));
@@ -105,7 +105,7 @@ function placeEntrance(walls: WallSeg[], gen: IdGen, room: RoomDef, doors: Openi
 }
 
 /** One window per room, centred on the widest free run of its longest exterior wall. */
-function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[]): Opening[] {
+export function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[]): Opening[] {
   const windows: Opening[] = [];
   for (const room of rooms) {
     const ext = walls.filter((w) => w.roomId === room.id && w.exterior && wallLen(w) >= WINDOW_WIDTH + 0.6);
@@ -137,7 +137,7 @@ function placeWindows(walls: WallSeg[], gen: IdGen, rooms: RoomDef[]): Opening[]
 
 type DoorsBySide = Record<Side, Array<[number, number]>>;
 
-function doorsForRoom(room: RoomDef, openings: Opening[]): DoorsBySide {
+export function doorsForRoom(room: RoomDef, openings: Opening[]): DoorsBySide {
   const { x, z, w, d } = room.rect;
   const out: DoorsBySide = { north: [], south: [], east: [], west: [] };
   const eq = (a: number, b: number) => Math.abs(a - b) < 1e-3;
@@ -174,7 +174,7 @@ function freeCentre(lo: number, hi: number, len: number, frac: number, doors: Ar
 
 const ROT: Record<Side, number> = { south: 0, north: Math.PI, west: Math.PI / 2, east: -Math.PI / 2 };
 
-interface PlaceOpts {
+export interface PlaceOpts {
   category?: "furniture" | "hvac";
   mount?: "floor" | "wall" | "ceiling";
   y?: number;
@@ -185,7 +185,7 @@ interface PlaceOpts {
 
 /** Place an item against a wall (back to the wall, facing into the room),
  *  size = [width-along-wall, height, depth-into-room]. */
-function against(
+export function against(
   gen: IdGen,
   room: RoomDef,
   ctx: DoorsBySide,
@@ -233,7 +233,7 @@ function against(
 /** Place an item flush into a room CORNER: back against the `side` wall and
  *  shoulder against the adjacent wall at `end` of that wall. Real kitchen
  *  counters and wardrobes sit in corners, not floating along a wall mid-span. */
-function inCorner(
+export function inCorner(
   gen: IdGen,
   room: RoomDef,
   side: Side,
