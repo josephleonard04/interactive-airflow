@@ -53,6 +53,12 @@ export interface Scenario {
   id: ScenarioId;
   /** Short label for the facilitator. */
   title: string;
+  /** Outdoor air temperature (°C) for this task. FIXED — the participant must
+   *  not be able to change the weather, or a cooling task is "solved" by
+   *  dragging the outdoor slider down. */
+  outdoorTemp: number;
+  /** Running-cost ceiling, or null if this task has no budget. */
+  costBudget?: number;
   /** Read to the participant verbatim — comfort goal only, no physics. */
   brief: string;
   /** What the participant may change, in plain words, shown in the panel. */
@@ -254,6 +260,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   design: {
     id: "design",
     title: "1 · Plan the apartment",
+    outdoorTemp: 33,
     brief:
       "You're planning this apartment before moving in. The kitchen and bathroom " +
       "are fixed — the rest is one open space. Divide it so there's a bedroom " +
@@ -270,6 +277,8 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   twoRooms: {
     id: "twoRooms",
     title: "2 · Two bedrooms, one AC",
+    outdoorTemp: 33,
+    costBudget: 3.2,
     brief:
       "It's a hot afternoon and both bedrooms are in use. There's one air " +
       "conditioner. Make both bedrooms comfortable to be in — and nobody wants " +
@@ -288,6 +297,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   smell: {
     id: "smell",
     title: "3 · Cooking smell next door",
+    outdoorTemp: 31,
     brief:
       "You're cooking something strong-smelling, and the kitchen opens straight " +
       "onto the bedroom where someone is sleeping. Keep the smell out of the " +

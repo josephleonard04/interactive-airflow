@@ -1,6 +1,6 @@
 import { compileLfmScene, openingBox, type Box } from "../bc/lfm";
 import { WALL_THICKNESS } from "../floorplan/geometry";
-import type { FloorPlan, PlacedItem, Rect } from "../floorplan/types";
+import type { FloorPlan, Opening, PlacedItem, Rect } from "../floorplan/types";
 import { Euler3D } from "./euler3d";
 
 // Voxelise the editor's home into a full 3D Euler simulation:
@@ -17,6 +17,45 @@ import { Euler3D } from "./euler3d";
 export interface Sim3DOptions {
   targetCells?: number;
   iterations?: number;
+  /** |indoor − outdoor| in K, driving stack exchange through open windows and
+   *  exterior doors. Bigger difference, stronger natural ventilation. */
+  openingDriveDT?: number;
+}
+
+/** Outward normal of an exterior opening (points away from the room). */
+function outwardNormalOf(plan: FloorPlan, o: Opening): [number, number, number] {
+  const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+  const mid = vertical ? [o.a[0], (o.a[1] + o.b[1]) / 2] : [(o.a[0] + o.b[0]) / 2, o.a[1]];
+  const inAnyRoom = (x: number, z: number) =>
+    plan.rooms.some(
+      (r) => x > r.rect.x + 1e-3 && x < r.rect.x + r.rect.w - 1e-3 && z > r.rect.z + 1e-3 && z < r.rect.z + r.rect.d - 1e-3,
+    );
+  if (vertical) return inAnyRoom(mid[0] + 0.1, mid[1]) ? [-1, 0, 0] : [1, 0, 0];
+  return inAnyRoom(mid[0], mid[1] + 0.1) ? [0, 0, -1] : [0, 0, 1];
+}
+
+/** Fix the face of cell (i,j,k) on the `dir` side to carry `speed` along dir. */
+function setFaceInto(
+  sim: Euler3D,
+  i: number,
+  j: number,
+  k: number,
+  dir: [number, number, number],
+  speed: number,
+): void {
+  if (dir[0] !== 0) {
+    const f = dir[0] > 0 ? sim.uIdx(i, j, k) : sim.uIdx(i + 1, j, k);
+    sim.uFixed[f] = 1;
+    sim.uVal[f] = dir[0] * speed;
+  } else if (dir[1] !== 0) {
+    const f = dir[1] > 0 ? sim.vIdx(i, j, k) : sim.vIdx(i, j + 1, k);
+    sim.vFixed[f] = 1;
+    sim.vVal[f] = dir[1] * speed;
+  } else {
+    const f = dir[2] > 0 ? sim.wIdx(i, j, k) : sim.wIdx(i, j, k + 1);
+    sim.wFixed[f] = 1;
+    sim.wVal[f] = dir[2] * speed;
+  }
 }
 
 /** The fidelity every REPORTED temperature is computed at — the numbers on the
@@ -188,6 +227,45 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       sim.open[c] = 1;
       ambient[c] = 1; // exterior opening = sink for both temperature and smell
     }
+
+  // A REAL WINDOW EXCHANGES AIR BOTH WAYS AT ONCE.
+  //
+  // Openings used to be single-signed outlets with nothing driving them, so an
+  // open window on its own produced exactly 0.0000 m/s — it could only ever let
+  // out air that something else had pushed in. That is why every task collapsed
+  // onto a door or a vent: the window was never a lever.
+  //
+  // Warm air leaves through the top of an opening and cool air enters through
+  // the bottom, with a neutral plane in between (the stack effect), plus
+  // turbulent exchange from wind. So: drive INFLOW across the lower half of each
+  // open exterior opening and leave the upper half as the free boundary it
+  // already is. One window now ventilates by itself, two windows on opposite
+  // walls set up a through-draught, and two close together exchange mostly with
+  // each other and barely sweep the room — which is the short-circuit the whole
+  // ventilation class of tasks turns on.
+  //
+  // Speed is a wind floor plus a stack term growing with |indoor − outdoor|:
+  // v = WIND + K·√(g·h·ΔT/T̄), the standard buoyancy-driven form, coarsened.
+  const dT = Math.abs(opts.openingDriveDT ?? 8);
+  const stack = 0.6 * Math.sqrt((9.81 * 0.6 * dT) / 293);
+  const exchange = clampf(0.12 + stack, 0.12, 0.9);
+  for (const o of [...plan.doors, ...plan.windows]) {
+    if (!o.open || !o.rooms.includes("outside")) continue;
+    const box = openingBox(o, WALL_THICKNESS);
+    const midY = (box.min[1] + box.max[1]) / 2;
+    const inward = outwardNormalOf(plan, o).map((v) => -v) as [number, number, number];
+    for (const [i, j, k] of cellsOf(box)) {
+      const [, wy] = cellCenter(i, j, k);
+      if (wy > midY) continue; // upper half stays a free outlet
+      const c = sim.cIdx(i, j, k);
+      sim.solid[c] = 0;
+      // lower half: prescribe inflow, and stop it acting as a pressure sink or
+      // the projection would just cancel the air we are pushing in
+      sim.open[c] = 0;
+      ambient[c] = 1; // still outdoor air: neutral temperature, no odour
+      setFaceInto(sim, i, j, k, inward, exchange);
+    }
+  }
 
   const itemAabb = (it: PlacedItem): Box => {
     const [cx, cy, cz] = it.position;
@@ -512,6 +590,58 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     }
   }
   return { temp, smell };
+}
+
+/** Mean of a per-cell field over an arbitrary ZONE — a corner, a bed, a couch —
+ *  rather than a whole room.
+ *
+ *  A room mean can look perfectly fine while the corner the air never reaches
+ *  stays stale, and that corner is exactly what a ventilation task is about. It
+ *  is also how a draught constraint has to be scored: what matters is the air
+ *  over the pillow, not the average of the bedroom. `yRange` defaults to the
+ *  occupied band (0.2–1.8 m), because nobody cares what the air is doing at
+ *  ankle height under the bed or up against the ceiling. */
+export function zoneMean(
+  s: Sim3D,
+  field: Float32Array,
+  zone: Rect,
+  yRange: [number, number] = [0.2, 1.8],
+): number | null {
+  const { sim, nx, ny, nz, cellCenter, inside } = s;
+  let sum = 0;
+  let n = 0;
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const c = sim.cIdx(i, j, k);
+        if (sim.solid[c] || !inside[c]) continue;
+        const [x, y, z] = cellCenter(i, j, k);
+        if (y < yRange[0] || y > yRange[1]) continue;
+        if (x < zone.x || x > zone.x + zone.w || z < zone.z || z > zone.z + zone.d) continue;
+        sum += field[c];
+        n++;
+      }
+  return n > 0 ? sum / n : null;
+}
+
+/** Mean AIR SPEED over a zone — the draught measure. */
+export function zoneSpeed(s: Sim3D, zone: Rect, yRange: [number, number] = [0.2, 1.8]): number | null {
+  const { sim, nx, ny, nz, cellCenter, inside } = s;
+  let sum = 0;
+  let n = 0;
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const c = sim.cIdx(i, j, k);
+        if (sim.solid[c] || !inside[c]) continue;
+        const [x, y, z] = cellCenter(i, j, k);
+        if (y < yRange[0] || y > yRange[1]) continue;
+        if (x < zone.x || x > zone.x + zone.w || z < zone.z || z > zone.z + zone.d) continue;
+        const [u, v, w] = sim.velocityAt(i, j, k);
+        sum += Math.hypot(u, v, w);
+        n++;
+      }
+  return n > 0 ? sum / n : null;
 }
 
 /** Mean of a per-cell field over each room's interior air, keyed by room id.
