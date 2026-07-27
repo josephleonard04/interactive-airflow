@@ -344,36 +344,49 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     id: "winter",
     title: "Single-bedroom home · Temperature (winter) · Design",
     outdoorTemp: 2,
+    // WHY THE PARTICIPANT MAY MOVE WINDOWS. "You rent this place" cannot justify
+    // repositioning glazing, so the task is set at the moment when that really is
+    // still an open choice: the home is built and the walls and doors are fixed
+    // by the structure, but the glazing has not been fitted yet. That is how a
+    // real build runs — the structural plan is frozen long before the window
+    // schedule is — and it is also the moment a buyer is actually asked where
+    // they want the windows.
     brief:
-      "It's 2 °C outside and the bedroom is freezing — the cold pours in through " +
-      "its window. There's one heater, in the living room. Get the bedroom warm " +
-      "and comfortable without letting the living room get cold.",
-    youCanChange: "Place the heater and the fan, and open, close or move doors and windows.",
+      "You're finishing this newly built home before you move in. The walls and " +
+      "doors are set, but the windows aren't fitted yet, and there's one heater " +
+      "and one fan to position. It's 2 °C outside, and glass is where a home " +
+      "loses its heat. Make both the bedroom and the living room comfortable.",
+    youCanChange:
+      "Place the heater and the fan, and add, remove or move the windows. Walls and doors are fixed.",
     tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, resize: false },
     viz: { maxSeeds: 8 },
-    // Measured on this layout at 2 °C outdoors (living / bedroom).
+    // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
+    // glazing modelled. THREE levers, and medium power needs at least two of them.
     //
-    // Heater placement, medium, no fan:
-    //   far-left corner        18.7 / 10.0    bedroom fails badly
-    //   by the living window   18.8 / 13.8    still fails
-    //   beside the doorway     19.2 / 19.2    PASS
-    //   inside the bedroom     14.3 / 24.7    the failure just inverts
-    // Fan placement, aimed through the doorway, adds to the bedroom:
-    //   heater by the window   13.8 -> 16.2   (+2.4, still short on medium)
-    //   heater by the doorway  19.2 -> 19.5   PASS with margin
-    //   heater by window, HIGH 19.4           PASS — the brute-force route
-    // Shutting the door pins the bedroom at exactly 2 °C, so the documented wrong
-    // instinct scores as the total failure it is.
+    // Heater placement (medium, fan aimed through the doorway):
+    //   far-left corner       18.0 /  9.1   bedroom fails badly
+    //   under the living window 18.1 / 14.6  still fails — see note below
+    //   beside the doorway    18.5 / 17.3   close, but short
+    // Window handling (heater at the doorway, medium, fan on):
+    //   bedroom window as-built   17.3
+    //   slid to the far end       18.0   PASS — cold zone away from the doorway
+    //   bedroom window removed    19.5   PASS — no glazing, no loss
+    // Power:
+    //   HIGH at the doorway + fan  22.3 / 21.0  PASS without touching the glazing
     //
-    // So BOTH placements are levers and neither alone is the whole answer: the
-    // heater decides how much warmth reaches the doorway, the fan decides how
-    // much of it gets through. Two routes pass, which is deliberate — a task with
-    // exactly one answer tells us nothing about how people search.
+    // NOTE on "put the heater under the window", which is the real-world instinct
+    // and a correct one — but for COMFORT, not for mean temperature. A radiator
+    // under glazing cancels the cold downdraught you would feel sitting there; it
+    // actually loses slightly more energy, and it does nothing for a room down the
+    // hall. Here it measures worse (14.6 vs 17.3) because the heater ends up both
+    // in the coldest part of the room and furthest from the doorway the warmth has
+    // to travel through. Worth watching in the study: participants who reason this
+    // way are right about buildings and wrong about this goal.
     success:
-      "BOTH rooms ≥ 18 °C at 2 °C outdoors — which needs the heater AND the fan " +
-      "placed together: the heater near the open doorway so the warmth reaches it, " +
-      "and the fan aimed through the doorway to carry it into the bedroom. Putting " +
-      "the heater in either room's far corner fails, and so does shutting the door.",
+      "BOTH rooms ≥ 18 °C at 2 °C outdoors. Three levers and no single one is " +
+      "enough on medium: the heater near the doorway so warmth reaches it, the fan " +
+      "aimed through the doorway to carry it, and the bedroom glazing moved away " +
+      "from that path (or dropped). Turning the heater to high also passes.",
     build: buildWinter,
   },
   summer: {
