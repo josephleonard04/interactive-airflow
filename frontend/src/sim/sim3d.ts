@@ -98,6 +98,13 @@ export interface Sim3D {
    *  would read as the exhaust blowing); streamlines seed here and trace
    *  upstream, which is what draws air visibly converging into the vent. */
   sinks: Array<[number, number, number]>;
+  /** Cells at the GLASS of an exterior window. Glazing is the weak point in a
+   *  wall: in winter its inner surface sits far below room temperature, so it
+   *  chills the air touching it, that air sinks, and a cold draught pools under
+   *  the window. Closed windows used to be plain wall — thermally inert — which
+   *  made "the cold pours in through the window" untrue and made where a window
+   *  sits irrelevant to a heating task. */
+  glass: number[];
   /** Heat (red) / cold (blue) source locations, to anchor the temperature view. */
   markers: Array<{ pos: [number, number, number]; kind: "hot" | "cold" }>;
 }
@@ -149,6 +156,15 @@ const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
  *  is not what medium on a real heater does: medium is the everyday setting that
  *  holds a room comfortable, and high is the extra push for a cold snap. */
 const HEATER_POWER: Record<number, number> = { 1: 0.72, 2: 1.3, 3: 1.6 };
+/** Temperature of a window's inner glass surface, as a delta from outdoor. Glass
+ *  is the coldest surface in a heated room in winter: it sits a few degrees ABOVE
+ *  the outside air (the pane is not the outdoors) but far below the room, so the
+ *  air against it is chilled and sinks. That downdraught is the whole reason
+ *  radiators are traditionally put under windows. Slightly below outdoor here so
+ *  it registers as a cold source for the buoyancy step; the REPORTED temperature
+ *  never dips under outdoor, because geodesicFields treats glass as a heat-loss
+ *  surface (attenuating toward outdoor) rather than as a cold source. */
+const GLASS_DT = -4;
 /** Fan thrust as an acceleration on the air in its cells (m/s²). Tuned so a
  *  medium fan settles at roughly 1 m/s in front of it in open air — about what
  *  a domestic pedestal fan does — while still being able to stall when it has
@@ -266,6 +282,33 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   //
   // Speed is a wind floor plus a stack term growing with |indoor − outdoor|:
   // v = WIND + K·√(g·h·ΔT/T̄), the standard buoyancy-driven form, coarsened.
+  // COLD GLASS. Every exterior window chills the air against it, whether it is
+  // open or shut — a shut window is not a wall, it is the thinnest part of the
+  // envelope. Marked before the open-window inflow below so an open window is
+  // both a cold surface and an air exchange.
+  // The window box itself lands INSIDE the wall (a shut window is never carved
+  // out of the solids), so those cells are all solid and marking them would do
+  // nothing. What matters is the air ON THE ROOM SIDE of the pane — that is what
+  // gets chilled — so take the non-solid indoor neighbours of the box.
+  const glass: number[] = [];
+  const glassSeen = new Set<number>();
+  for (const o of plan.windows) {
+    if (!o.rooms.includes("outside")) continue;
+    for (const [i, j, k] of cellsOf(openingBox(o, WALL_THICKNESS))) {
+      for (const [di, dj, dk] of [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]] as const) {
+        const a = i + di, b2 = j + dj, d2 = k + dk;
+        if (a < 0 || b2 < 0 || d2 < 0 || a >= nx || b2 >= ny || d2 >= nz) continue;
+        const c = sim.cIdx(a, b2, d2);
+        if (sim.solid[c] || !inside[c] || glassSeen.has(c)) continue;
+        glassSeen.add(c);
+        glass.push(c);
+        // cold surface for the buoyancy step: air here is chilled and sinks
+        sim.tempFixed[c] = 1;
+        sim.tempVal[c] = GLASS_DT;
+      }
+    }
+  }
+
   const dT = Math.abs(opts.openingDriveDT ?? 8);
   const stack = 0.6 * Math.sqrt((9.81 * 0.6 * dT) / 293);
   const exchange = clampf(0.12 + stack, 0.12, 0.9);
@@ -460,7 +503,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -580,21 +623,34 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   const SMELL_TAU = 9;
   const SINK_LAMBDA = 0.7; // smell drops to ~0 within ~3 cells of an open window/vent
 
+  // Glazing is HEAT LOSS, not a cold source. As a source it would drag the
+  // reported temperature below the outdoor air, which a closed window cannot do.
+  // Modelled instead as an attenuation toward outdoor with distance from the
+  // glass: right at the pane most of the room's warmth is given up, a metre away
+  // almost none. Same treatment cools a summer room's cool air near the glass
+  // (heat gain), so it is correct in both seasons.
+  const glassSet = new Set(s.glass);
+  const GLASS_LOSS = 0.6;   // fraction of the local delta surrendered AT the pane
+  const GLASS_LAMBDA = 0.8; // metres — how far the cold zone reaches into the room
+
   // temperature: hot (heater) & cold (AC) sources carried by the airflow
   const hotSeeds: number[] = [], coldSeeds: number[] = [];
   let hotMag = 0, coldMag = 0;
-  for (let c = 0; c < n3; c++) if (sim.tempFixed[c]) {
+  for (let c = 0; c < n3; c++) if (sim.tempFixed[c] && !glassSet.has(c)) {
     if (sim.tempVal[c] > 0) { hotSeeds.push(c); hotMag = Math.max(hotMag, sim.tempVal[c]); }
     else if (sim.tempVal[c] < 0) { coldSeeds.push(c); coldMag = Math.max(coldMag, -sim.tempVal[c]); }
   }
   const dHot = hotSeeds.length ? costFromSources(hotSeeds) : null;
   const dCold = coldSeeds.length ? costFromSources(coldSeeds) : null;
+  const dGlass = s.glass.length ? bfs(s.glass) : null;
   const temp = new Float32Array(n3);
   for (let c = 0; c < n3; c++) {
     if (sim.solid[c]) continue;
     let t = 0;
     if (dHot && dHot[c] !== Infinity) t += hotMag * Math.exp(-dHot[c] / TAU);
     if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / TAU);
+    // heat bleeding out through the glazing, strongest right at the pane
+    if (dGlass && dGlass[c] !== Infinity) t *= 1 - GLASS_LOSS * Math.exp(-dGlass[c] / GLASS_LAMBDA);
     temp[c] = t;
   }
 
