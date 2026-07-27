@@ -8,6 +8,7 @@ import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
 import { STREAMLINE_BLUE, buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
+import { SCENARIOS, VIZ_DEFAULT } from "../floorplan/scenarios";
 import { FLOW_RENDER_ORDER } from "../viz/layers";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
@@ -123,19 +124,25 @@ export function FlowField3D() {
     [plan.items],
   );
 
+  // Line density is a per-task setting (see Scenario.viz) — outside a task, and
+  // for tasks that don't override it, VIZ_DEFAULT applies.
+  const scenarioId = useSceneStore((s) => s.scenarioId);
+  const vizMaxSeeds =
+    (scenarioId ? SCENARIOS[scenarioId].viz?.maxSeeds : undefined) ?? VIZ_DEFAULT.maxSeeds;
+
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
     () =>
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          maxSeeds: 8,
+          maxSeeds: vizMaxSeeds,
           rooms: plan.rooms.map((r) => r.rect),
           gateways,
           obstacles,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways, obstacles],
+    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
