@@ -131,7 +131,15 @@ function nearestFreeCell(
 }
 const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
-const HEATER_T = 10; // heater (warm) and AC (cool) use equal magnitude
+// Heating and cooling are NOT symmetric, because the job is not symmetric: a
+// winter heater lifts a room from ~2 °C to ~20 °C (+18 K), while a summer AC
+// pulls 33 °C down to ~26 °C (−7 K). They were both ±10, which made every
+// heating task literally unwinnable — with the heater at maximum the living
+// room only reached 12.5 °C and the far bedroom 8.4 °C against a "≥ 18 °C"
+// goal, because ±10 is the delta AT THE SOURCE and the room mean is well under
+// it. The heater is sized so a room containing it settles around 20–22 °C at
+// 2 °C outdoors; the AC is unchanged, since it was already landing correctly.
+const HEATER_T = 19;
 const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 /** Fan thrust as an acceleration on the air in its cells (m/s²). Tuned so a

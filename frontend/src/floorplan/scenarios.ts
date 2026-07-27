@@ -76,6 +76,12 @@ export interface Scenario {
   /** What the participant may change, in plain words, shown in the panel. */
   youCanChange: string;
   tools: ScenarioTools;
+  /** Per-task airflow-visualization tuning. Line density is a per-task judgement
+   *  — a two-room home with a doorway path needs far fewer lines to read clearly
+   *  than a single room does — so it is set here rather than globally. Omitted =
+   *  VIZ_DEFAULT. (Obstacle/wall clipping is NOT tunable: a line through a couch
+   *  is wrong everywhere.) */
+  viz?: { maxSeeds?: number };
   /** Researcher-facing: what counts as done. Not shown to the participant.
    *  NOTE: thresholds are provisional until calibrated by running the sim. */
   success: string;
@@ -344,10 +350,17 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "and comfortable without letting the living room get cold.",
     youCanChange: "Place the heater and the fan, and open, close or move doors and windows.",
     tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, resize: false },
+    viz: { maxSeeds: 8 },
+    // Measured on this layout at 2 °C outdoors, heater on high. Heater in the far
+    // corner of the living room (the instinct): 23.3 / 12.0 — living fine, bedroom
+    // fails. Heater moved into the bedroom: 14.3 / 24.7 — the failure inverts.
+    // Heater near the doorway, so the warmth is delivered THROUGH it: 22.8 / 21.2
+    // — both pass. Shutting the door pins the bedroom at exactly 2 °C, i.e. the
+    // documented wrong instinct is scored as the total failure it is.
     success:
-      "Bedroom ≥ 18 °C at 2 °C outdoors while the living room stays ≥ 18 °C too — " +
-      "reached by closing the bedroom window, keeping the door open and carrying " +
-      "the heat across, not by one action.",
+      "BOTH rooms ≥ 18 °C at 2 °C outdoors. Reachable only by placing the heater " +
+      "where the warm air can travel between the rooms (near the open doorway) — " +
+      "not by putting it in either room's far corner, and not by turning it up.",
     build: buildWinter,
   },
   summer: {
@@ -398,6 +411,9 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
 };
 
 export const SCENARIO_ORDER: ScenarioId[] = ["winter", "summer", "humidity", "smell"];
+
+/** Streamline density outside a task (and for tasks that don't override it). */
+export const VIZ_DEFAULT = { maxSeeds: 14 };
 
 /** Everything unlocked — the normal, non-study app. */
 export const FREE_TOOLS: ScenarioTools = {
