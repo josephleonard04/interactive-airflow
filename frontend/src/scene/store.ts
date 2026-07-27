@@ -756,7 +756,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     if (!spec) return null;
     const { plan } = get();
     const { bounds, wallHeight } = plan;
-    const pos: Vec3 = position ?? [bounds.x + bounds.w / 2, 0, bounds.z + bounds.d / 2];
+    // Drop new items into the CENTRE OF THE LARGEST ROOM, not the bounding-box
+    // centre — for an L-shaped home the bbox centre is empty (non-room) space, so
+    // the item would land where it can't be seen or placed.
+    const home = plan.rooms.reduce(
+      (a, b) => (b.rect.w * b.rect.d > a.rect.w * a.rect.d ? b : a),
+      plan.rooms[0],
+    );
+    const pos: Vec3 = position ??
+      (home
+        ? [home.rect.x + home.rect.w / 2, 0, home.rect.z + home.rect.d / 2]
+        : [bounds.x + bounds.w / 2, 0, bounds.z + bounds.d / 2]);
     const isVent = type === "supply" || type === "return";
     const y =
       spec.mount === "ceiling"
