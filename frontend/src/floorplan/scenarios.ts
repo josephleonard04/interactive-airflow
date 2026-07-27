@@ -133,9 +133,20 @@ function addWindow(plan: FloorPlan, roomId: string, side: "north" | "south" | "e
   plan.windows.push(o);
 }
 
-/** Open every window that borders a given room. */
-function openWindowsOf(plan: FloorPlan, roomId: string): void {
-  for (const win of plan.windows) if (win.rooms.includes(roomId)) win.open = true;
+/** Place an item in the CENTRE of a room (e.g. a couch in the middle). */
+function centreItem(gen: IdGen, room: RoomDef, type: string, size: [number, number, number]): PlacedItem {
+  const { x, z, w, d } = room.rect;
+  return {
+    id: gen(type),
+    category: "furniture",
+    type,
+    roomId: room.id,
+    position: [x + w / 2, size[1] / 2, z + d / 2],
+    size,
+    rotationY: 0,
+    mount: "floor",
+    movable: true,
+  };
 }
 
 // ---------------------------------------------------------------- winter
@@ -151,8 +162,8 @@ function openWindowsOf(plan: FloorPlan, roomId: string): void {
  */
 function buildWinter(): FloorPlan {
   const rooms = [
-    room("living", "living", "Living + kitchen", 0, 3.0, 6.4, 3.6),
-    room("bedroom", "bedroom", "Bedroom", 3.2, 0, 3.2, 3.0),
+    room("living", "living", "Living + kitchen", 0, 4.0, 8.4, 3.6),
+    room("bedroom", "bedroom", "Bedroom", 5.6, 0, 2.8, 4.0),
   ];
   const plan = assemble(
     "Single-bedroom home",
@@ -163,26 +174,31 @@ function buildWinter(): FloorPlan {
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
-      const [living, bed] = rs;
+      const [living, bedroom] = rs;
       return [
-        against(gen, bed, c(bed), "west", 0.45, "bed", [1.5, 0.5, 2.0]),
-        inCorner(gen, bed, "east", "start", "closet", [1.0, 2.0, 0.6]),
-        against(gen, living, c(living), "west", 0.35, "couch", [1.8, 0.8, 0.85]),
-        against(gen, living, c(living), "east", 0.3, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }),
+        // Living + kitchen: couch in the MIDDLE; kitchen in the top-left corner
+        // (sink, fridge and the extract vent); TV on the right-hand wall.
+        centreItem(gen, living, "couch", [1.8, 0.8, 0.85]),
         inCorner(gen, living, "south", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
-        against(gen, living, c(living), "south", 0.85, "fridge", [0.7, 1.8, 0.7]),
-        // Heater and fan: parked in the living room, ON/idle — the participant
-        // decides where they go. The heater is the ONLY heat source.
-        against(gen, living, c(living), "east", 0.7, "heater", [0.8, 0.5, 0.18], {
-          category: "hvac", mount: "floor", flow: 0, on: true,
+        against(gen, living, c(living), "south", 0.22, "fridge", [0.7, 1.8, 0.7]),
+        against(gen, living, c(living), "south", 0.06, "return", VENT_SIZE, {
+          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
         }),
-        against(gen, living, c(living), "west", 0.7, "fan", [0.45, 1.3, 0.45], {
-          category: "hvac", mount: "floor", flow: 0, on: false,
-        }),
+        against(gen, living, c(living), "east", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }),
+        // Bedroom (a tall room): bed in the corner against the walls, desk along
+        // a wall, closet in a corner. NO heater or fan — the participant PLACES
+        // those (the whole point of the design task).
+        inCorner(gen, bedroom, "south", "end", "bed", [1.4, 0.5, 2.0]),
+        against(gen, bedroom, c(bedroom), "west", 0.5, "desk", [1.2, 0.75, 0.6]),
+        inCorner(gen, bedroom, "north", "start", "closet", [0.9, 2.0, 0.6]),
       ];
     },
+    { windows: false },
   );
-  openWindowsOf(plan, "bedroom"); // the cold source starts open
+  // A window on the living room's right-hand wall and one in the bedroom — both
+  // start CLOSED (like every window in these tasks).
+  addWindow(plan, "living", "east", 0.85, false);
+  addWindow(plan, "bedroom", "east", 0.75, false);
   return plan;
 }
 
