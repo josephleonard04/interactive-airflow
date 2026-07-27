@@ -58,6 +58,8 @@ export function Panel() {
 
   const scenarioId = useSceneStore((s) => s.scenarioId);
   const tools = useSceneStore((s) => s.tools);
+  /** Structural openings never go, and a task can freeze the set entirely. */
+  const canRemoveOpening = (o: Opening) => !o.fixed && !(scenarioId && tools.editOpeningSet === false);
   const scenario = scenarioId ? SCENARIOS[scenarioId] : null;
   const cost = useMemo(() => runningCost(plan), [plan]);
   const overBudget = scenario?.costBudget != null && cost.total > scenario.costBudget;
@@ -312,10 +314,15 @@ export function Panel() {
             >
               {selectedOpening.open ? "Open ✓" : "Closed"}
             </button>
-            <button className="danger" onClick={() => removeOpening(selectedOpening.id)}>
-              🗑 Remove
-            </button>
+            {canRemoveOpening(selectedOpening) && (
+              <button className="danger" onClick={() => removeOpening(selectedOpening.id)}>
+                🗑 Remove
+              </button>
+            )}
           </div>
+          {selectedOpening.fixed && (
+            <p className="muted-line">Fixed by the building — you can open and close it, but not move it.</p>
+          )}
         </section>
       )}
 
@@ -375,20 +382,29 @@ export function Panel() {
               >
                 {o.open ? "Open" : "Closed"}
               </button>
-              <button
-                className="x"
-                title="Remove"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeOpening(o.id);
-                }}
-              >
-                ✕
-              </button>
+              {canRemoveOpening(o) && (
+                <button
+                  className="x"
+                  title="Remove"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeOpening(o.id);
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </li>
           ))}
         </ul>
-        <p className="muted-line">To add one: click a wall in the view, then “Add door / window”.</p>
+        {tools.editOpeningSet === false ? (
+          <p className="muted-line">
+            The doors and windows are part of the building. You can open and close them, and drag the
+            window this task is about onto any wall of its room.
+          </p>
+        ) : (
+          <p className="muted-line">To add one: click a wall in the view, then “Add door / window”.</p>
+        )}
       </section>
 
       <section>

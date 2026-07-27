@@ -55,8 +55,12 @@ export interface ScenarioTools {
   addable: string[];
   /** Draw new interior walls. */
   walls: boolean;
-  /** Add / remove / open / close doors and windows. */
+  /** Open / close doors and windows, and drag the ones that aren't `fixed`. */
   openings: boolean;
+  /** Offer "add" / "remove" for openings. False = the set of openings is what
+   *  the build gave you; you may reposition an unfixed one but not delete it or
+   *  cut a new one. Undefined behaves as true (the unrestricted app). */
+  editOpeningSet?: boolean;
   /** Change the home's footprint. */
   resize: boolean;
 }
@@ -218,6 +222,12 @@ function buildWinter(): FloorPlan {
   // its right wall. Both start CLOSED (like every window in these tasks).
   addWindow(plan, "living", "north", 0.8, false);
   addWindow(plan, "bedroom", "east", 0.5, false);
+  // Everything structural is pinned: the doors, and the living room's glazing,
+  // which the build already decided. The BEDROOM window is the one thing left
+  // open, and it is the whole point of the task — so it is the only opening that
+  // can be dragged, and it can go on any wall of the bedroom.
+  for (const o of plan.doors) o.fixed = true;
+  for (const o of plan.windows) if (o.rooms.includes("living")) o.fixed = true;
   return plan;
 }
 
@@ -352,13 +362,15 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // schedule is — and it is also the moment a buyer is actually asked where
     // they want the windows.
     brief:
-      "You're finishing this newly built home before you move in. The walls and " +
-      "doors are set, but the windows aren't fitted yet, and there's one heater " +
-      "and one fan to position. It's 2 °C outside, and glass is where a home " +
-      "loses its heat. Make both the bedroom and the living room comfortable.",
+      "It's 2 °C outside. You're about to move into this newly built home, and " +
+      "the builder can still change one thing for you: the bedroom window hasn't " +
+      "been cut yet, so you choose which wall it goes on. You also decide where " +
+      "the heater and the fan stand. Glass is where a home leaks its heat — so " +
+      "get both the bedroom and the living room warm enough to live in.",
     youCanChange:
-      "Place the heater and the fan, and add, remove or move the windows. Walls and doors are fixed.",
-    tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, resize: false },
+      "Position the heater and the fan, and slide the bedroom window onto any wall of the bedroom. " +
+      "The walls, the doors and the living-room window are already built.",
+    tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, editOpeningSet: false, resize: false },
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
     // glazing modelled. THREE levers, and medium power needs at least two of them.

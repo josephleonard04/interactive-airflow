@@ -256,12 +256,13 @@ function OpeningDragController({ offset }: { offset: Vec3 }) {
   const plan = useSceneStore((s) => s.plan);
   const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
   const moveOpeningAlong = useSceneStore((s) => s.moveOpeningAlong);
+  const moveOpeningToPoint = useSceneStore((s) => s.moveOpeningToPoint);
   const setDraggingOpening = useSceneStore((s) => s.setDraggingOpening);
 
   useEffect(() => {
     if (!draggingOpeningId) return;
     const o = [...plan.doors, ...plan.windows].find((x) => x.id === draggingOpeningId);
-    if (!o) return;
+    if (!o || o.fixed) return; // structural — not the participant's to move
     const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // wall runs along z
     const ray = new THREE.Raycaster();
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -277,8 +278,13 @@ function OpeningDragController({ offset }: { offset: Vec3 }) {
       ray.setFromCamera(ndc(e), camera);
       const pt = new THREE.Vector3();
       if (!ray.ray.intersectPlane(plane, pt)) return;
-      const along = vertical ? snapG(pt.z - offset[2]) : snapG(pt.x - offset[0]);
-      moveOpeningAlong(draggingOpeningId, along);
+      const px = snapG(pt.x - offset[0]);
+      const pz = snapG(pt.z - offset[2]);
+      // A WINDOW may travel round any wall of its own room, so the drag follows
+      // the cursor to the nearest one; a door stays on the wall it was hung in
+      // and only slides along it.
+      if (o.kind === "window") moveOpeningToPoint(draggingOpeningId, px, pz);
+      else moveOpeningAlong(draggingOpeningId, vertical ? pz : px);
     };
     const onUp = () => setDraggingOpening(null);
     window.addEventListener("pointermove", onMove);
@@ -287,7 +293,7 @@ function OpeningDragController({ offset }: { offset: Vec3 }) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [draggingOpeningId, camera, gl, offset, plan, moveOpeningAlong, setDraggingOpening]);
+  }, [draggingOpeningId, camera, gl, offset, plan, moveOpeningAlong, moveOpeningToPoint, setDraggingOpening]);
 
   return null;
 }

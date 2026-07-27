@@ -4,6 +4,7 @@ import {
   DOOR_WIDTH,
   WALL_THICKNESS,
   WINDOW_WIDTH,
+  carveOpening,
   makeOpening,
   openingSpan,
   rectContains,
@@ -74,6 +75,8 @@ export interface SceneState {
   setDragging: (id: string | null) => void;
   setDraggingOpening: (id: string | null) => void;
   moveOpeningAlong: (id: string, alongCenter: number) => void;
+  /** Move an opening to whichever wall of its own room is nearest (x, z). */
+  moveOpeningToPoint: (id: string, x: number, z: number) => void;
   setPosition: (id: string, position: Vec3, rotationY?: number) => void;
   translate: (id: string, delta: Vec3) => void;
   updateItem: (id: string, patch: Partial<PlacedItem>) => void;
@@ -663,10 +666,63 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   // Slide a door/window along its wall (it stays on the same wall line), clamped
   // to the wall extent. Updates the opening in doors/windows and in the carved
   // wall copies. No history here — handled by setDraggingOpening start/end.
+  // Relocate an opening to the nearest wall of the room it belongs to, so a
+  // window can travel around ITS room's walls rather than being stuck sliding
+  // along the one it was built on.
+  moveOpeningToPoint: (id, x, z) =>
+    set((s) => {
+      const o = [...s.plan.doors, ...s.plan.windows].find((v) => v.id === id);
+      if (!o || o.fixed) return {};
+      const roomId = o.rooms.find((r) => r !== "outside");
+      const room = s.plan.rooms.find((r) => r.id === roomId);
+      if (!room) return {};
+      const { x: rx, z: rz, w, d } = room.rect;
+      const half = o.width / 2;
+      const M = 0.12; // keep clear of the corners
+      // the four walls of this room, as (axis, line, along-range)
+      // A window has to give onto the OUTSIDE, so only walls with nothing behind
+      // them qualify — the wall this room shares with the next one would make an
+      // interior window looking into the living room.
+      const outward = (px: number, pz: number) => !s.plan.rooms.some((r) => rectContains(r.rect, px, pz));
+      const mid = { x: rx + w / 2, z: rz + d / 2 };
+      const E = 0.12;
+      const sides = [
+        { axis: "x" as const, line: rz, lo: rx, hi: rx + w, dist: Math.abs(z - rz), out: outward(mid.x, rz - E) },
+        { axis: "x" as const, line: rz + d, lo: rx, hi: rx + w, dist: Math.abs(z - (rz + d)), out: outward(mid.x, rz + d + E) },
+        { axis: "z" as const, line: rx, lo: rz, hi: rz + d, dist: Math.abs(x - rx), out: outward(rx - E, mid.z) },
+        { axis: "z" as const, line: rx + w, lo: rz, hi: rz + d, dist: Math.abs(x - (rx + w)), out: outward(rx + w + E, mid.z) },
+      ].filter((sd) => sd.hi - sd.lo >= o.width + 2 * M && (o.kind !== "window" || sd.out));
+      if (!sides.length) return {};
+      const side = sides.reduce((b, sd) => (sd.dist < b.dist ? sd : b), sides[0]);
+      const want = side.axis === "x" ? x : z;
+      const centre = Math.min(side.hi - M - half, Math.max(side.lo + M + half, want));
+      // don't land on top of another opening on that same line
+      const clash = [...s.plan.doors, ...s.plan.windows].some((v) => {
+        if (v.id === id) return false;
+        const sp = openingSpan(v);
+        if (sp.axis !== side.axis || Math.abs(sp.line - side.line) > 1e-3) return false;
+        return centre + half > sp.s - 0.06 && centre - half < sp.e + 0.06;
+      });
+      if (clash) return {};
+      const moved: Opening = {
+        ...o,
+        a: side.axis === "z" ? [side.line, centre - half] : [centre - half, side.line],
+        b: side.axis === "z" ? [side.line, centre + half] : [centre + half, side.line],
+      };
+      // re-carve: drop it from every wall, then cut it into the new one
+      const walls = s.plan.walls.map((wl) => ({ ...wl, openings: wl.openings.filter((v) => v.id !== id) }));
+      carveOpening(walls, moved);
+      const swap = (arr: Opening[]) => arr.map((v) => (v.id === id ? moved : v));
+      return {
+        ...snapshot(s),
+        plan: { ...s.plan, walls, doors: swap(s.plan.doors), windows: swap(s.plan.windows) },
+      };
+    }),
+
   moveOpeningAlong: (id, alongCenter) =>
     set((s) => {
       const o = [...s.plan.doors, ...s.plan.windows].find((x) => x.id === id);
-      if (!o) return {};
+      if (!o || o.fixed) return {};
       const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
       const line = vertical ? o.a[0] : o.a[1];
       const width = o.width;
@@ -891,7 +947,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     }),
 
   addOpening: (wallId, kind) => {
-    const { plan } = get();
+    const { plan, scenarioId, tools } = get();
+    if (scenarioId && tools.editOpeningSet === false) return null;
     const wall = plan.walls.find((w) => w.id === wallId);
     if (!wall) return null;
     const axis = wall.axis;
@@ -956,7 +1013,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   removeOpening: (id) =>
-    set((s) => ({
+    set((s) => {
+      const o = [...s.plan.doors, ...s.plan.windows].find((x) => x.id === id);
+      // structural openings, and every opening in a task that fixes the set, stay
+      if (o?.fixed || (s.scenarioId && s.tools.editOpeningSet === false)) return {};
+      return {
       ...snapshot(s),
       plan: {
         ...s.plan,
@@ -965,7 +1026,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         windows: s.plan.windows.filter((o) => o.id !== id),
       },
       selectedOpeningId: s.selectedOpeningId === id ? null : s.selectedOpeningId,
-    })),
+      };
+    }),
 
   toggleOpening: (id) =>
     set((s) => {
