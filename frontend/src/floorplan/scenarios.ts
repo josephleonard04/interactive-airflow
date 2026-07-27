@@ -202,7 +202,7 @@ function buildWinter(): FloorPlan {
         // corner, closet in a corner. NO heater or fan — the participant places
         // those (the whole point of the design task).
         inCorner(gen, bedroom, "south", "start", "bed", [1.5, 0.5, 2.0]),
-        inCorner(gen, bedroom, "north", "end", "desk", [1.2, 0.75, 0.6]),
+        inCorner(gen, bedroom, "east", "end", "desk", [1.2, 0.75, 0.6]),
         inCorner(gen, bedroom, "south", "end", "closet", [0.9, 2.0, 0.6]),
       ];
     },

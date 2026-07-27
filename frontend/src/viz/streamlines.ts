@@ -109,6 +109,17 @@ function seedPoints(
     if (out.every((q) => q.distanceTo(p) > sep * 0.8)) out.push(p);
   }
 
+  // EXHAUST vents. Air is pulled OUT here, so nothing is ever "born" at an
+  // extract and it was left unseeded — which is exactly why the kitchen vent
+  // looked inert. Seeding it makes the upstream trace draw the air converging
+  // into the grille. Kept ahead of the per-room seeds so the extract path is
+  // always present, not left to whichever cells happen to be fastest.
+  for (const s of built.sinks) {
+    const p = new THREE.Vector3(s[0], s[1], s[2]);
+    if (sample(p.x, p.y, p.z).solid) continue;
+    if (out.every((q) => q.distanceTo(p) > sep * 0.8)) out.push(p);
+  }
+
   // Per-room: pick the strongest-flow cells, but spaced apart (min separation)
   // so we get a few representative lines, not a cluster on one jet. Capped at 2
   // per room — the important paths (vents, doorways) are already seeded above.

@@ -93,6 +93,11 @@ export interface Sim3D {
   roomIds: string[];
   /** Points just in front of vents/AC/fans — where to seed airflow particles. */
   seeds: Array<[number, number, number]>;
+  /** Points just in front of EXHAUST vents (returns) — where air leaves. Kept
+   *  separate from `seeds` because particles must not SPAWN at an extract (that
+   *  would read as the exhaust blowing); streamlines seed here and trace
+   *  upstream, which is what draws air visibly converging into the vent. */
+  sinks: Array<[number, number, number]>;
   /** Heat (red) / cold (blue) source locations, to anchor the temperature view. */
   markers: Array<{ pos: [number, number, number]; kind: "hot" | "cold" }>;
 }
@@ -294,6 +299,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
 
   let hasTemperature = false;
   const seeds: Array<[number, number, number]> = [];
+  const sinks: Array<[number, number, number]> = [];
   const markers: Array<{ pos: [number, number, number]; kind: "hot" | "cold" }> = [];
   for (const it of plan.items) {
     const isAC = it.type === "ac";
@@ -331,6 +337,12 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         // only AC / supply generate air → seed airflow particles here; a fan only
         // pushes existing air and a return only removes it, so neither seeds
         if (isAC || isSupply) seeds.push(cellCenter(i, j, k));
+        if (isReturn) {
+          // one cell IN FRONT of the grille (dir faces into the room), so the
+          // seed sits in open air rather than in the vent's own boundary cell
+          const [cx2, cy2, cz2] = cellCenter(i, j, k);
+          sinks.push([cx2 + dir[0] * dx, cy2 + dir[1] * dx, cz2 + dir[2] * dx]);
+        }
         if (isFan) {
           // A FAN IS NOT A SOURCE OF AIR. It was modelled with fixed-velocity
           // faces, which PRESCRIBE the flow: the solver was ordered to hold
@@ -433,7 +445,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, markers };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
