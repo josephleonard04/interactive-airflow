@@ -542,16 +542,6 @@ export function Editor() {
       <directionalLight position={[span, span * 1.7, span * 0.6]} intensity={1.35} />
       <directionalLight position={[-span * 0.8, span, -span * 0.5]} intensity={0.4} />
 
-      {/* floor grid sized exactly to the home footprint */}
-      <Grid
-        position={[0, 0.005, 0]}
-        args={[bounds.w, bounds.d]}
-        cellSize={GRID}
-        cellColor="#8aa0ad"
-        sectionColor="#6b8392"
-        sectionSize={GRID * 4}
-      />
-
       {/* soft contact shadow grounds the whole home */}
       <ContactShadows
         position={[0, 0.015, 0]}
@@ -565,6 +555,18 @@ export function Editor() {
 
       <group position={offset}>
         <FloorInteractor offset={offset} />
+        {/* one grid PER ROOM, so empty (non-room) space shows no grid at all */}
+        {plan.rooms.map((r) => (
+          <Grid
+            key={`grid-${r.id}`}
+            position={[r.rect.x + r.rect.w / 2, 0.006, r.rect.z + r.rect.d / 2]}
+            args={[r.rect.w, r.rect.d]}
+            cellSize={GRID}
+            cellColor="#8aa0ad"
+            sectionColor="#6b8392"
+            sectionSize={GRID * 4}
+          />
+        ))}
         <FloorPlanView plan={plan} />
         {plan.items.map((it) => (
           <ItemMesh key={it.id} item={it} />
