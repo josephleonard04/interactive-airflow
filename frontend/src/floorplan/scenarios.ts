@@ -351,16 +351,29 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     youCanChange: "Place the heater and the fan, and open, close or move doors and windows.",
     tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, resize: false },
     viz: { maxSeeds: 8 },
-    // Measured on this layout at 2 °C outdoors, heater on high. Heater in the far
-    // corner of the living room (the instinct): 23.3 / 12.0 — living fine, bedroom
-    // fails. Heater moved into the bedroom: 14.3 / 24.7 — the failure inverts.
-    // Heater near the doorway, so the warmth is delivered THROUGH it: 22.8 / 21.2
-    // — both pass. Shutting the door pins the bedroom at exactly 2 °C, i.e. the
-    // documented wrong instinct is scored as the total failure it is.
+    // Measured on this layout at 2 °C outdoors (living / bedroom).
+    //
+    // Heater placement, medium, no fan:
+    //   far-left corner        18.7 / 10.0    bedroom fails badly
+    //   by the living window   18.8 / 13.8    still fails
+    //   beside the doorway     19.2 / 19.2    PASS
+    //   inside the bedroom     14.3 / 24.7    the failure just inverts
+    // Fan placement, aimed through the doorway, adds to the bedroom:
+    //   heater by the window   13.8 -> 16.2   (+2.4, still short on medium)
+    //   heater by the doorway  19.2 -> 19.5   PASS with margin
+    //   heater by window, HIGH 19.4           PASS — the brute-force route
+    // Shutting the door pins the bedroom at exactly 2 °C, so the documented wrong
+    // instinct scores as the total failure it is.
+    //
+    // So BOTH placements are levers and neither alone is the whole answer: the
+    // heater decides how much warmth reaches the doorway, the fan decides how
+    // much of it gets through. Two routes pass, which is deliberate — a task with
+    // exactly one answer tells us nothing about how people search.
     success:
-      "BOTH rooms ≥ 18 °C at 2 °C outdoors. Reachable only by placing the heater " +
-      "where the warm air can travel between the rooms (near the open doorway) — " +
-      "not by putting it in either room's far corner, and not by turning it up.",
+      "BOTH rooms ≥ 18 °C at 2 °C outdoors — which needs the heater AND the fan " +
+      "placed together: the heater near the open doorway so the warmth reaches it, " +
+      "and the fan aimed through the doorway to carry it into the bedroom. Putting " +
+      "the heater in either room's far corner fails, and so does shutting the door.",
     build: buildWinter,
   },
   summer: {

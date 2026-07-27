@@ -142,6 +142,13 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 const HEATER_T = 19;
 const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
+/** The heater's OWN power curve, kept separate from POWER because POWER also
+ *  scales the AC, the fan thrust and vent flux — raising it globally would have
+ *  quietly made the summer cooling task easier too. On the shared curve, the
+ *  heater's "medium" was half of high and left the living room at 14.6 °C, which
+ *  is not what medium on a real heater does: medium is the everyday setting that
+ *  holds a room comfortable, and high is the extra push for a cold snap. */
+const HEATER_POWER: Record<number, number> = { 1: 0.72, 2: 1.3, 3: 1.6 };
 /** Fan thrust as an acceleration on the air in its cells (m/s²). Tuned so a
  *  medium fan settles at roughly 1 m/s in front of it in open air — about what
  *  a domestic pedestal fan does — while still being able to stall when it has
@@ -394,7 +401,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       }
     }
     if (isAC || isHeater) {
-      const dT = (isAC ? AC_T : HEATER_T) * mult;
+      const dT = isAC ? AC_T * mult : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
       let placed = 0;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
