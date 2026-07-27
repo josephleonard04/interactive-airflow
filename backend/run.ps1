@@ -13,8 +13,20 @@ if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
     Write-Host "Creating virtual environment..." -ForegroundColor Cyan
     python -m venv .venv
     & ".\.venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-    & ".\.venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt
-    Write-Host "Dependencies installed." -ForegroundColor Green
+}
+
+# Sync dependencies on EVERY run, not just when creating the venv. Installing
+# only at creation time meant a dependency added later (e.g. anthropic, for the
+# plain-language goal parser) was silently missing for anyone whose venv already
+# existed — the server started fine and the feature just never worked. pip is a
+# no-op in a second or two when everything is already satisfied.
+& ".\.venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt
+
+if ($env:ANTHROPIC_API_KEY) {
+    Write-Host "Plain-language goal parsing: enabled." -ForegroundColor Green
+} else {
+    Write-Host "Plain-language goal parsing: off (no ANTHROPIC_API_KEY)." -ForegroundColor Yellow
+    Write-Host "  The keyword parser still works; only free-form wording is unavailable." -ForegroundColor DarkGray
 }
 
 if ($env:OPENFOAM_RUN_CMD) {
