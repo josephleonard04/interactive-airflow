@@ -86,7 +86,7 @@ function seedPoints(
 ): THREE.Vector3[] {
   const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
-  const sep = Math.max(built.dx * 4, 0.95); // metres between seeds (higher = fewer lines)
+  const sep = Math.max(built.dx * 5, 1.3); // metres between seeds (higher = fewer lines)
 
   // DOORWAYS FIRST. Seeding only inside rooms produced lines that mostly
   // circulated within the room they started in, so the picture answered "what is
@@ -110,8 +110,9 @@ function seedPoints(
   }
 
   // Per-room: pick the strongest-flow cells, but spaced apart (min separation)
-  // so we get a few representative lines, not a cluster on one jet.
-  const perRoom = rooms.length ? Math.max(2, Math.floor((maxSeeds - out.length) / rooms.length)) : 4;
+  // so we get a few representative lines, not a cluster on one jet. Capped at 2
+  // per room — the important paths (vents, doorways) are already seeded above.
+  const perRoom = rooms.length ? Math.min(2, Math.max(1, Math.floor((maxSeeds - out.length) / rooms.length))) : 3;
   const rlist: Rect[] = rooms.length ? rooms : [{ x: built.origin[0], z: built.origin[2], w: nx * built.dx, d: nz * built.dx, y: 0, h: 0 } as unknown as Rect];
   for (const r of rlist) {
     const cands: Array<{ p: THREE.Vector3; s: number }> = [];
@@ -145,6 +146,11 @@ export function buildStreamlinePaths(
     /** World points in the open doorways — seeded first so the between-room
      *  paths are always represented, not left to chance. */
     gateways?: Array<[number, number, number]>;
+    /** World-space boxes of furniture etc. Lines never draw through these. The
+     *  sim's voxel solids are too coarse for the eye — a line can pass one cell
+     *  above a couch and still LOOK like it cuts through it — so the visual clip
+     *  uses the real boxes, slightly inflated. */
+    obstacles?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
   } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
@@ -166,11 +172,21 @@ export function buildStreamlinePaths(
     p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1 && inHouse(p);
 
   const lineColor = new THREE.Color(opts.color ?? STREAMLINE_BLUE);
-  const MIN_SPEED = 0.05; // a line must carry real air somewhere, else it's noise
+  const MIN_SPEED = 0.08; // a line must carry real air somewhere, else it's noise
   const MIN_POINTS = 6; // and trace a real path, not a stub
   const step = dx * 0.75;
   const maxSteps = 170;
   const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02, opts.gateways ?? []);
+  // margin keeps a line from hugging a surface so closely it looks embedded
+  const obs = (opts.obstacles ?? []).map((b) => ({
+    min: [b.min[0] - 0.06, b.min[1] - 0.06, b.min[2] - 0.06] as const,
+    max: [b.max[0] + 0.06, b.max[1] + 0.06, b.max[2] + 0.06] as const,
+  }));
+  const inObstacle = (x: number, y: number, z: number) =>
+    obs.some((b) => x > b.min[0] && x < b.max[0] && y > b.min[1] && y < b.max[1] && z > b.min[2] && z < b.max[2]);
+  const FLOOR_Y = 0.14; // lines never draw inside the floor slab
+  const blocked = (x: number, y: number, z: number) =>
+    y < FLOOR_Y || sample(x, y, z).solid || inObstacle(x, y, z);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
@@ -201,7 +217,7 @@ export function buildStreamlinePaths(
     let stallBudget = 10;
     let peak = 0;
     for (let n = 0; n < maxSteps; n++) {
-      if (!inBounds(p) || sample(p.x, p.y, p.z).solid) break;
+      if (!inBounds(p) || blocked(p.x, p.y, p.z)) break;
       peak = Math.max(peak, sample(p.x, p.y, p.z).speed);
       const q1 = stepVec(p, s1, sign); // RK2 midpoint
       if (q1 === "dead") break;
@@ -215,7 +231,7 @@ export function buildStreamlinePaths(
       // test the point we are about to COMMIT, not just the one we came from —
       // otherwise every line overshoots one step past the wall before stopping,
       // which is how streamlines were poking out through open windows
-      if (sample(next.x, next.y, next.z).solid || !inBounds(next)) break;
+      if (blocked(next.x, next.y, next.z) || !inBounds(next)) break;
       lastDir.copy(s2);
       raw.push(next);
       p.copy(next);
@@ -242,15 +258,16 @@ export function buildStreamlinePaths(
     // single flat colour — no speed gradient, so the view stays clean.
     // The integration never steps into a wall, but Catmull-Rom then interpolates
     // BETWEEN those valid points and can cut the corner on a tight bend, which
-    // draws a segment clipping through a wall. Drop any segment whose midpoint
-    // is solid: the line simply has a hairline gap there instead of crossing.
+    // draws a segment clipping through a wall or a couch. Drop any segment that
+    // touches a wall, the floor slab or a furniture box (sampled densely): the
+    // line has a hairline gap there instead of crossing through the object.
     for (let i = 0; i < smooth.length - 1; i++) {
       const a = smooth[i], b = smooth[i + 1];
-      let clipped = false;
-      for (let t = 1; t <= 3; t++) {
-        const f = t / 4;
+      let clipped = blocked(a.x, a.y, a.z) || blocked(b.x, b.y, b.z);
+      for (let t = 1; !clipped && t <= 7; t++) {
+        const f = t / 8;
         mid.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f);
-        if (sample(mid.x, mid.y, mid.z).solid) { clipped = true; break; }
+        if (blocked(mid.x, mid.y, mid.z)) clipped = true;
       }
       if (clipped) continue;
       points.push(a, b);
