@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
 import { SCENARIOS, canMove } from "../floorplan/scenarios";
-import { runningCost } from "../sim/cost";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
@@ -61,8 +60,6 @@ export function Panel() {
   /** Structural openings never go, and a task can freeze the set entirely. */
   const canRemoveOpening = (o: Opening) => !o.fixed && !(scenarioId && tools.editOpeningSet === false);
   const scenario = scenarioId ? SCENARIOS[scenarioId] : null;
-  const cost = useMemo(() => runningCost(plan), [plan]);
-  const overBudget = scenario?.costBudget != null && cost.total > scenario.costBudget;
 
   // Palette filtered to whatever this task is about. Outside a scenario
   // `addable` is empty, which means "no restriction" — the full palette.
@@ -135,40 +132,6 @@ export function Panel() {
           ))}
         </div>
       </section>
-
-      {/* Running cost. A budget is what stops "turn everything to maximum" from
-          being a valid answer, and the participant cannot reason about a budget
-          they cannot see. */}
-      {scenario && (
-        <section className="selected-box">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>Running cost</span>
-            <strong
-              style={{
-                marginLeft: "auto",
-                fontSize: 15,
-                fontVariantNumeric: "tabular-nums",
-                color: overBudget ? "#c0392b" : "var(--ink)",
-              }}
-            >
-              {cost.total.toFixed(1)}
-              {scenario.costBudget != null && (
-                <span style={{ fontSize: 12, fontWeight: 400, color: "var(--muted)" }}> / {scenario.costBudget.toFixed(1)}</span>
-              )}
-            </strong>
-          </div>
-          {cost.lines.length > 0 && (
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-              {cost.lines.map((l) => `${l.label} ${l.cost.toFixed(1)}`).join(" · ")}
-            </div>
-          )}
-          {overBudget && (
-            <div style={{ fontSize: 11.5, color: "#c0392b", marginTop: 4, fontWeight: 600 }}>
-              Over budget — this setup costs too much to run.
-            </div>
-          )}
-        </section>
-      )}
 
       {/* The brief stays on screen for the whole task — participants should not
           have to remember it, and re-reading it is not a finding. */}

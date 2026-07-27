@@ -208,6 +208,17 @@ function buildWinter(): FloorPlan {
         // FACING the TV (east). A window on the bottom wall near the TV corner.
         against(gen, living, c(living), "east", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.5 }),
         centreItem(gen, living, "couch", [1.8, 0.8, 0.85], Math.PI / 2),
+        // The one heater and the one fan, parked together in the bottom-right
+        // corner. They start OUT of the way rather than pre-solved, so where they
+        // end up is entirely the participant's decision — but they are already in
+        // the home, because "how many heaters do I get" is not the question this
+        // task asks.
+        inCorner(gen, living, "east", "end", "heater", [0.8, 0.5, 0.18], {
+          category: "hvac", mount: "floor", flow: 0, on: true,
+        }),
+        against(gen, living, c(living), "north", 0.86, "fan", [0.45, 1.3, 0.45], {
+          category: "hvac", mount: "floor", flow: 0, on: false,
+        }),
         // Bedroom (bigger, tall). Bed in the corner against the walls, desk in a
         // corner, closet in a corner. NO heater or fan — the participant places
         // those (the whole point of the design task).
@@ -362,15 +373,15 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // schedule is — and it is also the moment a buyer is actually asked where
     // they want the windows.
     brief:
-      "It's 2 °C outside. You're about to move into this newly built home, and " +
-      "the builder can still change one thing for you: the bedroom window hasn't " +
-      "been cut yet, so you choose which wall it goes on. You also decide where " +
-      "the heater and the fan stand. Glass is where a home leaks its heat — so " +
-      "get both the bedroom and the living room warm enough to live in.",
+      "It's 2 °C outside and you're about to move into this newly built home. " +
+      "A heater and a fan have been delivered — they're sitting in the corner of " +
+      "the living room, and it's up to you where they go. The builder can also " +
+      "still cut the bedroom window into whichever wall you choose. Glass is " +
+      "where a home leaks its heat. Get both rooms warm enough to live in.",
     youCanChange:
-      "Position the heater and the fan, and slide the bedroom window onto any wall of the bedroom. " +
-      "The walls, the doors and the living-room window are already built.",
-    tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, editOpeningSet: false, resize: false },
+      "Move the heater and the fan anywhere, and put the bedroom window on any wall of the bedroom. " +
+      "There is one heater and one fan; the walls, doors and living-room window are already built.",
+    tools: { movable: ["heater", "fan"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
     // glazing modelled. THREE levers, and medium power needs at least two of them.
