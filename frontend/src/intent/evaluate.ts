@@ -166,10 +166,32 @@ export function evaluateGoal(
   plan: FloorPlan,
   opts: { sketch?: Rect | null; outdoorTemp: number },
 ): Evaluation[] {
-  const objs = parseGoal(text, plan, opts.sketch ?? null);
+  return evaluateObjectives(parseGoal(text, plan, opts.sketch ?? null), plan, opts);
+}
+
+/** Evaluate objectives that were already parsed (by keyword or by the LLM). */
+export function evaluateObjectives(
+  objs: Objective[],
+  plan: FloorPlan,
+  opts: { outdoorTemp: number },
+): Evaluation[] {
   // A compound goal ("cool the living room and the bedroom") is several
   // objectives over the same field — solve it once and share.
   const ctx: EvalContext = { outdoorTemp: opts.outdoorTemp };
   if (objs.some((o) => o.scalar === "temperature")) ctx.roomTempsC = roomTemperaturesC(plan, opts.outdoorTemp);
   return objs.map((o) => evaluateObjective(o, plan, ctx));
+}
+
+/** Keyword parser first; only if it matches nothing, ask the backend's LLM.
+ *  Phrases the seed vocabulary already knows never incur a call, so the common
+ *  path stays instant and offline. */
+export async function resolveObjectives(
+  text: string,
+  plan: FloorPlan,
+  sketch?: Rect | null,
+): Promise<{ objectives: Objective[]; usedLLM: boolean }> {
+  const keyword = parseGoal(text, plan, sketch ?? null);
+  if (keyword.length) return { objectives: keyword, usedLLM: false };
+  const { parseGoalWithLLM } = await import("./llmGoal");
+  return { objectives: await parseGoalWithLLM(text, plan, sketch ?? null), usedLLM: true };
 }
