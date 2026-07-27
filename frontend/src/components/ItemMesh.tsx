@@ -4,7 +4,7 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import type { Group } from "three";
 import type { PlacedItem } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
-import { canMove } from "../floorplan/scenarios";
+import { canAim, canMove } from "../floorplan/scenarios";
 import { Model } from "./models";
 
 // One placed item: a composite furniture/HVAC model plus an invisible click
@@ -37,12 +37,15 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
   // not because the participant is meant to rearrange it.
   const tools = useSceneStore((s) => s.tools);
   const draggable = canMove(tools, item.type);
+  // Aimable-but-not-movable items (a rented AC) can still be SELECTED so their
+  // angle can be changed — they just don't start a position drag.
+  const selectable = canAim(tools, item.type);
 
   const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "select" || !draggable) return;
+    if (mode !== "select" || !selectable) return;
     e.stopPropagation();
     selectItem(item.id);
-    setDragging(item.id);
+    if (draggable) setDragging(item.id);
   };
 
   return (
@@ -51,7 +54,7 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
       rotation={[0, item.rotationY, 0]}
       onPointerDown={onPointerDown}
       onPointerOver={(e) => {
-        if (!draggable) return; // no hover affordance on scenery
+        if (!selectable) return; // no hover affordance on scenery
         e.stopPropagation();
         setHovered(true);
       }}

@@ -1,4 +1,4 @@
-import { boundsOf, buildWalls } from "./geometry";
+import { WINDOW_WIDTH, boundsOf, buildWalls, carveOpening, makeOpening } from "./geometry";
 import {
   against,
   doorsForRoom,
@@ -14,31 +14,43 @@ import { rasterize } from "./raster";
 import { resolveOverlaps } from "./collision";
 import type { FloorPlan, Opening, PlacedItem, RoomDef } from "./types";
 
-// Study scenarios: one prebuilt home per task, plus the set of controls that
-// task is allowed to touch.
+// Study scenarios — the four tasks agreed with Prof. Igarashi, one prebuilt home
+// each, plus the exact set of controls that task is allowed to touch.
 //
-// Two design rules, both from the pilot survey and both deliberate:
+//   winter    Temperature in winter · DESIGN   — a small home; place the heater
+//             and the fan so the far bedroom warms up. The bedroom window is the
+//             cold source (it starts open). Buoyancy matters: warm air rises off
+//             the heater, cold air sinks from the window — a 3D effect.
+//   summer    Temperature in summer · RENTED   — a studio where the AC is bolted
+//             to the wall blowing onto the bed. You cannot move it; you re-aim it
+//             (angle up/away) and add a fan so the room cools evenly without a
+//             draught on the bed.
+//   humidity  Humidity / drying · DESIGN       — a bathroom; place a window and an
+//             extract vent so the damp corner behind the tub dries (modelled as a
+//             moisture source that has to be vented out).
+//   smell     Kitchen smell · RENTED           — one open room with the bin, two
+//             windows and an extract vent right next to one of them. Choose which
+//             window to open and aim a fan; opening the near window short-circuits
+//             with the vent, the far one sweeps the smell out.
 //
-//  1. **No task is solvable by typing one sentence.** Every scenario carries a
-//     second clause that pulls against the first (cool BOTH rooms; keep the
-//     smell out AND clear the source; fit a layout AND keep the smell away), so
-//     a single goal satisfies half of it and the participant has to see the
-//     other half fail and respond. That is the whole point of comparing a
-//     multimodal condition against manual: if one prompt finished the job there
-//     would be nothing to observe.
-//  2. **Only the controls the task is about are shown.** The homes are already
-//     furnished and the participant is not being asked to decorate, so the
-//     furniture palette, the size control and (where irrelevant) the wall tool
-//     are hidden. Every remaining control is one the task actually turns on.
+// Naming convention (shown to the facilitator): "<home> · <task> · <type>".
 //
-// Scenario 1 designs a home from an empty shell; scenarios 2 and 3 are prebuilt
-// homes to adjust.
+// Design rules, both deliberate:
+//  1. No task is solvable by one sentence — each has a second clause pulling
+//     against the first, so a single goal leaves half of it failing.
+//  2. Only the controls the task is about are shown; the home is already
+//     furnished, so the furniture palette and (where irrelevant) the wall tool
+//     are hidden.
 
-export type ScenarioId = "design" | "twoRooms" | "smell";
+export type ScenarioId = "winter" | "summer" | "humidity" | "smell";
 
 export interface ScenarioTools {
-  /** Item types the participant may move. Empty = none movable. */
+  /** Item types the participant may MOVE (drag to a new position). */
   movable: string[];
+  /** Item types the participant may RE-AIM (rotate + tilt) without moving —
+   *  e.g. a wall-mounted AC in a rented home: fixed in place, but you set its
+   *  louvre angle. `movable` items are always aimable too. */
+  aimable: string[];
   /** Item types offered in the "add" palette. Empty = palette hidden. */
   addable: string[];
   /** Draw new interior walls. */
@@ -51,11 +63,11 @@ export interface ScenarioTools {
 
 export interface Scenario {
   id: ScenarioId;
-  /** Short label for the facilitator. */
+  /** Short label for the facilitator: "<home> · <task> · <type>". */
   title: string;
   /** Outdoor air temperature (°C) for this task. FIXED — the participant must
-   *  not be able to change the weather, or a cooling task is "solved" by
-   *  dragging the outdoor slider down. */
+   *  not be able to change the weather, or a cooling/heating task is "solved" by
+   *  dragging the outdoor slider. */
   outdoorTemp: number;
   /** Running-cost ceiling, or null if this task has no budget. */
   costBudget?: number;
@@ -64,7 +76,8 @@ export interface Scenario {
   /** What the participant may change, in plain words, shown in the panel. */
   youCanChange: string;
   tools: ScenarioTools;
-  /** Researcher-facing: what counts as done. Not shown to the participant. */
+  /** Researcher-facing: what counts as done. Not shown to the participant.
+   *  NOTE: thresholds are provisional until calibrated by running the sim. */
   success: string;
   build: () => FloorPlan;
 }
@@ -84,8 +97,7 @@ function assemble(
   const walls = buildWalls(rooms, H);
   const doors: Opening[] = [];
   wire(walls, gen, doors);
-  // Interior doors start OPEN so the home is in a plausible everyday state and
-  // the participant has to decide whether that is what they want.
+  // Interior doors start OPEN so the home is in a plausible everyday state.
   for (const d of doors) if (!d.rooms.includes("outside")) d.open = true;
   const windows = opts.windows === false ? [] : placeWindows(walls, gen, rooms);
   const items = resolveOverlaps(makeItems(gen, rooms, [...doors, ...windows]), rooms, [...doors, ...windows]);
@@ -100,98 +112,109 @@ const room = (id: string, type: RoomDef["type"], name: string, x: number, z: num
   rect: { x, z, w, d },
 });
 
-// ---------------------------------------------------------------- scenario 1
+const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+/** Add an extra window to a room's wall AFTER assembly (placeWindows only makes
+ *  one per room). `side` is which wall of the room; `frac` is 0..1 along it. */
+function addWindow(plan: FloorPlan, roomId: string, side: "north" | "south" | "east" | "west", frac: number, open: boolean): void {
+  const r = plan.rooms.find((x) => x.id === roomId);
+  if (!r) return;
+  const { x, z, w, d } = r.rect;
+  const [axis, line, lo, hi] =
+    side === "north" ? (["x", z + d, x, x + w] as const)
+    : side === "south" ? (["x", z, x, x + w] as const)
+    : side === "east" ? (["z", x + w, z, z + d] as const)
+    : (["z", x, z, z + d] as const);
+  const mid = lo + frac * (hi - lo);
+  const s = clampf(mid - WINDOW_WIDTH / 2, lo + 0.2, hi - 0.2 - WINDOW_WIDTH);
+  const o = makeOpening(`window-x-${roomId}-${side}`, "window", axis, line, s, s + WINDOW_WIDTH, [roomId, "outside"]);
+  o.open = open;
+  carveOpening(plan.walls, o);
+  plan.windows.push(o);
+}
+
+/** Open every window that borders a given room. */
+function openWindowsOf(plan: FloorPlan, roomId: string): void {
+  for (const win of plan.windows) if (win.rooms.includes(roomId)) win.open = true;
+}
+
+// ---------------------------------------------------------------- winter
 
 /**
- * SHELL — a bare one-bedroom apartment being planned. The wet block (kitchen +
- * bathroom) is fixed along the east side because plumbing is; everything west of
- * it is one undivided space the participant has to partition.
- *
- * From the survey: "How can I design the layout to prevent unpleasant smells
- * from the kitchen and bathroom from spreading into the bedrooms?" and
- * "bathrooms and kitchens should have more windows and AC should be placed
- * strategically so that these rooms have more air flow."
+ * WINTER · DESIGN. A one-bedroom home like the pilot sketch: the bedroom sits
+ * off the top-right of a big living-and-kitchen room. It is 2 °C outside; the
+ * bedroom window is open and the cold is pouring in. The single heater lives in
+ * the living room and has to reach the far bedroom — which only happens if the
+ * cold window is closed, the door is open, and warm air is carried across (and
+ * it rises, so where the heat starts vertically matters). Placing the heater
+ * and a fan is the task.
  */
-function buildShell(): FloorPlan {
+function buildWinter(): FloorPlan {
   const rooms = [
-    room("open", "living", "Open space", 0, 0, 6.2, 6.6),
-    room("kitchen", "kitchen", "Kitchen", 6.2, 3.3, 3.0, 3.3),
-    room("bathroom", "bathroom", "Bathroom", 6.2, 0, 3.0, 3.3),
+    room("living", "living", "Living + kitchen", 0, 3.0, 6.4, 3.6),
+    room("bedroom", "bedroom", "Bedroom", 3.2, 0, 3.2, 3.0),
   ];
-  return assemble(
-    "Apartment being planned",
+  const plan = assemble(
+    "Single-bedroom home",
     rooms,
     (walls, gen, doors) => {
       placeDoor(walls, gen, rooms[0], rooms[1], doors);
-      placeDoor(walls, gen, rooms[0], rooms[2], doors);
       placeEntrance(walls, gen, rooms[0], doors);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
-      const [open, kitchen, bath] = rs;
+      const [living, bed] = rs;
       return [
-        inCorner(gen, kitchen, "north", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
-        against(gen, kitchen, c(kitchen), "north", 0.85, "fridge", [0.7, 1.8, 0.7]),
-        against(gen, kitchen, c(kitchen), "east", 0.5, "return", VENT_SIZE, {
-          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
+        against(gen, bed, c(bed), "west", 0.45, "bed", [1.5, 0.5, 2.0]),
+        inCorner(gen, bed, "east", "start", "closet", [1.0, 2.0, 0.6]),
+        against(gen, living, c(living), "west", 0.35, "couch", [1.8, 0.8, 0.85]),
+        against(gen, living, c(living), "east", 0.3, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }),
+        inCorner(gen, living, "south", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
+        against(gen, living, c(living), "south", 0.85, "fridge", [0.7, 1.8, 0.7]),
+        // Heater and fan: parked in the living room, ON/idle — the participant
+        // decides where they go. The heater is the ONLY heat source.
+        against(gen, living, c(living), "east", 0.7, "heater", [0.8, 0.5, 0.18], {
+          category: "hvac", mount: "floor", flow: 0, on: true,
         }),
-        against(gen, bath, c(bath), "west", 0.3, "toilet", [0.55, 0.75, 0.7]),
-        against(gen, bath, c(bath), "east", 0.5, "bathtub", [1.6, 0.6, 0.75]),
-        against(gen, bath, c(bath), "east", 0.9, "return", VENT_SIZE, {
-          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
-        }),
-        // The AC exists but is parked on the west wall — where it goes is the
-        // participant's decision, and it is the wrong answer where it starts.
-        against(gen, open, c(open), "west", 0.5, "ac", [0.85, 0.32, 0.22], {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25,
+        against(gen, living, c(living), "west", 0.7, "fan", [0.45, 1.3, 0.45], {
+          category: "hvac", mount: "floor", flow: 0, on: false,
         }),
       ];
     },
   );
+  openWindowsOf(plan, "bedroom"); // the cold source starts open
+  return plan;
 }
 
-// ---------------------------------------------------------------- scenario 2
+// ---------------------------------------------------------------- summer
 
 /**
- * RAILROAD — two bedrooms at opposite ends of a long apartment with one AC in
- * the middle. The far bedroom cannot be reached by turning the AC up; it is
- * reached by moving it, or by what the doors are doing.
- *
- * From the survey, the most-requested question of all — four of six free-text
- * ideas: "How can I use a single air conditioner to cool multiple rooms?"
+ * SUMMER · RENTED. A studio. The AC is fixed high on the east wall, blowing
+ * straight west onto the bed — the classic bad placement. You cannot move it,
+ * only re-aim it (angle it up / away) and add a fan, so the room cools evenly
+ * without a draught on the sleeper.
  */
-function buildRailroad(): FloorPlan {
-  const rooms = [
-    room("bedroomA", "bedroom", "Bedroom A", 0, 0, 3.2, 6.0),
-    room("living", "living", "Living Room", 3.2, 0, 4.6, 3.6),
-    room("kitchen", "kitchen", "Kitchen", 3.2, 3.6, 4.6, 2.4),
-    room("bedroomB", "bedroom", "Bedroom B", 7.8, 0, 3.2, 6.0),
-  ];
+function buildStudio(): FloorPlan {
+  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 4.2, 5.0)];
   return assemble(
-    "Two-bedroom apartment",
+    "Studio apartment",
     rooms,
     (walls, gen, doors) => {
-      placeDoor(walls, gen, rooms[1], rooms[0], doors);
-      placeDoor(walls, gen, rooms[1], rooms[2], doors);
-      placeDoor(walls, gen, rooms[1], rooms[3], doors);
-      placeEntrance(walls, gen, rooms[2], doors);
+      placeEntrance(walls, gen, rooms[0], doors);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
-      const [a, living, kitchen, bthe] = rs;
+      const [studio] = rs;
       return [
-        against(gen, a, c(a), "west", 0.4, "bed", [1.5, 0.5, 2.0]),
-        against(gen, a, c(a), "north", 0.8, "closet", [1.0, 2.0, 0.6]),
-        against(gen, bthe, c(bthe), "east", 0.4, "bed", [1.5, 0.5, 2.0]),
-        against(gen, bthe, c(bthe), "north", 0.8, "desk", [1.2, 0.75, 0.6]),
-        against(gen, living, c(living), "south", 0.3, "couch", [1.8, 0.8, 0.85]),
-        inCorner(gen, kitchen, "north", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
-        against(gen, kitchen, c(kitchen), "north", 0.85, "fridge", [0.7, 1.8, 0.7]),
-        // One AC, in the middle room, on the wall furthest from both bedrooms.
-        against(gen, living, c(living), "south", 0.7, "ac", [0.85, 0.32, 0.22], {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25,
+        against(gen, studio, c(studio), "west", 0.5, "bed", [1.5, 0.5, 2.0]),
+        inCorner(gen, studio, "north", "end", "closet", [1.0, 2.0, 0.6]),
+        against(gen, studio, c(studio), "south", 0.35, "desk", [1.2, 0.75, 0.6]),
+        // AC on the EAST wall, facing WEST (rotationY from `against(east)`), i.e.
+        // straight at the bed. Fixed in place — the participant re-aims it.
+        against(gen, studio, c(studio), "east", 0.5, "ac", [0.85, 0.32, 0.22], {
+          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25, on: true,
         }),
-        against(gen, living, c(living), "north", 0.2, "fan", [0.45, 1.3, 0.45], {
+        against(gen, studio, c(studio), "south", 0.8, "fan", [0.45, 1.3, 0.45], {
           category: "hvac", mount: "floor", flow: 0, on: false,
         }),
       ];
@@ -199,141 +222,172 @@ function buildRailroad(): FloorPlan {
   );
 }
 
-// ---------------------------------------------------------------- scenario 3
+// ---------------------------------------------------------------- humidity
 
 /**
- * BAD ADJACENCY — the kitchen opens straight onto the bedroom, which is the
- * situation the richest survey response described: doors normally shut, no
- * ventilation where the cooking is, and the smell going where it is least
- * wanted. Sealing the bedroom door is the obvious move and it fails the second
- * half of the brief, because the kitchen then never clears.
+ * HUMIDITY · DESIGN. A single bathroom: tub, toilet, wash basin. The far corner
+ * behind the tub stays wet (a moisture source, modelled with the contaminant
+ * field). No window and no vent yet — the participant places one window and one
+ * extract vent, and finds that placing them too close lets the air short-circuit
+ * and the corner never dries.
  */
-function buildAdjacency(): FloorPlan {
-  const rooms = [
-    room("bedroom", "bedroom", "Bedroom", 0, 0, 3.6, 3.6),
-    room("kitchen", "kitchen", "Kitchen", 0, 3.6, 3.6, 3.4),
-    room("living", "living", "Living Room", 3.6, 0, 4.6, 4.2),
-    room("bathroom", "bathroom", "Bathroom", 3.6, 4.2, 4.6, 2.8),
-  ];
+function buildBathroom(): FloorPlan {
+  const rooms = [room("bathroom", "bathroom", "Bathroom", 0, 0, 3.0, 3.4)];
   return assemble(
-    "Apartment with the kitchen next to the bedroom",
+    "Bathroom",
     rooms,
     (walls, gen, doors) => {
-      placeDoor(walls, gen, rooms[0], rooms[1], doors); // kitchen ↔ bedroom: the problem
-      placeDoor(walls, gen, rooms[0], rooms[2], doors);
-      placeDoor(walls, gen, rooms[1], rooms[2], doors);
-      placeDoor(walls, gen, rooms[2], rooms[3], doors);
-      placeEntrance(walls, gen, rooms[2], doors);
+      placeEntrance(walls, gen, rooms[0], doors);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
-      const [bed, kitchen, living, bath] = rs;
+      const [bath] = rs;
       return [
-        against(gen, bed, c(bed), "west", 0.45, "bed", [1.5, 0.5, 2.0]),
-        against(gen, bed, c(bed), "south", 0.8, "closet", [1.0, 2.0, 0.6]),
-        inCorner(gen, kitchen, "north", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
-        against(gen, kitchen, c(kitchen), "north", 0.85, "fridge", [0.7, 1.8, 0.7]),
-        // The cooking smell, already placed — this is the thing to contain.
-        against(gen, kitchen, c(kitchen), "north", 0.55, "smell", [0.34, 0.5, 0.34], {
-          category: "hvac", mount: "floor",
-        }),
-        against(gen, kitchen, c(kitchen), "west", 0.5, "return", VENT_SIZE, {
+        against(gen, bath, c(bath), "east", 0.6, "bathtub", [1.6, 0.6, 0.75]),
+        against(gen, bath, c(bath), "west", 0.25, "toilet", [0.55, 0.75, 0.7]),
+        against(gen, bath, c(bath), "west", 0.72, "sink", [0.7, 0.9, 0.55]),
+        // Damp corner behind the tub — moisture that must be vented out. Uses the
+        // contaminant ("smell") field as a stand-in for humidity.
+        inCorner(gen, bath, "north", "end", "smell", [0.34, 0.5, 0.34], { category: "hvac", mount: "floor" }),
+      ];
+    },
+    { windows: false }, // the participant places the window
+  );
+}
+
+// ---------------------------------------------------------------- smell
+
+/**
+ * SMELL · RENTED. One open room — bed, desk, kitchen with the bin. TWO windows,
+ * and the extract vent is right next to the FIRST one. Opening the near window
+ * short-circuits with the vent (air in and straight back out); the far window
+ * sets up a cross-draught that sweeps the smell out. The participant chooses
+ * which window to open and aims a fan; nothing structural moves.
+ */
+function buildSmell(): FloorPlan {
+  const rooms = [room("apt", "kitchen", "One-room apartment", 0, 0, 5.0, 4.2)];
+  const plan = assemble(
+    "One-room apartment",
+    rooms,
+    (walls, gen, doors) => {
+      placeEntrance(walls, gen, rooms[0], doors);
+    },
+    (gen, rs, openings) => {
+      const c = (r: RoomDef) => doorsForRoom(r, openings);
+      const [apt] = rs;
+      return [
+        against(gen, apt, c(apt), "north", 0.3, "bed", [1.5, 0.5, 2.0]),
+        against(gen, apt, c(apt), "west", 0.5, "desk", [1.2, 0.75, 0.6]),
+        inCorner(gen, apt, "south", "start", "kitchen_sink", [1.0, 0.9, 0.6]),
+        against(gen, apt, c(apt), "south", 0.55, "fridge", [0.7, 1.8, 0.7]),
+        // the bin — the smell source — by the kitchen
+        against(gen, apt, c(apt), "south", 0.72, "smell", [0.34, 0.5, 0.34], { category: "hvac", mount: "floor" }),
+        // extract vent high on the NORTH wall, next to window #1 (added below)
+        against(gen, apt, c(apt), "north", 0.82, "return", VENT_SIZE, {
           category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
         }),
-        against(gen, living, c(living), "east", 0.35, "couch", [1.8, 0.8, 0.85]),
-        against(gen, living, c(living), "east", 0.8, "ac", [0.85, 0.32, 0.22], {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25,
-        }),
-        against(gen, bath, c(bath), "east", 0.5, "bathtub", [1.6, 0.6, 0.75]),
-        against(gen, bath, c(bath), "west", 0.3, "toilet", [0.55, 0.75, 0.7]),
-        against(gen, bath, c(bath), "east", 0.9, "return", VENT_SIZE, {
-          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
+        // a fan the participant can aim
+        against(gen, apt, c(apt), "west", 0.85, "fan", [0.45, 1.3, 0.45], {
+          category: "hvac", mount: "floor", flow: 0, on: false,
         }),
       ];
     },
+    { windows: false },
   );
+  // window #1 on the NORTH wall next to the vent (the short-circuit trap);
+  // window #2 on the far SOUTH wall (the cross-draught). Both start closed —
+  // the participant chooses which to open.
+  addWindow(plan, "apt", "north", 0.82, false);
+  addWindow(plan, "apt", "south", 0.5, false);
+  return plan;
 }
 
 // ---------------------------------------------------------------------------
 
 export const SCENARIOS: Record<ScenarioId, Scenario> = {
-  design: {
-    id: "design",
-    title: "1 · Plan the apartment",
-    outdoorTemp: 33,
+  winter: {
+    id: "winter",
+    title: "Single-bedroom home · Temperature (winter) · Design",
+    outdoorTemp: 2,
     brief:
-      "You're planning this apartment before moving in. The kitchen and bathroom " +
-      "are fixed — the rest is one open space. Divide it so there's a bedroom " +
-      "you can sleep in comfortably on a hot night, and so cooking and bathroom " +
-      "smells don't drift into it.",
-    youCanChange:
-      "Draw interior walls, add or open doors and windows, and place the air conditioner.",
-    tools: { movable: ["ac", "supply", "return", "fan"], addable: ["supply", "return"], walls: true, openings: true, resize: false },
+      "It's 2 °C outside and the bedroom is freezing — the cold pours in through " +
+      "its window. There's one heater, in the living room. Get the bedroom warm " +
+      "and comfortable without letting the living room get cold.",
+    youCanChange: "Place the heater and the fan, and open, close or move doors and windows.",
+    tools: { movable: ["heater", "fan"], aimable: [], addable: ["heater", "fan"], walls: false, openings: true, resize: false },
     success:
-      "A separate bedroom exists; bedroom ≤ 26 °C at 33 °C outdoors; contaminant " +
-      "from kitchen in bedroom ≤ 0.12 while the kitchen still has an open exterior path.",
-    build: buildShell,
+      "Bedroom ≥ 18 °C at 2 °C outdoors while the living room stays ≥ 18 °C too — " +
+      "reached by closing the bedroom window, keeping the door open and carrying " +
+      "the heat across, not by one action.",
+    build: buildWinter,
   },
-  twoRooms: {
-    id: "twoRooms",
-    title: "2 · Two bedrooms, one AC",
+  summer: {
+    id: "summer",
+    title: "Studio · Temperature (summer) · Rented",
     outdoorTemp: 33,
-    costBudget: 3.2,
     brief:
-      "It's a hot afternoon and both bedrooms are in use. There's one air " +
-      "conditioner. Make both bedrooms comfortable to be in — and nobody wants " +
-      "air blowing straight onto a bed.",
-    youCanChange: "Move the air conditioner and the fan, and open, close or move doors and windows.",
-    tools: { movable: ["ac", "fan", "supply", "return"], addable: [], walls: false, openings: true, resize: false },
-    // Measured on this layout at 33 °C outdoors. Start 29.9 / 28.5 — fails.
-    // AC at maximum, doors open: 27.8 / 25.6 — solves ONE bedroom, which is the
-    // point. Best found (AC moved to the north wall facing in, plus the fan on):
-    // 24.5 / 25.3. So the goal is reachable but only by relocating the unit, not
-    // by turning it up.
+      "It's a hot afternoon. The air conditioner is fixed to the wall and blows " +
+      "straight onto the bed, so it's a cold draught all night. Cool the whole " +
+      "room evenly and keep the air over the bed calm.",
+    youCanChange: "Aim the air conditioner (you can't move it), and add, move and aim a fan.",
+    tools: { movable: ["fan"], aimable: ["ac"], addable: ["fan"], walls: false, openings: true, resize: false },
     success:
-      "Both bedrooms ≤ 26 °C at 33 °C outdoors AND mean air speed over each bed ≤ 0.28 m/s.",
-    build: buildRailroad,
+      "Studio ≤ 26 °C at 33 °C outdoors AND mean air speed in the bed zone ≤ 0.25 m/s — " +
+      "reached by angling the AC up/away and using the fan to mix, not by blasting the bed.",
+    build: buildStudio,
+  },
+  humidity: {
+    id: "humidity",
+    title: "Bathroom · Humidity · Design",
+    outdoorTemp: 24,
+    brief:
+      "The corner behind the bathtub stays wet after every shower and grows " +
+      "mould. Add one window and one extract vent so that damp corner dries out.",
+    youCanChange: "Place an extract vent, and add a window; open, close or move doors and windows.",
+    tools: { movable: ["return"], aimable: [], addable: ["return"], walls: false, openings: true, resize: false },
+    success:
+      "Moisture in the tub corner cleared (contaminant ≤ 0.12) with an open path " +
+      "to outside — and NOT solved by putting the window and vent so close they " +
+      "short-circuit past the corner.",
+    build: buildBathroom,
   },
   smell: {
     id: "smell",
-    title: "3 · Cooking smell next door",
+    title: "One-room apartment · Smell · Rented",
     outdoorTemp: 31,
     brief:
-      "You're cooking something strong-smelling, and the kitchen opens straight " +
-      "onto the bedroom where someone is sleeping. Keep the smell out of the " +
-      "bedroom — and don't leave the kitchen smelling all evening either.",
-    youCanChange: "Move the extract vents, the AC and the fan, and open, close or move doors and windows.",
-    tools: { movable: ["return", "supply", "ac", "fan", "smell"], addable: ["return", "supply", "fan"], walls: false, openings: true, resize: false },
-    // Measured on this layout. Start: bedroom 0.279, living 0.187, no exterior
-    // path — fails everything. Shutting the kitchen↔bedroom door alone drops the
-    // bedroom to 0.077 and leaves the kitchen at 0.563: containment passed, the
-    // second clause failed. Sealing EVERY kitchen door scores a perfect 0.000 in
-    // both rooms and still fails, because there is then no way out — that is the
-    // trap. Solved by shutting the kitchen's interior doors, opening its window
-    // and running the extract: bedroom 0.022, living 0.049, path open.
-    //
-    // Note the kitchen's own level barely moves (0.558 → 0.487) whatever you do,
-    // because the source is running continuously — so "has the kitchen cleared"
-    // has to be scored as "is there a way out", not as a level.
+      "The kitchen bin smells and your bed is in the same open room. There are " +
+      "two windows and an extract vent. Keep the smell away from the bed.",
+    youCanChange: "Open or close either window, and add, move and aim a fan.",
+    tools: { movable: ["fan"], aimable: [], addable: ["fan"], walls: false, openings: true, resize: false },
     success:
-      "Contaminant ≤ 0.12 in BOTH the bedroom and the living room (the smell is " +
-      "confined to the kitchen) AND the kitchen has an open exterior opening.",
-    build: buildAdjacency,
+      "Contaminant ≤ 0.12 in the bed zone with an open exterior path — reached by " +
+      "opening the FAR window (cross-draught), not the near one (which short-" +
+      "circuits with the vent).",
+    build: buildSmell,
   },
 };
 
-export const SCENARIO_ORDER: ScenarioId[] = ["design", "twoRooms", "smell"];
+export const SCENARIO_ORDER: ScenarioId[] = ["winter", "summer", "humidity", "smell"];
 
 /** Everything unlocked — the normal, non-study app. */
 export const FREE_TOOLS: ScenarioTools = {
   movable: [],
+  aimable: [],
   addable: [],
   walls: true,
   openings: true,
   resize: true,
 };
 
-/** `movable`/`addable` empty means "no restriction" outside a scenario. */
+/** `movable` empty means "no restriction" outside a scenario. */
 export function canMove(tools: ScenarioTools, type: string): boolean {
   return tools.movable.length === 0 || tools.movable.includes(type);
+}
+
+/** Whether an item can be RE-AIMED (rotate + tilt). Movable items always can;
+ *  `aimable` adds items that are fixed in place but still adjustable (a rented
+ *  AC). Outside a scenario (movable empty) everything is aimable. */
+export function canAim(tools: ScenarioTools, type: string): boolean {
+  return canMove(tools, type) || tools.aimable.includes(type);
 }

@@ -275,21 +275,21 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     const ez = q === 1 || q === 3 ? sw : sd;
     return { min: [cx - ex / 2, cy - sh / 2, cz - ez / 2], max: [cx + ex / 2, cy + sh / 2, cz + ez / 2] };
   };
-  const horizDir = (rotY: number): [number, number, number] => {
-    const q = ((Math.round(rotY / (Math.PI / 2)) % 4) + 4) % 4;
-    return ([[0, 0, 1], [1, 0, 0], [0, 0, -1], [-1, 0, 0]] as [number, number, number][])[q];
+  // Continuous aim from yaw (rotationY) + vertical tilt. At tilt 0 this matches
+  // the old quantised facing (yaw 0 -> +z, yaw π/2 -> +x); a positive tilt aims
+  // the jet UP, negative DOWN. This is what lets an AC be angled off a bed and a
+  // fan be pointed up / down / diagonally.
+  const aimVec = (rotY: number, tilt: number): [number, number, number] => {
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    return [Math.sin(rotY) * ct, st, Math.cos(rotY) * ct];
   };
-  const setFace = (i: number, j: number, k: number, dir: [number, number, number], speed: number) => {
-    if (dir[0] !== 0) {
-      const f = dir[0] > 0 ? sim.uIdx(i + 1, j, k) : sim.uIdx(i, j, k);
-      sim.uFixed[f] = 1; sim.uVal[f] = dir[0] * speed;
-    } else if (dir[1] !== 0) {
-      const f = dir[1] > 0 ? sim.vIdx(i, j + 1, k) : sim.vIdx(i, j, k);
-      sim.vFixed[f] = 1; sim.vVal[f] = dir[1] * speed;
-    } else {
-      const f = dir[2] > 0 ? sim.wIdx(i, j, k + 1) : sim.wIdx(i, j, k);
-      sim.wFixed[f] = 1; sim.wVal[f] = dir[2] * speed;
-    }
+  // Prescribe a directed jet along an arbitrary unit aim by fixing the outgoing
+  // face on EACH axis in proportion to the aim — a diagonal or vertical jet, not
+  // just one of six cardinal directions.
+  const setJet = (i: number, j: number, k: number, a: [number, number, number], speed: number) => {
+    if (Math.abs(a[0]) > 1e-3) { const f = a[0] > 0 ? sim.uIdx(i + 1, j, k) : sim.uIdx(i, j, k); sim.uFixed[f] = 1; sim.uVal[f] = a[0] * speed; }
+    if (Math.abs(a[1]) > 1e-3) { const f = a[1] > 0 ? sim.vIdx(i, j + 1, k) : sim.vIdx(i, j, k); sim.vFixed[f] = 1; sim.vVal[f] = a[1] * speed; }
+    if (Math.abs(a[2]) > 1e-3) { const f = a[2] > 0 ? sim.wIdx(i, j, k + 1) : sim.wIdx(i, j, k); sim.wFixed[f] = 1; sim.wVal[f] = a[2] * speed; }
   };
 
   let hasTemperature = false;
@@ -318,7 +318,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
           ? [0, -1, 0]
           : (isSupply || isReturn) && it.mount === "floor"
             ? [0, 1, 0]
-            : horizDir(it.rotationY);
+            : aimVec(it.rotationY, it.tilt ?? 0);
       // a RETURN vent sucks air OUT: same face, negated speed → air flows toward
       // the vent instead of away, pulling room air (and odour) into it. Pair a
       // supply in one room with a return in another and the air is drawn ACROSS
@@ -340,21 +340,21 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
           // the room, and the pressure projection routes the return path around
           // it. Blocked in, it stalls; in open air, it throws a jet. Nothing is
           // created, which is exactly the physical distinction.
+          //
+          // The force follows the full aim vector, so a fan can be pointed up,
+          // down or diagonally, not only along a wall.
           const F = FAN_FORCE * mult;
-          if (dir[0] !== 0) {
-            sim.uForce[sim.uIdx(i, j, k)] += dir[0] * F;
-            sim.uForce[sim.uIdx(i + 1, j, k)] += dir[0] * F;
-          } else {
-            sim.wForce[sim.wIdx(i, j, k)] += dir[2] * F;
-            sim.wForce[sim.wIdx(i, j, k + 1)] += dir[2] * F;
-          }
+          if (Math.abs(dir[0]) > 1e-3) { sim.uForce[sim.uIdx(i, j, k)] += dir[0] * F; sim.uForce[sim.uIdx(i + 1, j, k)] += dir[0] * F; }
+          if (Math.abs(dir[1]) > 1e-3) { sim.vForce[sim.vIdx(i, j, k)] += dir[1] * F; sim.vForce[sim.vIdx(i, j + 1, k)] += dir[1] * F; }
+          if (Math.abs(dir[2]) > 1e-3) { sim.wForce[sim.wIdx(i, j, k)] += dir[2] * F; sim.wForce[sim.wIdx(i, j, k + 1)] += dir[2] * F; }
           // An oscillating fan sweeps side to side. Averaged over the sweep that
-          // is a broader, weaker push, so spread part of the force laterally
-          // rather than adding more of it — a sweeping fan does not move MORE
-          // air than a fixed one, it spreads the same air over a wider arc.
+          // is a broader, weaker push, so spread part of the force laterally in
+          // the horizontal plane (perpendicular to the aim's heading) rather than
+          // adding more of it — a sweeping fan spreads the same air over a wider
+          // arc, it does not move more.
           if (it.oscillate) {
             const lat = F * 0.45;
-            if (dir[0] !== 0) {
+            if (Math.abs(dir[0]) >= Math.abs(dir[2])) {
               sim.wForce[sim.wIdx(i, j, k + 1)] += lat;
               sim.wForce[sim.wIdx(i, j, k)] -= lat;
             } else {
@@ -369,7 +369,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
           // could never spread past the vent).
           sim.open[c] = 1;
           ventDilute[c] = 1;
-          setFace(i, j, k, dir, speed);
+          setJet(i, j, k, dir, speed);
         }
       }
     }

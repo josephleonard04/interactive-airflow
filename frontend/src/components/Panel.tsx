@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
-import { SCENARIOS } from "../floorplan/scenarios";
+import { SCENARIOS, canMove } from "../floorplan/scenarios";
 import { runningCost } from "../sim/cost";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
@@ -253,6 +253,20 @@ export function Panel() {
                   </button>
                 </div>
               )}
+              {(selected.type === "ac" || selected.type === "fan") && selected.on !== false && (
+                <div className="field" style={{ marginTop: 6 }}>
+                  <span>aim up / down · {Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}°</span>
+                  <input
+                    type="range"
+                    min={-60}
+                    max={60}
+                    step={5}
+                    value={Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}
+                    onChange={(e) => updateItem(selected.id, { tilt: (Number(e.target.value) * Math.PI) / 180 })}
+                    title="Tilt the airflow up (+) or down (−). 0° = straight out along the facing."
+                  />
+                </div>
+              )}
             </>
           )}
           <RotationDial
@@ -261,9 +275,11 @@ export function Panel() {
           />
           <div className="btn-row">
             <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ 90°</button>
-            <button className="danger" onClick={() => removeItem(selected.id)}>
-              🗑 Remove
-            </button>
+            {canMove(tools, selected.type) && (
+              <button className="danger" onClick={() => removeItem(selected.id)}>
+                🗑 Remove
+              </button>
+            )}
           </div>
         </section>
       )}
