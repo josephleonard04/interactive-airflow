@@ -534,7 +534,7 @@ export function Editor() {
     <Canvas
       dpr={[1, 2]}
       gl={{ alpha: true, antialias: true }}
-      camera={{ position: [span * 0.85, span * 0.78, span * 1.05], fov: 40 }}
+      camera={{ position: [span * 1.02, span * 0.94, span * 1.26], fov: 40 }}
     >
       {/* soft studio lighting */}
       <ambientLight intensity={0.7} />

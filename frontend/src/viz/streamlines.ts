@@ -86,7 +86,7 @@ function seedPoints(
 ): THREE.Vector3[] {
   const { nx, ny, nz, cellCenter } = built;
   const out: THREE.Vector3[] = [];
-  const sep = Math.max(built.dx * 3, 0.6); // metres between seeds
+  const sep = Math.max(built.dx * 4, 0.95); // metres between seeds (higher = fewer lines)
 
   // DOORWAYS FIRST. Seeding only inside rooms produced lines that mostly
   // circulated within the room they started in, so the picture answered "what is
