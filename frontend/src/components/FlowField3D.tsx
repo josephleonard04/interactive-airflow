@@ -101,18 +101,41 @@ export function FlowField3D() {
     return g;
   }, [plan.doors, plan.windows]);
 
+  // World-space boxes of everything standing in the rooms (rotation-aware
+  // footprint). The streamline pass clips against these so no line ever draws
+  // through a couch or desk — the sim's voxel solids are too coarse to trust
+  // for that visually.
+  const obstacles = useMemo(
+    () =>
+      plan.items
+        .filter((it) => it.category === "furniture" || it.mount === "floor")
+        .map((it) => {
+          const [cx, cy, cz] = it.position;
+          const [sw, sh, sd] = it.size;
+          const swapped = Math.abs(Math.round(it.rotationY / (Math.PI / 2))) % 2 === 1;
+          const hx = (swapped ? sd : sw) / 2;
+          const hz = (swapped ? sw : sd) / 2;
+          return {
+            min: [cx - hx, cy - sh / 2, cz - hz] as [number, number, number],
+            max: [cx + hx, cy + sh / 2, cz + hz] as [number, number, number],
+          };
+        }),
+    [plan.items],
+  );
+
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
     () =>
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          maxSeeds: 13,
+          maxSeeds: 8,
           rooms: plan.rooms.map((r) => r.rect),
           gateways,
+          obstacles,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways],
+    [built, plan.wallHeight, plan.rooms, gateways, obstacles],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
