@@ -67,6 +67,11 @@ export interface Opening {
   rooms: [string, string | "outside"];
   /** Whether the door/window is open (lets air through) or closed. */
   open: boolean;
+  /** Structural: set by the build and not the participant's to change. A fixed
+   *  opening can still be opened and closed, but it cannot be dragged along its
+   *  wall, relocated, or removed. Used to pin doors and any glazing a task has
+   *  already decided, so only the opening the task is ABOUT stays editable. */
+  fixed?: boolean;
 }
 
 export type WallAxis = "x" | "z";

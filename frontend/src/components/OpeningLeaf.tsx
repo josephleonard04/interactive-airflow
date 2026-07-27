@@ -41,7 +41,8 @@ export function OpeningLeaf({ opening }: { opening: Opening }) {
     if (mode !== "select") return;
     e.stopPropagation();
     selectOpening(opening.id);
-    setDraggingOpening(opening.id);
+    // a fixed opening can still be selected (to open/close it) but not dragged
+    if (!opening.fixed) setDraggingOpening(opening.id);
   };
 
   return (
