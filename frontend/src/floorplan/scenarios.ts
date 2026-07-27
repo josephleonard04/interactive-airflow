@@ -153,8 +153,8 @@ function centreItem(gen: IdGen, room: RoomDef, type: string, size: [number, numb
 /** Put the entrance on a room's NORTH wall (largest z = screen-bottom), rather
  *  than letting placeEntrance pick the longest exterior wall (which lands on the
  *  top edge here, because buildWalls flags the shared south wall exterior). */
-function entranceOnBottom(walls: ReturnType<typeof buildWalls>, gen: IdGen, roomId: string, rect: RoomDef["rect"], doors: Opening[]): void {
-  const cx = rect.x + rect.w / 2;
+function entranceOnBottom(walls: ReturnType<typeof buildWalls>, gen: IdGen, roomId: string, rect: RoomDef["rect"], doors: Opening[], frac = 0.5): void {
+  const cx = clampf(rect.x + frac * rect.w, rect.x + DOOR_WIDTH, rect.x + rect.w - DOOR_WIDTH);
   const ent = makeOpening(gen("door"), "door", "x", rect.z + rect.d, cx - DOOR_WIDTH / 2, cx + DOOR_WIDTH / 2, [roomId, "outside"]);
   carveOpening(walls, ent);
   doors.push(ent);
@@ -181,7 +181,7 @@ function buildWinter(): FloorPlan {
     rooms,
     (walls, gen, doors) => {
       placeDoor(walls, gen, rooms[0], rooms[1], doors);
-      entranceOnBottom(walls, gen, "living", rooms[0].rect, doors); // bottom wall
+      entranceOnBottom(walls, gen, "living", rooms[0].rect, doors, 0.22); // bottom wall, toward the left
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
@@ -192,26 +192,26 @@ function buildWinter(): FloorPlan {
         inCorner(gen, living, "south", "start", "fridge", [0.7, 1.8, 0.7]),
         against(gen, living, c(living), "south", 0.24, "kitchen_sink", [1.0, 0.9, 0.6]),
         against(gen, living, c(living), "south", 0.24, "return", VENT_SIZE, {
-          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.02,
+          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.25,
         }),
-        // TV on the right-hand wall, up toward the top; couch in the middle FACING
-        // the TV (east). A window on the bottom wall near the TV corner.
-        against(gen, living, c(living), "east", 0.22, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }),
+        // TV centred (middle) and high on the right-hand wall; couch in the middle
+        // FACING the TV (east). A window on the bottom wall near the TV corner.
+        against(gen, living, c(living), "east", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.5 }),
         centreItem(gen, living, "couch", [1.8, 0.8, 0.85], Math.PI / 2),
-        // Bedroom (bigger, tall). Bed in the corner against the walls, desk along
-        // a wall, closet in a corner. NO heater or fan — the participant places
+        // Bedroom (bigger, tall). Bed in the corner against the walls, desk in a
+        // corner, closet in a corner. NO heater or fan — the participant places
         // those (the whole point of the design task).
         inCorner(gen, bedroom, "south", "start", "bed", [1.5, 0.5, 2.0]),
-        against(gen, bedroom, c(bedroom), "east", 0.75, "desk", [1.2, 0.75, 0.6]),
+        inCorner(gen, bedroom, "north", "start", "desk", [1.2, 0.75, 0.6]),
         inCorner(gen, bedroom, "south", "end", "closet", [0.9, 2.0, 0.6]),
       ];
     },
     { windows: false },
   );
   // Living window on the bottom wall near the TV (east) corner; bedroom window on
-  // its left wall. Both start CLOSED (like every window in these tasks).
+  // its right wall. Both start CLOSED (like every window in these tasks).
   addWindow(plan, "living", "north", 0.8, false);
-  addWindow(plan, "bedroom", "west", 0.7, false);
+  addWindow(plan, "bedroom", "east", 0.5, false);
   return plan;
 }
 

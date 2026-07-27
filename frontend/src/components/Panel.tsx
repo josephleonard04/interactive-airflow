@@ -8,6 +8,9 @@ import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
 
+/** One-per-home appliances in a study task — the Add button caps at this. */
+const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
+
 function pretty(t: string) {
   return t.replace(/_/g, " ");
 }
@@ -327,12 +330,23 @@ export function Panel() {
             <div key={group.group} className="palette-group">
               {!scenarioId && <div className="palette-label">{group.group}</div>}
               <div className="chips">
-                {group.types.map((t) => (
-                  <button key={t} className="chip" onClick={() => addItem(t)} title={`Add ${CATALOG[t].label}`}>
-                    <span className="swatch" style={{ background: itemColor(t) }} />
-                    {CATALOG[t].label}
-                  </button>
-                ))}
+                {group.types.map((t) => {
+                  const limit = scenarioId ? ADD_MAX[t] : undefined;
+                  const maxed = limit != null && plan.items.filter((it) => it.type === t).length >= limit;
+                  return (
+                    <button
+                      key={t}
+                      className="chip"
+                      disabled={maxed}
+                      onClick={() => !maxed && addItem(t)}
+                      title={maxed ? `${CATALOG[t].label} already placed (max ${limit})` : `Add ${CATALOG[t].label}`}
+                    >
+                      <span className="swatch" style={{ background: itemColor(t) }} />
+                      {CATALOG[t].label}
+                      {maxed ? " ✓" : ""}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}

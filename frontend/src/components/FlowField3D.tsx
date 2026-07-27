@@ -107,7 +107,7 @@ export function FlowField3D() {
       setPaths(
         buildStreamlinePaths(built, {
           roofY: plan.wallHeight,
-          maxSeeds: 30,
+          maxSeeds: 13,
           rooms: plan.rooms.map((r) => r.rect),
           gateways,
         }),

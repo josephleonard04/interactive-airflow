@@ -289,6 +289,27 @@ function roomAt(plan: FloorPlan, x: number, z: number): string {
   return room ? room.id : plan.rooms[0]?.id ?? "";
 }
 
+/** One-per-home appliances in a study task (can't add a second). */
+const ADD_LIMIT: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
+
+/** An empty floor position inside a room that doesn't overlap existing floor
+ *  items, so a new item never lands on top of the couch. Scans a coarse grid and
+ *  falls back to the room centre. Returns [x, 0, z]. */
+function freeSpotIn(rect: Rect, items: PlacedItem[], size: Vec3): Vec3 {
+  const hw = size[0] / 2, hd = size[2] / 2, m = 0.3;
+  const floor = items.filter((it) => it.mount === "floor");
+  const hits = (cx: number, cz: number) =>
+    floor.some(
+      (it) =>
+        Math.abs(cx - it.position[0]) < hw + it.size[0] / 2 + 0.15 &&
+        Math.abs(cz - it.position[2]) < hd + it.size[2] / 2 + 0.15,
+    );
+  for (let cz = rect.z + hd + m; cz <= rect.z + rect.d - hd - m + 1e-6; cz += 0.4)
+    for (let cx = rect.x + hw + m; cx <= rect.x + rect.w - hw - m + 1e-6; cx += 0.4)
+      if (!hits(cx, cz)) return [cx, 0, cz];
+  return [rect.x + rect.w / 2, 0, rect.z + rect.d / 2];
+}
+
 const DEV_NAME: Record<string, string> = { ac: "AC", fan: "Fan", supply: "Vent", heater: "Heater" };
 const POWER_WORD = ["", "low", "medium", "high"];
 
@@ -754,19 +775,23 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   addItem: (type, position) => {
     const spec = CATALOG[type];
     if (!spec) return null;
-    const { plan } = get();
+    const { plan, scenarioId } = get();
     const { bounds, wallHeight } = plan;
-    // Drop new items into the CENTRE OF THE LARGEST ROOM, not the bounding-box
-    // centre — for an L-shaped home the bbox centre is empty (non-room) space, so
-    // the item would land where it can't be seen or placed.
+    // In a study task, some appliances are one-per-home — refuse to add a second.
+    if (scenarioId && ADD_LIMIT[type] && plan.items.filter((it) => it.type === type).length >= ADD_LIMIT[type]) {
+      return null;
+    }
+    // Drop new items into an EMPTY spot in the largest room — not the bounding-box
+    // centre (empty non-room space in an L-shaped home) and not on top of existing
+    // furniture (e.g. the couch in the middle).
     const home = plan.rooms.reduce(
       (a, b) => (b.rect.w * b.rect.d > a.rect.w * a.rect.d ? b : a),
       plan.rooms[0],
     );
     const pos: Vec3 = position ??
       (home
-        ? [home.rect.x + home.rect.w / 2, 0, home.rect.z + home.rect.d / 2]
-        : [bounds.x + bounds.w / 2, 0, bounds.z + bounds.d / 2]);
+        ? freeSpotIn(home.rect, plan.items, spec.size)
+        : ([bounds.x + bounds.w / 2, 0, bounds.z + bounds.d / 2] as Vec3));
     const isVent = type === "supply" || type === "return";
     const y =
       spec.mount === "ceiling"
