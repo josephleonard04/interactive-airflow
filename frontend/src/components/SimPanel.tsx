@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
-import { evaluateGoal, type Evaluation } from "../intent/evaluate";
+import { evaluateObjectives, resolveObjectives, type Evaluation } from "../intent/evaluate";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
@@ -81,13 +81,16 @@ export function SimPanel() {
 
   // Plain-language goal → physical objectives → checked against the result, and
   // the matching view is shown so the user sees what's happening.
-  const checkGoalText = (text: string) => {
+  const checkGoalText = async (text: string) => {
     if (!text.trim()) return;
     // Read the plan from the store, not the render closure: this is called
     // immediately after applying a solution, and the closed-over `plan` is still
     // the pre-apply one — which made the verdict report the old temperatures.
     const livePlan = useSceneStore.getState().plan;
-    const evals = evaluateGoal(text, livePlan, { sketch: sketchRegion, outdoorTemp });
+    // Keyword parser first; the LLM only sees wording it couldn't match, so a
+    // recognised phrase is still resolved instantly and offline.
+    const { objectives } = await resolveObjectives(text, livePlan, sketchRegion);
+    const evals = evaluateObjectives(objectives, livePlan, { outdoorTemp });
     useSceneStore.getState().logEvent("check", {
       text,
       results: evals.map((e) => ({ summary: e.summary, satisfied: e.satisfied, value: e.value })),

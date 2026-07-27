@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import goal_llm
 from mock_engine import compute_mock_field
 from openfoam_runner import (
     detect_openfoam,
@@ -47,6 +48,11 @@ class RunRequest(BaseModel):
     points: list[list[float]]
 
 
+class GoalRequest(BaseModel):
+    text: str
+    rooms: list[dict[str, str]]
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     info = detect_openfoam()
@@ -55,7 +61,21 @@ def health() -> dict[str, Any]:
         "version": info["version"],
         "mode": info["mode"],
         "detail": info["detail"],
+        # so the frontend can tell whether the plain-language fallback exists
+        # before it bothers asking
+        "goalLlm": goal_llm.available(),
     }
+
+
+@app.post("/api/parse-goal")
+def parse_goal(req: GoalRequest) -> dict[str, Any]:
+    """Free-text comfort wish -> the solver's objective vocabulary.
+
+    Only called when the frontend's keyword parser found nothing, so this is
+    the generalisation layer, not the main path. Always returns 200 with a
+    (possibly empty) objective list — the caller falls back silently.
+    """
+    return goal_llm.parse_goal(req.text, req.rooms)
 
 
 @app.post("/api/run")
