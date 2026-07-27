@@ -255,7 +255,7 @@ export function Panel() {
               )}
               {(selected.type === "ac" || selected.type === "fan") && selected.on !== false && (
                 <div className="field" style={{ marginTop: 6 }}>
-                  <span>aim up / down · {Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}°</span>
+                  <span>vertical aim (− down / + up) · {Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}°</span>
                   <input
                     type="range"
                     min={-60}
