@@ -46,6 +46,11 @@ export interface PlacedItem {
   power?: number;
   /** Fan only: oscillating (sweeps side to side) vs fixed direction. */
   oscillate?: boolean;
+  /** AC & fan: vertical aim of the jet, in radians. 0 = horizontal (straight out
+   *  along rotationY), positive tilts the jet UP, negative tilts it DOWN. Combined
+   *  with rotationY this lets an AC be angled away from a bed, or a fan be aimed
+   *  up/down/diagonally. Undefined = 0 (horizontal). */
+  tilt?: number;
   movable: boolean;
 }
 
