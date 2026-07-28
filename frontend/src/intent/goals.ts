@@ -147,16 +147,6 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       return { label: g.label, met: ok, detail: speed.toFixed(2), word: ok ? "calm" : "you'd feel it" };
     }
 
-    // Temperature measured in a sub-zone rather than over the whole room.
-    if (g.metric === "temperature" && g.nearWindowOf) {
-      const zone = windowZone(plan, g.nearWindowOf);
-      const delta = zone ? zoneMean(built, fields.temp, zone) : null;
-      if (delta === null) return { label: g.label, met: false, detail: "", word: "" };
-      const c = Number((outdoorTemp + delta).toFixed(1));
-      const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
-      return { label: g.label, met, detail: `${c.toFixed(1)} °C`, word: warmthWord(c, g), color: rgbCss(tempColor(c)) };
-    }
-
     const raw = g.metric === "temperature" ? temps?.get(g.roomId) : smells?.get(g.roomId);
     if (raw === undefined || raw === null) return { label: g.label, met: false, detail: "", word: "" };
 
@@ -165,8 +155,24 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       // 17.96 against an 18 °C floor while the readout says "18.0 °C" produces
       // a box that looks stuck for no visible reason.
       const c = Number((outdoorTemp + raw).toFixed(1));
-      const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
-      return { label: g.label, met, detail: `${c.toFixed(1)} °C`, word: warmthWord(c, g), color: rgbCss(tempColor(c)) };
+      let met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
+      // …and, when the goal asks for it, the cold pool at the glazing too.
+      let glass: number | null = null;
+      if (g.windowAtLeast !== undefined) {
+        const zone = windowZone(plan, g.roomId);
+        const delta = zone ? zoneMean(built, fields.temp, zone) : null;
+        if (delta !== null) {
+          glass = Number((outdoorTemp + delta).toFixed(1));
+          if (glass < g.windowAtLeast) met = false;
+        }
+      }
+      const detail = glass === null ? `${c.toFixed(1)} °C` : `${c.toFixed(1)} °C (${glass.toFixed(1)} °C at the glass)`;
+      // The word and the colour describe whichever part is FAILING, so "view"
+      // shows the cold pool rather than a comfortable room mean hiding it. Only
+      // when it fails, though: a glass reading that passes must not be able to
+      // caption a satisfied row "not quite warm enough".
+      const shown = glass !== null && g.windowAtLeast !== undefined && glass < g.windowAtLeast ? glass : c;
+      return { label: g.label, met, detail, word: warmthWord(shown, g), color: rgbCss(tempColor(shown)) };
     }
     const met = (g.atLeast === undefined || raw >= g.atLeast) && (g.atMost === undefined || raw <= g.atMost);
     // A 0..1 concentration means nothing to a non-expert, so show it as a plain

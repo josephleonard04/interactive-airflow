@@ -19,7 +19,9 @@ import {
   type BackendHealth,
 } from "../engine/accurate";
 import { type OptimizeGoal } from "../intent/optimize";
-import { findSolutions, type Solution } from "../intent/solutions";
+import { findSolutions, withholdComplete, type Solution } from "../intent/solutions";
+import { checkGoals } from "../intent/goals";
+import { sketchToGoal, type SketchMark, type SketchTool } from "../intent/sketch";
 import { parseGoal } from "../intent/objectives";
 import type {
   FloorPlan,
@@ -142,6 +144,14 @@ export interface SceneState {
 
   /** Search a plain-language goal for SEVERAL good configurations to choose from. */
   applyBestSolution: (goalText: string) => boolean;
+  /** The shared search both inputs funnel into. Not called directly by the UI. */
+  runSearch: (
+    goal: OptimizeGoal,
+    targetIds: string[],
+    goalText: string,
+    calm: boolean,
+    regionName: string | null,
+  ) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
   solutionOptions: Solution[];
   /** The goal text those options answer, for the option-panel heading. */
@@ -156,6 +166,21 @@ export interface SceneState {
   /** User-sketched target region (world coords) for "this area" goals. */
   sketchRegion: Rect | null;
   setSketchRegion: (r: Rect | null) => void;
+
+  /** How the user is stating intents right now: typing or drawing. */
+  intentInput: "text" | "sketch";
+  setIntentInput: (m: "text" | "sketch") => void;
+  /** Everything drawn on the mini-map: intent areas and air-direction arrows. */
+  sketchMarks: SketchMark[];
+  /** The pen currently selected in the sketch pad. */
+  sketchTool: SketchTool;
+  setSketchTool: (t: SketchTool) => void;
+  addSketchMark: (m: SketchMark) => void;
+  removeSketchMark: (id: string) => void;
+  clearSketch: () => void;
+  /** Search the drawing for configurations, the same way a typed goal is
+   *  searched — no sentence required. */
+  applySketchSolution: () => boolean;
 
   /** Study session log (§6.5 of the study protocol): every utterance, parse,
    *  review decision and plan change, timestamped, downloadable as JSON. */
@@ -275,6 +300,36 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set({ sketchRegion });
   },
 
+  intentInput: "text",
+  setIntentInput: (intentInput) => set({ intentInput }),
+  sketchMarks: [],
+  sketchTool: "warm",
+  setSketchTool: (sketchTool) => set({ sketchTool }),
+  addSketchMark: (m) => {
+    get().logEvent("sketch", { added: m });
+    set((s) => ({
+      sketchMarks: [...s.sketchMarks, m],
+      // The 3D view highlights one area; the newest one is the one being talked
+      // about, and it keeps deictic typed goals ("keep this area cool") working
+      // whichever input the user reached for.
+      sketchRegion: m.kind === "area" ? m.rect : s.sketchRegion,
+    }));
+  },
+  removeSketchMark: (id) =>
+    set((s) => {
+      const marks = s.sketchMarks.filter((m) => m.id !== id);
+      const lastArea = [...marks].reverse().find((m) => m.kind === "area");
+      return { sketchMarks: marks, sketchRegion: lastArea?.kind === "area" ? lastArea.rect : null };
+    }),
+  clearSketch: () => set({ sketchMarks: [], sketchRegion: null }),
+
+  applySketchSolution: () => {
+    const s = get();
+    const sk = sketchToGoal(s.sketchMarks, s.plan);
+    if (!sk) return false;
+    return s.runSearch(sk.goal, sk.targetIds, sk.text, sk.calm, sk.calm ? "the area you drew" : null);
+  },
+
   sessionLog: [],
   logEvent: (kind, data) =>
     set((s) => ({ sessionLog: [...s.sessionLog, { t: Date.now(), kind, data }] })),
@@ -355,8 +410,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   applyBestSolution: (goalText) => {
-    if (get().optimizing) return false;
-    const objs = parseGoal(goalText, get().plan, get().sketchRegion);
+    const s = get();
+    const objs = parseGoal(goalText, s.plan, s.sketchRegion);
     const obj = objs[0];
     if (!obj) return false;
     // Every room the goal named, not just the first. "Cool the living room and
@@ -376,6 +431,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         : obj.scalar === "draft"
           ? "circulate"
           : "ventilate";
+    return s.runSearch(goal, targetIds, goalText, calm, obj.regionName);
+  },
+
+  // The one search path, shared by the typed and the drawn input. Both arrive
+  // here as (goal, rooms, a sentence to show) — downstream nothing knows or
+  // cares which one the user reached for.
+  runSearch: (goal, targetIds, goalText, calm, regionName) => {
+    if (get().optimizing) return false;
     set({ optimizing: true });
     window.setTimeout(() => {
       try {
@@ -388,8 +451,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             it.type === "fan" ? { ...it, on: false } : it.type === "ac" ? { ...it, power: 1 } : it,
           );
           const after: FloorPlan = { ...before, items };
-          const lines = [...diffPlan(before, after), `Quieted the air movers so ${obj.regionName ?? "the area"} stays calm`];
-          get().logEvent("goal", { text: goalText, objective: obj, lines });
+          const lines = [...diffPlan(before, after), `Quieted the air movers so ${regionName ?? "the area"} stays calm`];
+          get().logEvent("goal", { text: goalText, lines });
           set({
             ...snapshot(s),
             plan: after,
@@ -398,15 +461,31 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           });
           return;
         }
-        const options = findSolutions(before, goal, targetIds, {
+        const found = findSolutions(before, goal, targetIds, {
           outdoorTemp: s.outdoorTemp,
           want: 3,
           lockPower: s.tools.lockPower === true,
         });
+        // Never hand back a finished task — see withholdComplete.
+        const taskGoals = s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : [];
+        const options = taskGoals.length
+          ? withholdComplete(
+              found,
+              (plan) => ({
+                met: checkGoals(taskGoals, plan, s.outdoorTemp).filter((r) => r.met).length,
+                total: taskGoals.length,
+              }),
+              goal,
+              before,
+              targetIds,
+              s.outdoorTemp,
+            )
+          : found;
         get().logEvent("goal", {
           text: goalText,
-          objective: obj,
           targets: targetIds,
+          found: found.length,
+          withheld: found.length - options.length,
           offered: options.map((o) => ({ id: o.id, label: o.label, score: o.score })),
         });
         set({
@@ -438,6 +517,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set({
       plan: mode === "blank" ? generateEmpty(size) : generateHome(size),
       sketchRegion: null,
+      sketchMarks: [],
       started: true,
       scenarioId: null,
       tools: FREE_TOOLS,
@@ -462,6 +542,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       tools: sc.tools,
       outdoorTemp: sc.outdoorTemp, // fixed by the task; the UI locks the control
       sketchRegion: null,
+      sketchMarks: [],
       started: true,
       selectedId: null,
       selectedWallId: null,
