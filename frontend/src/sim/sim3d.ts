@@ -146,7 +146,7 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // goal, because ±10 is the delta AT THE SOURCE and the room mean is well under
 // it. The heater is sized so a room containing it settles around 20–22 °C at
 // 2 °C outdoors; the AC is unchanged, since it was already landing correctly.
-const HEATER_T = 24;
+const HEATER_T = 19;
 const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 /** The heater's OWN power curve, kept separate from POWER because POWER also
@@ -169,7 +169,7 @@ const GLASS_DT = -4;
  *  medium fan settles at roughly 1 m/s in front of it in open air — about what
  *  a domestic pedestal fan does — while still being able to stall when it has
  *  nowhere to push. */
-const FAN_FORCE = 14;
+const FAN_FORCE = 26;
 
 export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   const scene = compileLfmScene(plan);
@@ -290,6 +290,15 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
   // out of the solids), so those cells are all solid and marking them would do
   // nothing. What matters is the air ON THE ROOM SIDE of the pane — that is what
   // gets chilled — so take the non-solid indoor neighbours of the box.
+  // WHY A RADIATOR GOES UNDER A WINDOW. Glazing chills the air against it; that
+  // air sinks and spills across the floor as a cold draught. A heat source
+  // directly below the glass sends a warm plume up the pane and cancels the
+  // downdraught before it forms — which is exactly why radiators have been put
+  // under windows for a century. Without this, the model only ever charged the
+  // heater for standing in a cold spot, so the real-world answer measured WORSE
+  // than an arbitrary corner and the task taught the opposite of the truth.
+  const heaters = plan.items.filter((it) => it.type === "heater" && it.on !== false);
+  const SHIELD_R = 1.3; // metres: how close the heater must be to blanket the pane
   const glass: number[] = [];
   const glassSeen = new Set<number>();
   for (const o of plan.windows) {
@@ -301,6 +310,11 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         const c = sim.cIdx(a, b2, d2);
         if (sim.solid[c] || !inside[c] || glassSeen.has(c)) continue;
         glassSeen.add(c);
+        const [wx, , wz] = cellCenter(a, b2, d2);
+        const shielded = heaters.some(
+          (h) => Math.hypot(h.position[0] - wx, h.position[2] - wz) <= SHIELD_R,
+        );
+        if (shielded) continue; // the plume covers this pane: no cold surface, no loss
         glass.push(c);
         // cold surface for the buoyancy step: air here is chilled and sinks
         sim.tempFixed[c] = 1;
@@ -547,8 +561,13 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   // still reached; the flow just biases how far the field is carried each way.
   // Returns a time-like cost (s); combined with an exp falloff this is the
   // steady-state ("very long time") distribution advected by the airflow.
-  const V0 = 0.6;    // base diffusive spread (m/s) — dominant, fills the house
-  const KADV = 0.5;  // airflow bias on top of the base spread (carries downwind)
+  const V0 = 0.6;    // base diffusive spread (m/s) — fills the house on its own
+  // Airflow bias on top of that base spread. Raised from 0.5: at the old value
+  // a fan barely changed where the heat ended up, so aiming one was close to a
+  // no-op and "move air from the warm room to the cold one" — the whole point
+  // of having a fan — was not a strategy the model rewarded. Now which way the
+  // fan points measurably decides how far the warmth travels.
+  const KADV = 1.6;
   const costFromSources = (seeds: number[]): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
@@ -619,7 +638,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     return dist;
   };
 
-  const TAU = 12;        // temperature decay time (s) — fills a house, keeps a gradient
+  const TAU = 23;        // temperature decay time (s) — fills a house, keeps a gradient
   const SMELL_TAU = 9;
   const SINK_LAMBDA = 0.7; // smell drops to ~0 within ~3 cells of an open window/vent
 

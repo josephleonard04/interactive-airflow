@@ -3,6 +3,7 @@ import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPrese
 import { evaluateObjectives, resolveObjectives, type Evaluation } from "../intent/evaluate";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
+import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { STREAMLINE_BLUE } from "../viz/streamlines";
 import { SketchCanvas } from "./SketchCanvas";
@@ -78,6 +79,8 @@ export function SimPanel() {
 
   const [goal, setGoal] = useState("");
   const [results, setResults] = useState<Evaluation[]>([]);
+  const checklistScenario = useSceneStore((s) => s.scenarioId);
+  const hasChecklist = !!(checklistScenario && SCENARIOS[checklistScenario].goals?.length);
 
   // Plain-language goal → physical objectives → checked against the result, and
   // the matching view is shown so the user sees what's happening.
@@ -299,7 +302,10 @@ export function SimPanel() {
             onDismiss={dismissSolutions}
           />
         )}
-        {results.map((r, i) => (
+        {/* The prose verdict is suppressed whenever the task has a tick-list —
+            two answers to "am I done?" in one panel, one of them contradicting
+            the other's thresholds, is worse than either alone. */}
+        {!hasChecklist && results.map((r, i) => (
           <div
             key={i}
             style={{

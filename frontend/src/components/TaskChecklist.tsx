@@ -19,13 +19,28 @@ export function TaskChecklist() {
   const scenarioId = useSceneStore((s) => s.scenarioId);
   const plan = useSceneStore((s) => s.plan);
   const outdoorTemp = useSceneStore((s) => s.outdoorTemp);
+  const recorded = useSceneStore((s) => s.simulatedModes);
+  const simActive = useSceneStore((s) => s.simActive);
+  const simReady = useSceneStore((s) => s.simReady);
+  const simMode = useSceneStore((s) => s.simMode);
+  // The mode being viewed RIGHT NOW counts as soon as the solve is ready, so
+  // the gate never depends on whether setSimMode happened before or after
+  // setSimReady — an ordering the render loop does not guarantee.
+  const simulatedModes = simActive && simReady && !recorded.includes(simMode) ? [...recorded, simMode] : recorded;
   const [rows, setRows] = useState<GoalStatus[]>([]);
   const [checking, setChecking] = useState(false);
 
   const goals = scenarioId ? SCENARIOS[scenarioId].goals : undefined;
 
+  // A goal is only scored once the participant has actually watched the
+  // matching simulation converge. Ticking a box off a background solve would
+  // hand them the verdict without their having run anything.
+  const modeFor = { temperature: "temperature", smell: "contamination", draft: "airflow" } as const;
+  const unlocked = (goals ?? []).some((g) => simulatedModes.includes(modeFor[g.metric]));
+  const pending = (goals ?? []).filter((g) => !simulatedModes.includes(modeFor[g.metric]));
+
   useEffect(() => {
-    if (!goals?.length) {
+    if (!goals?.length || !unlocked) {
       setRows([]);
       return;
     }
@@ -34,9 +49,11 @@ export function TaskChecklist() {
     // Off the paint path: solving the field is heavy enough to drop a frame if
     // it runs inline with the edit that triggered it.
     const id = window.setTimeout(() => {
-      const next = checkGoals(goals, plan, outdoorTemp);
+      // Only score the goals whose simulation has actually been watched.
+      const ready = goals.filter((g) => simulatedModes.includes(modeFor[g.metric]));
+      const scored = new Map(checkGoals(ready, plan, outdoorTemp).map((r) => [r.label, r]));
       if (!cancelled) {
-        setRows(next);
+        setRows(goals.map((g) => scored.get(g.label) ?? { label: g.label, met: false, detail: "" }));
         setChecking(false);
       }
     }, 60);
@@ -44,7 +61,8 @@ export function TaskChecklist() {
       cancelled = true;
       window.clearTimeout(id);
     };
-  }, [goals, plan, outdoorTemp]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goals, plan, outdoorTemp, unlocked, simulatedModes]);
 
   if (!goals?.length) return null;
   const done = rows.filter((r) => r.met).length;
@@ -86,6 +104,11 @@ export function TaskChecklist() {
         ))}
       </ul>
       {checking && <p className="muted-line" style={{ marginTop: 6 }}>Checking…</p>}
+      {pending.length > 0 && (
+        <p className="muted-line" style={{ marginTop: 6 }}>
+          Run the simulation to check {pending.length === goals.length ? "these" : "the rest"}.
+        </p>
+      )}
     </section>
   );
 }

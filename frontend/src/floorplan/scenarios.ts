@@ -63,6 +63,10 @@ export interface ScenarioTools {
   editOpeningSet?: boolean;
   /** Change the home's footprint. */
   resize: boolean;
+  /** Hide the on/off + low/medium/high control. Use when the task is about
+   *  WHERE a device goes: an exposed dial invites "turn it up" as a substitute
+   *  for placement, and turning it up is usually the wrong lesson. */
+  lockPower?: boolean;
 }
 
 /** One checkable line of the task, shown as a tick-box the participant watches.
@@ -80,6 +84,11 @@ export interface ScenarioGoal {
   /** Measure over the footprint of this item type instead of the whole room —
    *  a draught is felt where you lie, not averaged over the floor. */
   nearItem?: string;
+  /** Measure in the strip of floor just inside this room's exterior window.
+   *  A room mean can sit at a comfortable 23 °C while the air spilling off the
+   *  glass is near freezing — that cold pool by the window is the thing a
+   *  radiator under it exists to kill, and it is invisible to a room average. */
+  nearWindowOf?: string;
   /** Pass when the value is at least / at most this. °C for temperature,
    *  0..1 for smell, m/s for draft.
    *
@@ -237,16 +246,18 @@ function buildWinter(): FloorPlan {
         // FACING the TV (east). A window on the bottom wall near the TV corner.
         against(gen, living, c(living), "east", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.5 }),
         centreItem(gen, living, "couch", [1.8, 0.8, 0.85], Math.PI / 2),
-        // The one heater and the one fan, parked together in the bottom-right
-        // corner. They start OUT of the way rather than pre-solved, so where they
-        // end up is entirely the participant's decision — but they are already in
-        // the home, because "how many heaters do I get" is not the question this
-        // task asks.
-        inCorner(gen, living, "east", "end", "heater", [0.8, 0.5, 0.18], {
+        // The one heater and the one fan, delivered and left by the kitchen just
+        // inside the front door — where a delivery would actually be dropped, and
+        // a poor spot to heat from. They start OUT of the way rather than
+        // pre-solved, so where they end up is entirely the participant's call.
+        // Both run on medium and the power control is hidden: this task is about
+        // WHERE the heat goes, and leaving the dial exposed invites "turn it up"
+        // as a substitute for thinking about placement.
+        against(gen, living, c(living), "north", 0.06, "heater", [0.8, 0.5, 0.18], {
           category: "hvac", mount: "floor", flow: 0, on: true,
         }),
-        against(gen, living, c(living), "north", 0.86, "fan", [0.45, 1.3, 0.45], {
-          category: "hvac", mount: "floor", flow: 0, on: false,
+        against(gen, living, c(living), "north", 0.38, "fan", [0.45, 1.3, 0.45], {
+          category: "hvac", mount: "floor", flow: 0, on: true,
         }),
         // Bedroom (bigger, tall). Bed in the corner against the walls, desk in a
         // corner, closet in a corner. NO heater or fan — the participant places
@@ -262,12 +273,11 @@ function buildWinter(): FloorPlan {
   // its right wall. Both start CLOSED (like every window in these tasks).
   addWindow(plan, "living", "north", 0.8, false);
   addWindow(plan, "bedroom", "east", 0.5, false);
-  // Everything structural is pinned: the doors, and the living room's glazing,
-  // which the build already decided. The BEDROOM window is the one thing left
-  // open, and it is the whole point of the task — so it is the only opening that
-  // can be dragged, and it can go on any wall of the bedroom.
-  for (const o of plan.doors) o.fixed = true;
-  for (const o of plan.windows) if (o.rooms.includes("living")) o.fixed = true;
+  // The whole envelope is pinned — doors and every window. This task is about
+  // where the heat goes, not about redesigning the building, and leaving the
+  // glazing draggable gave the participant a second, unrelated puzzle to solve
+  // at the same time. Openings can still be opened and closed.
+  for (const o of [...plan.doors, ...plan.windows]) o.fixed = true;
   return plan;
 }
 
@@ -402,15 +412,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // schedule is — and it is also the moment a buyer is actually asked where
     // they want the windows.
     brief:
-      "It's 2 °C outside and you're about to move into this newly built home. " +
-      "A heater and a fan have been delivered — they're sitting in the corner of " +
-      "the living room, and it's up to you where they go. The builder can also " +
-      "still cut the bedroom window into whichever wall you choose. Glass is " +
-      "where a home leaks its heat. Get both rooms warm enough to live in.",
+      "It's 2 °C outside and you've just moved into this newly built home. The " +
+      "heater and the fan were delivered and left by the kitchen, inside the " +
+      "front door. Glass is where a home leaks its heat, and right now the cold " +
+      "is pouring off the windows. Get both rooms warm enough to live in.",
     youCanChange:
-      "Move the heater and the fan anywhere, and put the bedroom window on any wall of the bedroom. " +
-      "There is one heater and one fan; the walls, doors and living-room window are already built.",
-    tools: { movable: ["heater", "fan"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
+      "Move the heater and the fan anywhere, aim the fan, and open or close the doors and windows. " +
+      "Both run on medium. The walls, doors and windows are already built.",
+    tools: { movable: ["heater", "fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
     // Bands, not floors. Living rooms sit in the ASHRAE 55 winter comfort zone
     // (~20–24 °C); a bedroom is conventionally kept cooler, so it takes the WHO
     // healthy-home minimum of 18 °C as its floor and shares the 24 °C ceiling.
@@ -421,6 +430,19 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     goals: [
       { label: "Bedroom is comfortable (18–24 °C)", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
       { label: "Living + kitchen is comfortable (20–24 °C)", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
+      // The third goal is what makes the real-world answer the right one. A room
+      // mean can sit at a comfortable 23 °C while the air spilling off the glass
+      // is near freezing and pooling across the floor — you feel that sitting by
+      // the window, and no room average shows it. The only way to clear it is to
+      // put the heat source under the window so its plume covers the pane, which
+      // is why radiators have lived under windows for a century.
+      {
+        label: "No cold draught off the living-room window (16 °C or above at the glass)",
+        metric: "temperature",
+        roomId: "living",
+        nearWindowOf: "living",
+        atLeast: 16,
+      },
     ],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold

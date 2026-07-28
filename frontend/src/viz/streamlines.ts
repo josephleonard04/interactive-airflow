@@ -162,6 +162,14 @@ export function buildStreamlinePaths(
      *  above a couch and still LOOK like it cuts through it — so the visual clip
      *  uses the real boxes, slightly inflated. */
     obstacles?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
+    /** Real wall slabs. The solver's voxels are ~0.4 m while a wall is 0.1 m
+     *  thick, so a wall often fails to fill the cell it runs through and the
+     *  `solid` flag reads false — which is how lines kept slipping through
+     *  walls even with the solid test in place. Clipping against the actual
+     *  geometry is exact regardless of grid resolution. */
+    walls?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
+    /** Open doorways/windows, which punch holes back through `walls`. */
+    gaps?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
   } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
@@ -195,9 +203,20 @@ export function buildStreamlinePaths(
   }));
   const inObstacle = (x: number, y: number, z: number) =>
     obs.some((b) => x > b.min[0] && x < b.max[0] && y > b.min[1] && y < b.max[1] && z > b.min[2] && z < b.max[2]);
+  const inBox = (
+    bs: Array<{ min: [number, number, number]; max: [number, number, number] }>,
+    x: number,
+    y: number,
+    z: number,
+  ) => bs.some((b) => x >= b.min[0] && x <= b.max[0] && y >= b.min[1] && y <= b.max[1] && z >= b.min[2] && z <= b.max[2]);
+  const wallBoxes = opts.walls ?? [];
+  const gapBoxes = opts.gaps ?? [];
+  // Inside a wall slab and NOT inside an open doorway/window = blocked.
+  const inWall = (x: number, y: number, z: number) =>
+    inBox(wallBoxes, x, y, z) && !inBox(gapBoxes, x, y, z);
   const FLOOR_Y = 0.14; // lines never draw inside the floor slab
   const blocked = (x: number, y: number, z: number) =>
-    y < FLOOR_Y || sample(x, y, z).solid || inObstacle(x, y, z);
+    y < FLOOR_Y || inWall(x, y, z) || sample(x, y, z).solid || inObstacle(x, y, z);
 
   const s1 = new THREE.Vector3();
   const s2 = new THREE.Vector3();
