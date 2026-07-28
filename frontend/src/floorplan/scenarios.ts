@@ -246,17 +246,20 @@ function buildWinter(): FloorPlan {
         // FACING the TV (east). A window on the bottom wall near the TV corner.
         against(gen, living, c(living), "east", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.5 }),
         centreItem(gen, living, "couch", [1.8, 0.8, 0.85], Math.PI / 2),
-        // The one heater and the one fan, delivered and left by the kitchen just
-        // inside the front door — where a delivery would actually be dropped, and
-        // a poor spot to heat from. They start OUT of the way rather than
-        // pre-solved, so where they end up is entirely the participant's call.
-        // Both run on medium and the power control is hidden: this task is about
-        // WHERE the heat goes, and leaving the dial exposed invites "turn it up"
-        // as a substitute for thinking about placement.
-        against(gen, living, c(living), "north", 0.06, "heater", [0.8, 0.5, 0.18], {
+        // The one heater and the one fan, delivered and left TOGETHER in the
+        // near-left corner of the living room, just inside the front door —
+        // where a delivery would actually be dropped, and a poor spot to heat
+        // from. They start OUT of the way rather than pre-solved, so where they
+        // end up is entirely the participant's call. Both run on medium and the
+        // power control is hidden: this task is about WHERE the heat goes, and
+        // leaving the dial exposed invites "turn it up" as a substitute for
+        // thinking about placement.
+        inCorner(gen, living, "north", "start", "heater", [0.8, 0.5, 0.18], {
           category: "hvac", mount: "floor", flow: 0, on: true,
         }),
-        against(gen, living, c(living), "north", 0.38, "fan", [0.45, 1.3, 0.45], {
+        // Beside it, against the left wall — same corner, clear of the heater's
+        // footprint so neither gets nudged away by the overlap pass.
+        against(gen, living, c(living), "west", 0.8, "fan", [0.45, 1.3, 0.45], {
           category: "hvac", mount: "floor", flow: 0, on: true,
         }),
         // Bedroom (bigger, tall). Bed in the corner against the walls, desk in a

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { SCENARIOS } from "../floorplan/scenarios";
-import { checkGoals, type GoalStatus } from "../intent/goals";
+import { checkGoals, goalPicture, type GoalStatus } from "../intent/goals";
 import { useSceneStore } from "../scene/store";
 import { tempGradientCss } from "../viz/temperature";
 
@@ -17,6 +17,45 @@ import { tempGradientCss } from "../viz/temperature";
 // tool is supposed to be explaining. The row says whether the room is
 // comfortable; "view" shows the room's warmth as a picture on the same colour
 // scale the Temp view uses. The bands are still enforced underneath.
+//
+// "view" is on every row from the moment the task opens — it is the GOAL, and a
+// goal you can only see after you have already run the simulation is not much
+// of a goal. Before the first run it shows where the home starts and where it
+// has to get to; once a run has landed, the left half becomes the room as it
+// actually is now, so the same picture doubles as progress.
+
+/** Which simulation view answers each kind of goal. */
+const MODE_FOR = { temperature: "temperature", smell: "contamination", draft: "airflow" } as const;
+
+/** One end of the before/after picture: a colour, what it is called, and which
+ *  end of the story it is. */
+function Swatch({ caption, color, word, accent }: { caption: string; color: string; word: string; accent?: boolean }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>{caption}</div>
+      <div
+        style={{
+          height: 40,
+          borderRadius: 8,
+          border: `1px solid ${accent ? "#2a9d8f" : "var(--line)"}`,
+          background: color,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "0 4px",
+          textAlign: "center",
+          color: "#12212a",
+          fontSize: 11.5,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          textShadow: "0 1px 0 rgba(255,255,255,.35)",
+        }}
+      >
+        {word}
+      </div>
+    </div>
+  );
+}
 
 export function TaskChecklist() {
   const scenarioId = useSceneStore((s) => s.scenarioId);
@@ -38,10 +77,9 @@ export function TaskChecklist() {
   // solve gives away the verdict before they have run anything. The mode being
   // viewed right now counts as soon as the solve is ready, so the gate never
   // depends on whether setSimMode fired before or after setSimReady.
-  const modeFor = { temperature: "temperature", smell: "contamination", draft: "airflow" } as const;
   const simulated = simActive && simReady && !recorded.includes(simMode) ? [...recorded, simMode] : recorded;
-  const unlocked = (goals ?? []).some((g) => simulated.includes(modeFor[g.metric]));
-  const pending = (goals ?? []).filter((g) => !simulated.includes(modeFor[g.metric]));
+  const unlocked = (goals ?? []).some((g) => simulated.includes(MODE_FOR[g.metric]));
+  const pending = (goals ?? []).filter((g) => !simulated.includes(MODE_FOR[g.metric]));
 
   useEffect(() => {
     if (!goals?.length || !unlocked) {
@@ -53,7 +91,7 @@ export function TaskChecklist() {
     // Off the paint path: the solve is heavy enough to drop a frame if it runs
     // inline with the edit that triggered it.
     const id = window.setTimeout(() => {
-      const ready = goals.filter((g) => simulated.includes(modeFor[g.metric]));
+      const ready = goals.filter((g) => simulated.includes(MODE_FOR[g.metric]));
       const scored = new Map(checkGoals(ready, plan, outdoorTemp).map((r) => [r.label, r]));
       if (!cancelled) {
         setRows(goals.map((g) => scored.get(g.label) ?? { label: g.label, met: false, detail: "", word: "" }));
@@ -84,8 +122,13 @@ export function TaskChecklist() {
         )}
       </h2>
       <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 7 }}>
-        {display.map((r) => {
+        {display.map((r, i) => {
           const open = shown === r.label;
+          const goal = goals[i];
+          const pic = goalPicture(goal, outdoorTemp);
+          // Before any run there is nothing measured, so "now" is where the home
+          // starts; after one, it is the room as it stands.
+          const now = r.color ? { color: r.color, word: r.word } : pic.before;
           return (
             <li key={r.label}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -110,54 +153,45 @@ export function TaskChecklist() {
                 <span style={{ fontSize: 12.5, lineHeight: 1.4, color: r.met ? "var(--muted)" : "var(--ink)" }}>
                   {r.label}
                 </span>
-                {r.color && (
-                  <button
-                    className="toggle"
-                    style={{ marginLeft: "auto", fontSize: 11, padding: "1px 8px" }}
-                    onClick={() => {
-                      // Show the real thing too, not just the swatch.
-                      setSimMode("temperature");
-                      setShown(open ? null : r.label);
-                    }}
-                  >
-                    {open ? "hide" : "view"}
-                  </button>
-                )}
+                <button
+                  className="toggle"
+                  style={{ marginLeft: "auto", fontSize: 11, padding: "1px 8px" }}
+                  title="See what this goal looks like"
+                  onClick={() => {
+                    // Show the real thing too, not just the swatch.
+                    setSimMode(MODE_FOR[goal.metric]);
+                    setShown(open ? null : r.label);
+                  }}
+                >
+                  {open ? "hide" : "view"}
+                </button>
               </div>
-              {open && r.color && (
+              {open && (
                 <div style={{ marginTop: 6, marginLeft: 25 }}>
-                  {/* The room's warmth, as a picture on the Temp view's scale. */}
-                  <div
-                    style={{
-                      height: 44,
-                      borderRadius: 8,
-                      border: "1px solid var(--line)",
-                      background: r.color,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "#12212a",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      textShadow: "0 1px 0 rgba(255,255,255,.35)",
-                    }}
-                  >
-                    {r.word}
+                  {/* Where it is now → where it has to get to. */}
+                  <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+                    <Swatch caption={r.color ? "now" : "at the start"} color={now.color} word={now.word} />
+                    <span style={{ alignSelf: "center", color: "var(--muted)", fontSize: 15 }}>→</span>
+                    <Swatch caption="goal" color={pic.after.color} word={pic.after.word} accent />
                   </div>
-                  {/* Where that colour sits between cold and warm — still no numbers. */}
-                  <div
-                    style={{
-                      marginTop: 4,
-                      height: 7,
-                      borderRadius: 4,
-                      background: tempGradientCss(),
-                      border: "1px solid var(--line)",
-                    }}
-                  />
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
-                    <span>cold</span>
-                    <span>warm</span>
-                  </div>
+                  {pic.onTempScale && (
+                    <>
+                      {/* Where those colours sit between cold and warm — still no numbers. */}
+                      <div
+                        style={{
+                          marginTop: 6,
+                          height: 7,
+                          borderRadius: 4,
+                          background: tempGradientCss(),
+                          border: "1px solid var(--line)",
+                        }}
+                      />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
+                        <span>cold</span>
+                        <span>warm</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </li>
