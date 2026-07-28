@@ -1,7 +1,7 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneSpeed } from "../sim/sim3d";
-import { rgbCss, tempColor } from "../viz/temperature";
+import { TEMP_MAX_C, TEMP_MIN_C, rgbCss, tempColor } from "../viz/temperature";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -24,6 +24,52 @@ export interface GoalStatus {
   /** The room's temperature as a CSS colour on the same scale the Temp view
    *  uses, so the checklist can SHOW the state instead of stating it. */
   color?: string;
+}
+
+/** The two ends of a goal, as a picture: what the home is like at the start,
+ *  and what "done" looks like. Shown BEFORE anything is simulated — a tick-box
+ *  alone says whether you are finished, not what finished looks like, and the
+ *  participant needs the target in front of them while they are working, not
+ *  after. Derived from the goal's own band and the day's weather, so it can
+ *  never drift from what the checklist scores.
+ *
+ *  It shows STATES, not moves. "Cold → comfortable" is the goal; "put the
+ *  heater under the window" is the answer, and the study exists to watch the
+ *  participant find that themselves. */
+export interface GoalPicture {
+  before: { color: string; word: string };
+  after: { color: string; word: string };
+  /** True when the two swatches sit on the Temp view's °C ramp, so the caller
+   *  can draw that ramp underneath them for context. */
+  onTempScale: boolean;
+}
+
+export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
+  if (g.metric === "temperature") {
+    // The home starts at the outdoor temperature and is carried from there, so
+    // that is honestly where "before" sits — cold in winter, hot in summer.
+    const lo = g.atLeast ?? TEMP_MIN_C;
+    const hi = g.atMost ?? TEMP_MAX_C;
+    const target = (lo + hi) / 2;
+    return {
+      before: { color: rgbCss(tempColor(outdoorTemp)), word: warmthWord(outdoorTemp, g) },
+      after: { color: rgbCss(tempColor(target)), word: "comfortable" },
+      onTempScale: true,
+    };
+  }
+  if (g.metric === "smell") {
+    // Same violet ramp the contamination view draws.
+    return {
+      before: { color: "#8a3fd0", word: "it reaches here" },
+      after: { color: "#efe7fb", word: "clear" },
+      onTempScale: false,
+    };
+  }
+  return {
+    before: { color: "#2f7ff0", word: "you'd feel it" },
+    after: { color: "#dfe8f2", word: "calm" },
+    onTempScale: false,
+  };
 }
 
 /** Footprint of an item, rotation-aware, as a floor rect to measure over. */

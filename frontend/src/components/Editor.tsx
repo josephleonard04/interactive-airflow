@@ -413,8 +413,18 @@ function FloorInteractor({ offset }: { offset: Vec3 }) {
 type ViewName = "top" | "iso" | "fit";
 
 // When the sim panel overlays the left edge of the canvas, shift the rendered
-// view right by half the covered width so the house stays centred in the part
-// of the canvas the user can actually see (instead of hiding behind the panel).
+// view right by the covered width so the house stays centred in the part of the
+// canvas the user can actually see (instead of hiding behind the panel).
+//
+// PAN ONLY — NO ZOOM, and the zoom came from the way OUT of it. setViewOffset
+// overwrites camera.aspect with fullWidth/fullHeight (a wider-than-canvas value
+// here) and clearViewOffset does NOT put it back — it only disables the view.
+// So closing the panel left the camera on the wide aspect until the next window
+// resize, and a too-wide aspect fits more world across the canvas: the house
+// shrank. Reopening the panel restored the correct framing, which read as the
+// house "getting bigger" every time Simulate was pressed. Restoring the aspect
+// on the way out is the whole fix; the house is now the same size open or shut,
+// and the offset does nothing but slide the view sideways.
 const SIM_PANEL_COVER = 330; // panel width 300 + left offset/margins
 function PanelOffset() {
   const simActive = useSceneStore((s) => s.simActive);
@@ -423,12 +433,17 @@ function PanelOffset() {
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera;
     (globalThis as unknown as { __editorCamera?: THREE.Camera }).__editorCamera = cam; // debug/scripting handle
+    const reset = () => {
+      cam.clearViewOffset();
+      cam.aspect = size.width / size.height;
+      cam.updateProjectionMatrix();
+    };
     if (simActive && size.width > SIM_PANEL_COVER * 2) {
       cam.setViewOffset(size.width + SIM_PANEL_COVER, size.height, 0, 0, size.width, size.height);
     } else {
-      cam.clearViewOffset();
+      reset();
     }
-    return () => cam.clearViewOffset();
+    return reset;
   }, [camera, simActive, size.width, size.height]);
   return null;
 }

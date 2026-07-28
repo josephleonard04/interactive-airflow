@@ -194,7 +194,19 @@ export function buildStreamlinePaths(
   const MIN_SPEED = 0.08; // a line must carry real air somewhere, else it's noise
   const MIN_POINTS = 6; // and trace a real path, not a stub
   const step = dx * 0.75;
-  const maxSteps = 170;
+  // LENGTH BUDGET, not a step count. A flat 170 steps is ~34 m of path in each
+  // direction, which in a 7 m home means every line laps the rooms several
+  // times and the picture turns to spaghetti — worse the faster the air moves,
+  // which is why raising the fan force brought the mess back. A line's job is
+  // to show ONE journey through the house, so it gets a little under one
+  // house-diagonal of travel each way and then stops.
+  const diag = Math.hypot(nx * dx, nz * dx);
+  const maxSteps = Math.max(20, Math.min(170, Math.round((diag * 0.9) / step)));
+  // A recirculating cell coils a line into a ball of yarn on the spot. Once the
+  // path comes back to where it already was, it has stopped telling us anything
+  // new — cut it there.
+  const LOOP_BACK = step * 0.9;
+  const LOOP_SKIP = 10; // ignore the neighbours it has only just left
   const seeds = seedPoints(built, sample, opts.maxSeeds ?? 30, opts.rooms ?? [], 0.02, opts.gateways ?? []);
   // margin keeps a line from hugging a surface so closely it looks embedded
   const obs = (opts.obstacles ?? []).map((b) => ({
@@ -244,7 +256,11 @@ export function buildStreamlinePaths(
     const p = seed.clone();
     const raw: THREE.Vector3[] = [p.clone()];
     lastDir.set(0, 0, 0);
-    let stallBudget = 10;
+    // Coasting on the last direction keeps a line alive across a slow room, but
+    // ten steps of it is 1.8 m of line drawn through air that is barely moving —
+    // invented flow, and a good share of the clutter. Enough to cross a doorway,
+    // not enough to cross a room.
+    let stallBudget = 4;
     let peak = 0;
     for (let n = 0; n < maxSteps; n++) {
       if (!inBounds(p) || blocked(p.x, p.y, p.z)) break;
@@ -262,12 +278,30 @@ export function buildStreamlinePaths(
       // otherwise every line overshoots one step past the wall before stopping,
       // which is how streamlines were poking out through open windows
       if (blocked(next.x, next.y, next.z) || !inBounds(next)) break;
+      let looped = false;
+      for (let m = 0; m < raw.length - LOOP_SKIP; m++) {
+        if (raw[m].distanceTo(next) < LOOP_BACK) { looped = true; break; }
+      }
+      if (looped) break;
       lastDir.copy(s2);
       raw.push(next);
       p.copy(next);
     }
     return { raw, peak };
   };
+
+  // Two seeds a doorway apart trace nearly the same journey, and a second line
+  // laid on top of the first adds no information — just weight. Keep the paths
+  // already drawn and drop anything that mostly retraces one.
+  const drawn: THREE.Vector3[][] = [];
+  const NEAR = Math.max(dx * 1.2, 0.4); // "the same line", in metres
+  const DUP_SHARE = 0.7; // this much of a path lying on an existing one = a copy
+  const duplicates = (path: THREE.Vector3[]) =>
+    drawn.some((other) => {
+      let on = 0;
+      for (const q of path) if (other.some((o) => o.distanceTo(q) < NEAR)) on++;
+      return on >= path.length * DUP_SHARE;
+    });
 
   for (const seed of seeds) {
     // Trace BOTH ways from the seed. Forward alone answers "where does this air
@@ -281,6 +315,8 @@ export function buildStreamlinePaths(
     const peak = Math.max(fwd.peak, back.peak);
     // meaningful only: a real path that carries real air somewhere
     if (raw.length < MIN_POINTS || peak < MIN_SPEED) continue;
+    if (duplicates(raw)) continue;
+    drawn.push(raw);
 
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);
