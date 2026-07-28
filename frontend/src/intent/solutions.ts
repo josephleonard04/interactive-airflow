@@ -238,25 +238,28 @@ function strategiesFor(goal: OptimizeGoal): Strategy[] {
   if (goal === "cool" || goal === "warm") {
     const dev = goal === "cool" ? "ac" : "heater";
     const other = goal === "cool" ? "heater" : "ac";
+    // WINDOWS STAY SHUT for a heating or cooling goal. Opening one throws the
+    // conditioned air straight outside and pulls the outdoor temperature in —
+    // it is the opposite of the goal, and suggesting it to someone trying to
+    // warm a room in winter reads as broken advice however the numbers land.
+    // Interior doors are still searched: those move heat between rooms.
     for (const power of [2, 3]) {
       for (const doorsOpen of [true, false]) {
-        for (const win of [false, true]) {
-          add({
-            id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}-${win ? "win" : "nowin"}`,
-            label: `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
-            devices: {
-              [dev]: { on: true, power },
-              [other]: { on: false },
-              fan: { on: true, power: doorsOpen ? 2 : 1, oscillate: true },
-            },
-            interiorDoors: doorsOpen,
-            windows: win,
-            note: [
-              doorsOpen ? "interior doors open so the air reaches every room" : "interior doors shut to concentrate it",
-              win ? "windows open" : "windows shut",
-            ].join(", "),
-          });
-        }
+        add({
+          id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}`,
+          label: `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
+          devices: {
+            [dev]: { on: true, power },
+            [other]: { on: false },
+            fan: { on: true, power: doorsOpen ? 2 : 1, oscillate: true },
+          },
+          interiorDoors: doorsOpen,
+          windows: false,
+          note: [
+            doorsOpen ? "interior doors open so the air reaches every room" : "interior doors shut to concentrate it",
+            "windows shut to keep the outdoor air out",
+          ].join(", "),
+        });
       }
     }
     return out;
