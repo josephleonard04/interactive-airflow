@@ -231,7 +231,7 @@ function evaluate(
 
 // ---- strategies: the discrete variables that were never searched ----
 
-function strategiesFor(goal: OptimizeGoal): Strategy[] {
+function strategiesFor(goal: OptimizeGoal, lockPower = false): Strategy[] {
   const out: Strategy[] = [];
   const add = (s: Strategy) => out.push(s);
 
@@ -243,15 +243,21 @@ function strategiesFor(goal: OptimizeGoal): Strategy[] {
     // it is the opposite of the goal, and suggesting it to someone trying to
     // warm a room in winter reads as broken advice however the numbers land.
     // Interior doors are still searched: those move heat between rooms.
-    for (const power of [2, 3]) {
+    for (const power of lockPower ? [2] : [2, 3]) {
       for (const doorsOpen of [true, false]) {
         add({
           id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}`,
-          label: `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
+          // With the dial locked the only thing that varies is placement, so the
+          // label must describe THAT rather than a power the user can't set.
+          label: lockPower
+            ? `Move the ${(DEVICE_LABEL[dev] ?? dev).toLowerCase()} and the fan`
+            : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
           devices: {
             [dev]: { on: true, power },
             [other]: { on: false },
-            fan: { on: true, power: doorsOpen ? 2 : 1, oscillate: true },
+            // Locked tasks keep the fan on medium too — it is a device dial like
+            // any other, and dropping it to low is a change the user cannot make.
+            fan: { on: true, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
           },
           interiorDoors: doorsOpen,
           windows: false,
@@ -266,11 +272,11 @@ function strategiesFor(goal: OptimizeGoal): Strategy[] {
   }
 
   // ventilate / circulate / balanced: the openings matter more than the power
-  for (const power of [2, 3]) {
+  for (const power of lockPower ? [2] : [2, 3]) {
     for (const win of [true, false]) {
       add({
         id: `air${power}-${win ? "win" : "nowin"}`,
-        label: `Air movers on ${power === 3 ? "high" : "medium"}`,
+        label: lockPower ? "Move the fan and vents" : `Air movers on ${power === 3 ? "high" : "medium"}`,
         devices: { fan: { on: true, power, oscillate: true }, supply: { on: true, power }, return: { on: true, power } },
         interiorDoors: true,
         windows: win,
@@ -384,6 +390,11 @@ export interface FindOptions {
   want?: number;
   /** Coarse screening evaluations to spend across all strategies. */
   screenBudget?: number;
+  /** The task forbids changing the device dial (ScenarioTools.lockPower), so
+   *  every suggestion must be reachable by MOVING things. Offering "heater on
+   *  high" when the control is hidden proposes something the participant
+   *  cannot do. */
+  lockPower?: boolean;
 }
 
 /**
@@ -399,7 +410,7 @@ export function findSolutions(
 ): Solution[] {
   const want = opts.want ?? 3;
   const budget = { left: opts.screenBudget ?? 48 };
-  const strategies = strategiesFor(goal);
+  const strategies = strategiesFor(goal, opts.lockPower === true);
 
   // Split the screening budget EVENLY across strategies. A single shared
   // counter let the first strategy consume everything and left the rest with no

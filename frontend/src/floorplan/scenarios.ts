@@ -427,22 +427,13 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // satisfy both — all of them medium power with the heat delivered toward
     // the doorway. Every high-power setting overshoots and now fails, which is
     // the point: cranking it is not a solution.
+    // Thresholds stay out of the label. A participant who reads "18–24 °C" starts
+    // optimising toward a number instead of judging whether the home looks warm,
+    // and the number is what the tool is supposed to be explaining to them.
+    // The bands are still enforced — they are just not the interface.
     goals: [
-      { label: "Bedroom is comfortable (18–24 °C)", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
-      { label: "Living + kitchen is comfortable (20–24 °C)", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
-      // The third goal is what makes the real-world answer the right one. A room
-      // mean can sit at a comfortable 23 °C while the air spilling off the glass
-      // is near freezing and pooling across the floor — you feel that sitting by
-      // the window, and no room average shows it. The only way to clear it is to
-      // put the heat source under the window so its plume covers the pane, which
-      // is why radiators have lived under windows for a century.
-      {
-        label: "No cold draught off the living-room window (16 °C or above at the glass)",
-        metric: "temperature",
-        roomId: "living",
-        nearWindowOf: "living",
-        atLeast: 16,
-      },
+      { label: "Bedroom is comfortable", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
+      { label: "Living + kitchen is comfortable", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
     ],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
@@ -490,8 +481,8 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // each other, since the cheapest way to hit the temperature is to point
     // the air straight at the bed.
     goals: [
-      { label: "Studio is comfortable (23–26 °C)", metric: "temperature", roomId: "studio", atLeast: 23, atMost: 26 },
-      { label: "Air over the bed is calm (no draught)", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.25 },
+      { label: "Studio is comfortable", metric: "temperature", roomId: "studio", atLeast: 23, atMost: 26 },
+      { label: "Air over the bed is calm", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.25 },
     ],
     success:
       "Studio ≤ 26 °C at 33 °C outdoors AND mean air speed in the bed zone ≤ 0.25 m/s — " +
