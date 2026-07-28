@@ -7,6 +7,7 @@ import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
 import { TaskChecklist } from "./TaskChecklist";
+import { SubmitTask } from "./SubmitTask";
 
 /** One-per-home appliances in a study task — the Add button caps at this. */
 const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
@@ -148,6 +149,10 @@ export function Panel() {
 
       {/* Live tick-list of what the task actually requires. */}
       <TaskChecklist />
+
+      {/* …and the way out of it. Directly under the tick-list, because "am I
+          done?" and "I'm done" are the same thought. */}
+      <SubmitTask />
 
       <section>
         <h2>Edit the space</h2>

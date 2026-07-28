@@ -186,6 +186,17 @@ export interface SceneState {
    *  review decision and plan change, timestamped, downloadable as JSON. */
   sessionLog: LogEvent[];
   logEvent: (kind: LogEvent["kind"], data: Record<string, unknown>) => void;
+  /** When this task was opened — every event carries its offset from here, so a
+   *  session reads as a timeline rather than a pile of wall-clock stamps. */
+  sessionStart: number;
+  /** Record the goal verdict whenever it CHANGES, so the timeline shows when
+   *  each tick-box went green and what the participant had just done. */
+  logGoalStatus: (rows: Array<{ label: string; met: boolean; detail: string }>) => void;
+  /** The participant says they are done. Scores the goals one last time, seals
+   *  the log and returns the report; null if there was nothing to submit. */
+  submitSession: () => SessionReport | null;
+  /** Set once submitted, so the panel can stop offering it twice. */
+  submitted: SessionReport | null;
 
   /** Summary of the last change, pending Accept/Cancel. */
   pendingChange: PendingChange | null;
@@ -195,8 +206,24 @@ export interface SceneState {
 
 export interface LogEvent {
   t: number; // ms since epoch
-  kind: "goal" | "check" | "preset" | "review" | "sketch" | "edit" | "engine";
+  /** ms since the task was opened — the timeline axis. */
+  at: number;
+  kind: "goal" | "check" | "preset" | "review" | "sketch" | "edit" | "engine" | "goals" | "submit";
   data: Record<string, unknown>;
+}
+
+/** What a finished session hands back: who did what, in order, and whether the
+ *  task was actually met at the end. */
+export interface SessionReport {
+  scenario: string | null;
+  title: string | null;
+  startedAt: string;
+  submittedAt: string;
+  durationSec: number;
+  goals: Array<{ label: string; met: boolean; detail: string }>;
+  allGoalsMet: boolean;
+  counts: Record<string, number>;
+  events: LogEvent[];
 }
 
 export interface PendingChange {
@@ -210,6 +237,8 @@ export type AirflowStyle = "dots" | "lines";
 
 let customId = 0;
 const HISTORY = 50;
+/** Log coordinates to the centimetre — the log is for reading, not replaying. */
+const round2 = (v: number) => Math.round(v * 100) / 100;
 let dragSnapshot: FloorPlan | null = null;
 let openingDragSnapshot: FloorPlan | null = null;
 
@@ -331,8 +360,56 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   sessionLog: [],
+  sessionStart: Date.now(),
+  submitted: null,
   logEvent: (kind, data) =>
-    set((s) => ({ sessionLog: [...s.sessionLog, { t: Date.now(), kind, data }] })),
+    set((s) => ({
+      sessionLog: [...s.sessionLog, { t: Date.now(), at: Date.now() - s.sessionStart, kind, data }],
+    })),
+
+  logGoalStatus: (rows) => {
+    const s = get();
+    // Only when it CHANGES. The checklist re-scores after every edit, and a line
+    // per edit saying "still 1 of 2" buries the moment it became 2 of 2.
+    const last = [...s.sessionLog].reverse().find((e) => e.kind === "goals");
+    const key = rows.map((r) => `${r.label}=${r.met}`).join("|");
+    if (last && last.data.key === key) return;
+    s.logEvent("goals", { key, met: rows.filter((r) => r.met).length, of: rows.length, rows });
+  },
+
+  submitSession: () => {
+    const s = get();
+    if (s.submitted) return s.submitted;
+    const sc = s.scenarioId ? SCENARIOS[s.scenarioId] : null;
+    // Score the goals one final time against the plan as submitted, rather than
+    // trusting whatever the checklist last happened to show: the participant may
+    // have moved something after the last solve.
+    const goals = (sc?.goals ?? []).length
+      ? checkGoals(sc!.goals!, s.plan, s.outdoorTemp).map((r) => ({ label: r.label, met: r.met, detail: r.detail }))
+      : [];
+    const now = Date.now();
+    const counts: Record<string, number> = {};
+    for (const e of s.sessionLog) {
+      const what = e.kind === "edit" ? `edit:${String(e.data.what)}` : e.kind;
+      counts[what] = (counts[what] ?? 0) + 1;
+    }
+    const report: SessionReport = {
+      scenario: s.scenarioId,
+      title: sc?.title ?? null,
+      startedAt: new Date(s.sessionStart).toISOString(),
+      submittedAt: new Date(now).toISOString(),
+      durationSec: Math.round((now - s.sessionStart) / 1000),
+      goals,
+      allGoalsMet: goals.length > 0 && goals.every((g) => g.met),
+      counts,
+      events: [
+        ...s.sessionLog,
+        { t: now, at: now - s.sessionStart, kind: "submit" as const, data: { goals, allGoalsMet: goals.every((g) => g.met) } },
+      ],
+    };
+    set({ submitted: report, sessionLog: report.events });
+    return report;
+  },
 
   toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
   // Switching view does NOT re-solve — one converged field feeds every mode —
@@ -557,7 +634,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       solutionGoal: null,
       solutionTargets: [],
       pendingChange: null,
-      sessionLog: [{ t: Date.now(), kind: "preset", data: { scenario: id, title: sc.title } }],
+      // A task is a session: the clock and the log both start here.
+      sessionStart: Date.now(),
+      submitted: null,
+      sessionLog: [{ t: Date.now(), at: 0, kind: "preset", data: { scenario: id, title: sc.title } }],
       past: [],
       future: [],
     });
@@ -612,6 +692,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       if (moved) {
         // furniture defines room identity — re-name rooms after a move
         set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [], plan: autoNameRooms(s.plan) }));
+        for (const it of get().plan.items) {
+          const was = snap.items.find((o) => o.id === it.id);
+          if (!was || (was.position[0] === it.position[0] && was.position[2] === it.position[2])) continue;
+          get().logEvent("edit", {
+            what: "move",
+            item: it.type,
+            room: it.roomId,
+            from: [round2(was.position[0]), round2(was.position[2])],
+            to: [round2(it.position[0]), round2(it.position[2])],
+          });
+        }
       }
     }
     set({ draggingId: id });
@@ -624,7 +715,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const moved = openingDragSnapshot !== get().plan;
       const snap = openingDragSnapshot;
       openingDragSnapshot = null;
-      if (moved) set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [] }));
+      if (moved) {
+        set((s) => ({ past: [...s.past, snap].slice(-HISTORY), future: [] }));
+        const o = [...get().plan.doors, ...get().plan.windows].find((x) => x.id === get().draggingOpeningId);
+        get().logEvent("edit", { what: "move-opening", opening: o?.kind ?? "opening", id: get().draggingOpeningId });
+      }
     }
     set({ draggingOpeningId: id });
   },
@@ -782,17 +877,25 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       ),
     })),
 
-  updateItem: (id, patch) =>
+  updateItem: (id, patch) => {
+    const it = get().plan.items.find((o) => o.id === id);
+    // The device dials and the aim: exactly the changes a participant makes
+    // without dragging anything, and invisible in a before/after of positions.
+    get().logEvent("edit", { what: "adjust", item: it?.type ?? id, ...patch });
     set((s) => ({
       ...snapshot(s),
-      plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, ...patch } : it)),
-    })),
+      plan: mapItems(s.plan, (o) => (o.id === id ? { ...o, ...patch } : o)),
+    }));
+  },
 
-  rotateItem: (id, deltaRad) =>
+  rotateItem: (id, deltaRad) => {
+    const it = get().plan.items.find((o) => o.id === id);
+    get().logEvent("edit", { what: "rotate", item: it?.type ?? id, by: round2(deltaRad) });
     set((s) => ({
       ...snapshot(s),
-      plan: mapItems(s.plan, (it) => (it.id === id ? { ...it, rotationY: it.rotationY + deltaRad } : it)),
-    })),
+      plan: mapItems(s.plan, (o) => (o.id === id ? { ...o, rotationY: o.rotationY + deltaRad } : o)),
+    }));
+  },
 
   addItem: (type, position) => {
     const spec = CATALOG[type];
@@ -834,6 +937,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       flow: spec.flow,
       movable: true,
     };
+    get().logEvent("edit", { what: "add", item: type, room: item.roomId });
     set((s) => ({
       ...snapshot(s),
       plan: autoNameRooms({ ...s.plan, items: [...s.plan.items, item] }),
@@ -852,12 +956,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       },
     })),
 
-  removeItem: (id) =>
+  removeItem: (id) => {
+    const it = get().plan.items.find((o) => o.id === id);
+    get().logEvent("edit", { what: "remove", item: it?.type ?? id });
     set((s) => ({
       ...snapshot(s),
-      plan: { ...s.plan, items: s.plan.items.filter((it) => it.id !== id) },
+      plan: { ...s.plan, items: s.plan.items.filter((o) => o.id !== id) },
       selectedId: s.selectedId === id ? null : s.selectedId,
-    })),
+    }));
+  },
 
   addWall: (a, b) => {
     const { plan } = get();
@@ -995,7 +1102,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       };
     }),
 
-  toggleOpening: (id) =>
+  toggleOpening: (id) => {
+    const o0 = [...get().plan.doors, ...get().plan.windows].find((o) => o.id === id);
+    get().logEvent("edit", {
+      what: o0?.open ? "close" : "open",
+      opening: o0?.kind ?? "opening",
+      between: o0?.rooms,
+    });
     set((s) => {
       const flip = (o: Opening) => (o.id === id ? { ...o, open: !o.open } : o);
       return {
@@ -1007,7 +1120,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           windows: s.plan.windows.map(flip),
         },
       };
-    }),
+    });
+  },
 
   removeSelected: () => {
     const { selectedId, selectedWallId, selectedOpeningId, removeItem, removeWall, removeOpening } = get();

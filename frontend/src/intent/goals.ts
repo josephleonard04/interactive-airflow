@@ -1,7 +1,6 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneSpeed } from "../sim/sim3d";
-import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor } from "../viz/temperature";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -48,18 +47,10 @@ export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
   if (g.metric === "temperature") {
     // The home starts at the outdoor temperature and is carried from there, so
     // that is honestly where "before" sits — cold in winter, hot in summer.
-    const lo = g.atLeast ?? TEMP_MIN_C;
-    const hi = g.atMost ?? TEMP_MAX_C;
-    // The WARM end of the band, not its midpoint. A bedroom band of 18–24 has
-    // its midpoint at 21 °C, which on the ramp is still light blue — so "goal:
-    // comfortable" was drawn in the colour of a cool room, and the picture
-    // argued against its own caption. TEMP_NEUTRAL_C is the ramp's neutral
-    // point by construction; clamped into the band it is the warmest reading
-    // the goal actually accepts in winter, and stays inside the band in summer.
-    const target = Math.min(hi, Math.max(lo, TEMP_NEUTRAL_C));
+    const start = warmthWord(outdoorTemp, g);
     return {
-      before: { color: rgbCss(tempColor(outdoorTemp)), word: warmthWord(outdoorTemp, g) },
-      after: { color: rgbCss(tempColor(target)), word: "comfortable" },
+      before: { color: tempSwatch(start), word: start },
+      after: { color: tempSwatch("comfortable"), word: "comfortable" },
       onTempScale: true,
     };
   }
@@ -113,6 +104,26 @@ export function windowZone(plan: FloorPlan, roomId: string): Rect | null {
   const inward = Math.abs(line - z) < Math.abs(line - (z + d)) ? 1 : -1;
   return { x: x0, z: inward > 0 ? line : line - DEPTH, w: x1 - x0, d: DEPTH };
 }
+
+/** Swatch colour for a temperature state in the task picture.
+ *
+ *  Deliberately NOT the Temp view's ramp. The ramp is an absolute scale, so a
+ *  cold room came out near-black and a comfortable one came out cream or, worse,
+ *  mid-blue — a "comfortable" goal painted in the colour of a cool room. These
+ *  two swatches are not a reading, they are the two ends of a story: cold is a
+ *  light blue, comfortable is a light red. Light enough for dark ink either way. */
+function tempSwatch(word: string): string {
+  if (word === "too warm") return "#f3b1a4";
+  if (word === "comfortable") return "#f9d8d3";
+  return "#cfe3f7";
+}
+
+/** The little cold→warm bar under the picture, in the picture's own colours.
+ *  Drawing it on the Temp view's absolute ramp put a near-black-to-crimson strip
+ *  under two pale swatches that no longer sat anywhere on it. */
+export const SWATCH_SCALE_CSS = `linear-gradient(90deg, ${tempSwatch("cold")}, ${tempSwatch(
+  "comfortable",
+)}, ${tempSwatch("too warm")})`;
 
 /** What a person would say about the room, without quoting the threshold. */
 function warmthWord(c: number, g: ScenarioGoal): string {
@@ -172,7 +183,8 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       // when it fails, though: a glass reading that passes must not be able to
       // caption a satisfied row "not quite warm enough".
       const shown = glass !== null && g.windowAtLeast !== undefined && glass < g.windowAtLeast ? glass : c;
-      return { label: g.label, met, detail, word: warmthWord(shown, g), color: rgbCss(tempColor(shown)) };
+      const word = warmthWord(shown, g);
+      return { label: g.label, met, detail, word, color: tempSwatch(word) };
     }
     const met = (g.atLeast === undefined || raw >= g.atLeast) && (g.atMost === undefined || raw <= g.atMost);
     // A 0..1 concentration means nothing to a non-expert, so show it as a plain
