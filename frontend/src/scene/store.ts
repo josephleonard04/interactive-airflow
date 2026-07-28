@@ -539,7 +539,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           });
           return;
         }
-        const options = findSolutions(before, goal, targetIds, { outdoorTemp: s.outdoorTemp, want: 3 });
+        const options = findSolutions(before, goal, targetIds, {
+          outdoorTemp: s.outdoorTemp,
+          want: 3,
+          lockPower: s.tools.lockPower === true,
+        });
         get().logEvent("goal", {
           text: goalText,
           objective: obj,

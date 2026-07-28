@@ -1,6 +1,7 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneSpeed } from "../sim/sim3d";
+import { rgbCss, tempColor } from "../viz/temperature";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -13,8 +14,16 @@ import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneS
 export interface GoalStatus {
   label: string;
   met: boolean;
-  /** Short measured value, e.g. "19.5 °C". Empty when it couldn't be read. */
+  /** Short measured value, e.g. "19.5 °C". Empty when it couldn't be read.
+   *  Kept for logs and the researcher's view — NOT rendered in the checklist,
+   *  where a number invites optimising toward the number. */
   detail: string;
+  /** Plain word for what the room is like: "warm enough", "too cold", "calm".
+   *  What a person would say, rather than a reading. */
+  word: string;
+  /** The room's temperature as a CSS colour on the same scale the Temp view
+   *  uses, so the checklist can SHOW the state instead of stating it. */
+  color?: string;
 }
 
 /** Footprint of an item, rotation-aware, as a floor rect to measure over. */
@@ -51,6 +60,13 @@ function windowZone(plan: FloorPlan, roomId: string): Rect | null {
   return { x: x0, z: inward > 0 ? line : line - DEPTH, w: x1 - x0, d: DEPTH };
 }
 
+/** What a person would say about the room, without quoting the threshold. */
+function warmthWord(c: number, g: ScenarioGoal): string {
+  if (g.atLeast !== undefined && c < g.atLeast) return c < g.atLeast - 4 ? "cold" : "not quite warm enough";
+  if (g.atMost !== undefined && c > g.atMost) return "too warm";
+  return "comfortable";
+}
+
 export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: number): GoalStatus[] {
   const needsTemp = goals.some((g) => g.metric === "temperature");
   const needsSmell = goals.some((g) => g.metric === "smell");
@@ -71,24 +87,24 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
     if (g.metric === "draft") {
       const zone = g.nearItem ? itemZone(plan, g.nearItem) : plan.rooms.find((r) => r.id === g.roomId)?.rect ?? null;
       const speed = zone ? zoneSpeed(built, zone) : null;
-      if (speed === null) return { label: g.label, met: false, detail: "" };
+      if (speed === null) return { label: g.label, met: false, detail: "", word: "" };
       const ok = (g.atLeast === undefined || speed >= g.atLeast) && (g.atMost === undefined || speed <= g.atMost);
       // m/s means nothing to a non-expert — say what it would feel like.
-      return { label: g.label, met: ok, detail: ok ? "calm" : "you'd feel it" };
+      return { label: g.label, met: ok, detail: speed.toFixed(2), word: ok ? "calm" : "you'd feel it" };
     }
 
     // Temperature measured in a sub-zone rather than over the whole room.
     if (g.metric === "temperature" && g.nearWindowOf) {
       const zone = windowZone(plan, g.nearWindowOf);
       const delta = zone ? zoneMean(built, fields.temp, zone) : null;
-      if (delta === null) return { label: g.label, met: false, detail: "" };
+      if (delta === null) return { label: g.label, met: false, detail: "", word: "" };
       const c = Number((outdoorTemp + delta).toFixed(1));
       const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
-      return { label: g.label, met, detail: `${c.toFixed(1)} °C` };
+      return { label: g.label, met, detail: `${c.toFixed(1)} °C`, word: warmthWord(c, g), color: rgbCss(tempColor(c)) };
     }
 
     const raw = g.metric === "temperature" ? temps?.get(g.roomId) : smells?.get(g.roomId);
-    if (raw === undefined || raw === null) return { label: g.label, met: false, detail: "" };
+    if (raw === undefined || raw === null) return { label: g.label, met: false, detail: "", word: "" };
 
     if (g.metric === "temperature") {
       // Judge the value the participant can SEE, not the raw float. Comparing
@@ -96,11 +112,11 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       // a box that looks stuck for no visible reason.
       const c = Number((outdoorTemp + raw).toFixed(1));
       const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
-      return { label: g.label, met, detail: `${c.toFixed(1)} °C` };
+      return { label: g.label, met, detail: `${c.toFixed(1)} °C`, word: warmthWord(c, g), color: rgbCss(tempColor(c)) };
     }
     const met = (g.atLeast === undefined || raw >= g.atLeast) && (g.atMost === undefined || raw <= g.atMost);
     // A 0..1 concentration means nothing to a non-expert, so show it as a plain
     // word rather than a number the participant would have to learn to read.
-    return { label: g.label, met, detail: met ? "clear" : "still there" };
+    return { label: g.label, met, detail: raw.toFixed(3), word: met ? "clear" : "still there" };
   });
 }
