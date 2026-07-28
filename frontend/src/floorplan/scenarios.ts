@@ -420,8 +420,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // real build runs — the structural plan is frozen long before the window
     // schedule is — and it is also the moment a buyer is actually asked where
     // they want the windows.
+    // No number in the brief. "It's 2 °C outside" is a reading, and a reading is
+    // the one thing this tool is supposed to be explaining to someone who does
+    // not think in degrees; it also invites arithmetic against the comfort band.
+    // The weather is a fact of the task, said the way a person would say it.
     brief:
-      "It's 2 °C outside and you've just moved into this newly built home. The " +
+      "It's very cold outside and you've just moved into this newly built home. The " +
       "heater and the fan were delivered and left by the kitchen, inside the " +
       "front door. Glass is where a home leaks its heat, and right now the cold " +
       "is pouring off the windows. Get both rooms warm enough to live in.",

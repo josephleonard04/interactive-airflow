@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { SCENARIOS } from "../floorplan/scenarios";
-import { checkGoals, goalPicture, type GoalStatus } from "../intent/goals";
+import { SWATCH_SCALE_CSS, checkGoals, goalPicture, type GoalStatus } from "../intent/goals";
 import { useSceneStore } from "../scene/store";
-import { tempGradientCss } from "../viz/temperature";
+
 
 // The task as a live tick-list.
 //
@@ -85,6 +85,7 @@ export function TaskChecklist() {
   const simActive = useSceneStore((s) => s.simActive);
   const simReady = useSceneStore((s) => s.simReady);
   const simMode = useSceneStore((s) => s.simMode);
+  const logGoalStatus = useSceneStore((s) => s.logGoalStatus);
   const [rows, setRows] = useState<GoalStatus[]>([]);
   const [checking, setChecking] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
@@ -113,8 +114,12 @@ export function TaskChecklist() {
       const ready = goals.filter((g) => simulated.includes(MODE_FOR[g.metric]));
       const scored = new Map(checkGoals(ready, plan, outdoorTemp).map((r) => [r.label, r]));
       if (!cancelled) {
-        setRows(goals.map((g) => scored.get(g.label) ?? { label: g.label, met: false, detail: "", word: "" }));
+        const next = goals.map((g) => scored.get(g.label) ?? { label: g.label, met: false, detail: "", word: "" });
+        setRows(next);
         setChecking(false);
+        // The verdict is part of the story, so it goes in the log next to the
+        // edit that produced it — see logGoalStatus (it de-duplicates).
+        logGoalStatus(next.map((r) => ({ label: r.label, met: r.met, detail: r.detail })));
       }
     }, 60);
     return () => {
@@ -201,7 +206,7 @@ export function TaskChecklist() {
                           marginTop: 6,
                           height: 7,
                           borderRadius: 4,
-                          background: tempGradientCss(),
+                          background: SWATCH_SCALE_CSS,
                           border: "1px solid var(--line)",
                         }}
                       />
