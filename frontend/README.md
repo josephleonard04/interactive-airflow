@@ -21,13 +21,19 @@ placement search are all client-side. There is no server to stand up.
 
 Two ways, neither of which asks them to install anything.
 
-**A link.** The normal build is a static site:
+**A link — the one that keeps working.** `.github/workflows/pages.yml` rebuilds
+the app from `main` and publishes it to GitHub Pages on every push, so the URL is
+always current and no machine of yours has to be awake. It needs enabling once:
+**Settings → Pages → Source: GitHub Actions**. After that the app lives at
+`https://<user>.github.io/<repo>/`.
+
+To build it yourself instead:
 
 ```bash
 npm run build          # -> dist/
 ```
 
-Drop `dist/` on any static host (Netlify drop, Vercel, GitHub Pages). `base` is
+`dist/` is a plain static site — drop it on Netlify, Vercel, anything. `base` is
 relative, so a project page served from `/repo-name/` works as-is.
 
 **One file**, for someone who would rather not follow a link:
@@ -37,7 +43,12 @@ npm run build:single   # -> dist-single/interactive-airflow.html
 ```
 
 A single ~1.5 MB HTML file with the stylesheet and the whole bundle inlined;
-nothing else is fetched. Small enough to email.
+nothing else is fetched. Small enough to email, and it needs no network at all.
+
+Verified served over http. Opening it straight off disk (`file://`) has not been
+verified — the bundle is handed to the browser through a Blob URL and browsers
+treat local files as an opaque origin — so open it once yourself before sending
+it that way.
 
 Either way the LLM goal fallback (`intent/llmGoal.ts`) is unavailable, because it
 asks a local Python backend. That is by design: it is only consulted for
