@@ -102,6 +102,12 @@ export interface SceneState {
   simSourceRoomId: string | null;
   /** false while the steady-state solve is still converging. */
   simReady: boolean;
+  /** Modes the user has actually WATCHED converge this session. The task
+   *  tick-list stays blank until the matching mode appears here — a box that
+   *  ticks itself before the participant has run anything tells them the answer
+   *  without their having looked at the simulation, which is the behaviour the
+   *  study is trying to observe. */
+  simulatedModes: SimMode[];
   /** Airflow visual style: drifting dots (default) or streamlines. */
   airflowStyle: AirflowStyle;
   toggleSim: () => void;
@@ -356,6 +362,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   simPaused: false,
   simSourceRoomId: null,
   simReady: false,
+  simulatedModes: [],
   airflowStyle: "lines",
   sketchRegion: null,
   setSketchRegion: (sketchRegion) => {
@@ -368,11 +375,25 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     set((s) => ({ sessionLog: [...s.sessionLog, { t: Date.now(), kind, data }] })),
 
   toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
-  setSimMode: (m) => set({ simMode: m }),
+  // Switching view does NOT re-solve — one converged field feeds every mode —
+  // so a mode only counts as "simulated" once it has been LOOKED AT while the
+  // solve is ready. Recording it solely in setSimReady would credit whichever
+  // mode happened to be open when the solve finished and never the ones the
+  // participant switched to afterwards.
+  setSimMode: (m) =>
+    set((s) => ({
+      simMode: m,
+      simulatedModes:
+        s.simActive && s.simReady && !s.simulatedModes.includes(m) ? [...s.simulatedModes, m] : s.simulatedModes,
+    })),
   setAirflowStyle: (airflowStyle) => set({ airflowStyle }),
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
-  setSimReady: (v) => set({ simReady: v }),
+  setSimReady: (v) =>
+    set((s) => ({
+      simReady: v,
+      simulatedModes: v && !s.simulatedModes.includes(s.simMode) ? [...s.simulatedModes, s.simMode] : s.simulatedModes,
+    })),
 
   outdoorTemp: 30, // a warm summer day — the case the cooling goals are about
   setOutdoorTemp: (c) => set({ outdoorTemp: c }),
@@ -587,6 +608,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       mode: "select",
       simActive: false,
       simReady: false,
+      simulatedModes: [], // a fresh task starts with nothing verified
       solutionOptions: [],
       solutionGoal: null,
       solutionTargets: [],

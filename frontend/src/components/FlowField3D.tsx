@@ -10,6 +10,8 @@ import { applyFieldToSim } from "../engine/accurate";
 import { STREAMLINE_BLUE, buildStreamlinePaths, type StreamlinePaths } from "../viz/streamlines";
 import { SCENARIOS, VIZ_DEFAULT } from "../floorplan/scenarios";
 import { FLOW_RENDER_ORDER } from "../viz/layers";
+import { openingBox } from "../bc/lfm";
+import { WALL_THICKNESS } from "../floorplan/geometry";
 
 // Steady-state airflow visualization inside the 3D house. The Euler solver runs to
 // equilibrium ONCE, then we show the settled result:
@@ -130,6 +132,35 @@ export function FlowField3D() {
   const vizMaxSeeds =
     (scenarioId ? SCENARIOS[scenarioId].viz?.maxSeeds : undefined) ?? VIZ_DEFAULT.maxSeeds;
 
+  // Real wall slabs + the holes that open doors/windows punch through them.
+  const { wallBoxes, gapBoxes } = useMemo(() => {
+    const pad = 0.02;
+    const wb = plan.walls.map((w) => {
+      const x0 = Math.min(w.a[0], w.b[0]);
+      const x1 = Math.max(w.a[0], w.b[0]);
+      const z0 = Math.min(w.a[1], w.b[1]);
+      const z1 = Math.max(w.a[1], w.b[1]);
+      const h = w.thickness / 2 + pad;
+      // A wall is a line in plan; give it its real thickness on the thin axis.
+      return {
+        min: [x0 - (x1 - x0 < 1e-6 ? h : pad), 0, z0 - (z1 - z0 < 1e-6 ? h : pad)] as [number, number, number],
+        max: [x1 + (x1 - x0 < 1e-6 ? h : pad), w.height, z1 + (z1 - z0 < 1e-6 ? h : pad)] as [number, number, number],
+      };
+    });
+    const gb = [...plan.doors, ...plan.windows]
+      .filter((o) => o.open)
+      .map((o) => {
+        const b = openingBox(o, WALL_THICKNESS);
+        // Slightly wider than the hole so a line threading it isn't clipped by
+        // the wall box it necessarily overlaps.
+        return {
+          min: [b.min[0] - 0.08, b.min[1], b.min[2] - 0.08] as [number, number, number],
+          max: [b.max[0] + 0.08, b.max[1], b.max[2] + 0.08] as [number, number, number],
+        };
+      });
+    return { wallBoxes: wb, gapBoxes: gb };
+  }, [plan.walls, plan.doors, plan.windows]);
+
   // Build smooth streamlines from the frozen steady-state velocity field.
   const buildPaths = useCallback(
     () =>
@@ -140,9 +171,11 @@ export function FlowField3D() {
           rooms: plan.rooms.map((r) => r.rect),
           gateways,
           obstacles,
+          walls: wallBoxes,
+          gaps: gapBoxes,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds],
+    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;

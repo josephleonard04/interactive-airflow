@@ -191,29 +191,38 @@ export function Panel() {
           </p>
           {["ac", "fan", "heater", "supply", "return"].includes(selected.type) && (
             <>
-              <div className="field">
-                <span>power</span>
-                <button
-                  className={selected.on !== false ? "toggle on" : "toggle"}
-                  onClick={() => updateItem(selected.id, { on: selected.on === false })}
-                >
-                  {selected.on !== false ? "On" : "Off"}
-                </button>
-              </div>
-              {selected.on !== false && (
-                <div className="tools" style={{ marginTop: 4 }}>
-                  {[1, 2, 3].map((lvl) => (
+              {/* Power is hidden when the task locks it — see ScenarioTools.lockPower. */}
+              {!tools.lockPower && (
+                <>
+                  <div className="field">
+                    <span>power</span>
                     <button
-                      key={lvl}
-                      className={(selected.power ?? 2) === lvl ? "tool active" : "tool"}
-                      onClick={() => updateItem(selected.id, { power: lvl })}
+                      className={selected.on !== false ? "toggle on" : "toggle"}
+                      onClick={() => updateItem(selected.id, { on: selected.on === false })}
                     >
-                      {lvl === 1 ? "Low" : lvl === 2 ? "Med" : "High"}
+                      {selected.on !== false ? "On" : "Off"}
                     </button>
-                  ))}
-                </div>
+                  </div>
+                  {selected.on !== false && (
+                    <div className="tools" style={{ marginTop: 4 }}>
+                      {[1, 2, 3].map((lvl) => (
+                        <button
+                          key={lvl}
+                          className={(selected.power ?? 2) === lvl ? "tool active" : "tool"}
+                          onClick={() => updateItem(selected.id, { power: lvl })}
+                        >
+                          {lvl === 1 ? "Low" : lvl === 2 ? "Med" : "High"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-              {selected.type === "fan" && selected.on !== false && (
+              {tools.lockPower && <p className="muted-line">Running on medium — the setting is fixed for this task.</p>}
+              {/* Aim is NOT gated on the device being on. Which way a fan points
+                  is a placement decision the participant makes while setting up,
+                  and hiding the controls on an idle fan made them look missing. */}
+              {selected.type === "fan" && (
                 <div className="field" style={{ marginTop: 6 }}>
                   <span>sweep left–right</span>
                   <button
@@ -225,7 +234,7 @@ export function Panel() {
                   </button>
                 </div>
               )}
-              {(selected.type === "ac" || selected.type === "fan") && selected.on !== false && (
+              {(selected.type === "ac" || selected.type === "fan") && (
                 <div className="field" style={{ marginTop: 6 }}>
                   <span>vertical aim (− down / + up) · {Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}°</span>
                   <input
@@ -247,7 +256,11 @@ export function Panel() {
           />
           <div className="btn-row">
             <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ 90°</button>
-            {canMove(tools, selected.type) && (
+            {/* Removal is offered only if the task would let you put it back.
+                With an empty "add" palette a delete is unrecoverable — the
+                participant loses the one heater the task depends on and has to
+                restart. */}
+            {canMove(tools, selected.type) && (!scenarioId || tools.addable.includes(selected.type)) && (
               <button className="danger" onClick={() => removeItem(selected.id)}>
                 🗑 Remove
               </button>
