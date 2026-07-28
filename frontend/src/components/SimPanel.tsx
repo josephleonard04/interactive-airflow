@@ -48,6 +48,10 @@ export function SimPanel() {
   const acceptChange = useSceneStore((s) => s.acceptChange);
   const cancelChange = useSceneStore((s) => s.cancelChange);
   const sketchRegion = useSceneStore((s) => s.sketchRegion);
+  const intentInput = useSceneStore((s) => s.intentInput);
+  const setIntentInput = useSceneStore((s) => s.setIntentInput);
+  const sketchMarks = useSceneStore((s) => s.sketchMarks);
+  const applySketchSolution = useSceneStore((s) => s.applySketchSolution);
   const outdoorTemp = useSceneStore((s) => s.outdoorTemp);
   const setOutdoorTemp = useSceneStore((s) => s.setOutdoorTemp);
   const tempRoomId = useSceneStore((s) => s.tempRoomId);
@@ -60,7 +64,6 @@ export function SimPanel() {
   const dismissSolutions = useSceneStore((s) => s.dismissSolutions);
   const logCount = useSceneStore((s) => s.sessionLog.length);
   const scenarioId = useSceneStore((s) => s.scenarioId);
-  const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
 
   // After the placement search finishes, re-check the goal against the NEW plan.
@@ -142,56 +145,70 @@ export function SimPanel() {
       )}
 
       <div style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700 }}>Ask in plain language</span>
-          <button
-            className={showSketch || sketchRegion ? "toggle on" : "toggle"}
-            onClick={() => setShowSketch((v) => !v)}
-            title="Draw the area a goal refers to — then say “keep this area cool”"
-          >
-            ✏️ Sketch an area
-          </button>
-        </div>
-        {(showSketch || sketchRegion != null) && (
-          <div style={{ marginBottom: 8 }}>
-            <SketchCanvas />
-          </div>
-        )}
-        <textarea
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) checkGoal(); }}
-          placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
-          rows={3}
-          style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
-        />
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
-          {INTENT_TEMPLATES.map((t) => (
-            <button key={t} className="chip" style={{ fontSize: 11 }} onClick={() => { setGoal(t); checkGoalText(t); }}>
-              {t}
+        {/* Two ways to say the same thing. Typing suits "keep the kitchen smell
+            out of the bedroom"; drawing suits "warm THIS corner" and "bring the
+            air from here to there", which are sentences about geometry that is
+            already on screen. Either one alone is enough to search — the sketch
+            does not need a sentence to go with it. */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 8, background: "#eef0ea", borderRadius: 8, padding: 3 }}>
+          {(["text", "sketch"] as const).map((m) => (
+            <button
+              key={m}
+              className={intentInput === m ? "tool active" : "tool"}
+              style={{ flex: 1 }}
+              onClick={() => setIntentInput(m)}
+              title={m === "text" ? "Type what you want" : "Draw what you want on a plan of your home"}
+            >
+              {m === "text" ? "⌨️ Type it" : "✏️ Draw it"}
             </button>
           ))}
-          {sketchRegion && (
-            <button
-              className="chip"
-              style={{ fontSize: 11, borderColor: "var(--accent)" }}
-              onClick={() => { setGoal("Keep this area cool"); checkGoalText("Keep this area cool"); }}
-            >
-              Keep this area cool
-            </button>
-          )}
-          <button
-            className="primary"
-            style={{ marginLeft: "auto" }}
-            disabled={optimizing}
-            onClick={() => {
-              if (goal.trim() && applyBestSolution(goal)) recheckGoal.current = goal;
-            }}
-            title="Search your layout with the simulator and offer the setups that work best"
-          >
-            {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
-          </button>
         </div>
+
+        {intentInput === "text" ? (
+          <>
+            <textarea
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) checkGoal(); }}
+              placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
+              rows={3}
+              style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
+            />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
+              {INTENT_TEMPLATES.map((t) => (
+                <button key={t} className="chip" style={{ fontSize: 11 }} onClick={() => { setGoal(t); checkGoalText(t); }}>
+                  {t}
+                </button>
+              ))}
+              <button
+                className="primary"
+                style={{ marginLeft: "auto" }}
+                disabled={optimizing}
+                onClick={() => {
+                  if (goal.trim() && applyBestSolution(goal)) recheckGoal.current = goal;
+                }}
+                title="Search your layout with the simulator and offer the setups that work best"
+              >
+                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <SketchCanvas />
+            <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
+              <button
+                className="primary"
+                style={{ marginLeft: "auto" }}
+                disabled={optimizing || sketchMarks.length === 0}
+                onClick={() => { applySketchSolution(); }}
+                title="Search your layout for setups that match what you drew"
+              >
+                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
+              </button>
+            </div>
+          </>
+        )}
         {solutionOptions.length > 0 && (
           <SolutionOptions
             options={solutionOptions}

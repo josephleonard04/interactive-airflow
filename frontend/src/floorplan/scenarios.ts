@@ -84,11 +84,17 @@ export interface ScenarioGoal {
   /** Measure over the footprint of this item type instead of the whole room —
    *  a draught is felt where you lie, not averaged over the floor. */
   nearItem?: string;
-  /** Measure in the strip of floor just inside this room's exterior window.
+  /** Extra condition on a room temperature goal: the strip of floor just inside
+   *  the room's exterior window must ALSO be at least this warm.
+   *
    *  A room mean can sit at a comfortable 23 °C while the air spilling off the
    *  glass is near freezing — that cold pool by the window is the thing a
-   *  radiator under it exists to kill, and it is invisible to a room average. */
-  nearWindowOf?: string;
+   *  radiator under it exists to kill, and it is invisible to a room average.
+   *  It rides on the existing "is the room comfortable" line rather than being a
+   *  goal of its own: it is not a separate thing to achieve, it is part of what
+   *  makes a room comfortable to sit in, and a third tick-box spelling it out
+   *  hands over half the answer. */
+  windowAtLeast?: number;
   /** Pass when the value is at least / at most this. °C for temperature,
    *  0..1 for smell, m/s for draft.
    *
@@ -434,9 +440,9 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // optimising toward a number instead of judging whether the home looks warm,
     // and the number is what the tool is supposed to be explaining to them.
     // The bands are still enforced — they are just not the interface.
-    // THE THIRD GOAL IS WHAT MAKES THE PLACEMENT MATTER. With only the two room
-    // means, a heater parked on the far wall by the TV passed both boxes, and so
-    // did mid-room and beside-the-doorway — a room mean cannot see the cold pool
+    // THE WINDOW STRIP IS WHAT MAKES THE PLACEMENT MATTER. On room means alone a
+    // heater parked on the far wall by the TV passed both boxes, and so did
+    // mid-room and beside-the-doorway — a room mean cannot see the cold pool
     // spilling off the glass, so almost any placement "solved" the task and the
     // one real-world answer (a heater under the window) was indistinguishable
     // from the rest. Measured at the glass, over a 4x3x4 sweep of fan position
@@ -445,16 +451,17 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     //     far wall by the TV   16.7        beside the doorway   16.2
     //     mid-room             16.1        as delivered         15.5
     // 19 °C therefore separates "the heater is at the glass" from everything
-    // else with ~7 °C of headroom, and no fan trick closes the gap.
+    // else with ~7 °C of headroom, and no fan trick closes the gap. It hangs off
+    // the living-room line rather than adding a third one — see windowAtLeast.
     goals: [
       { label: "Bedroom is comfortable", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
-      { label: "Living + kitchen is comfortable", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
       {
-        label: "No cold draught off the living-room window",
+        label: "Living + kitchen is comfortable",
         metric: "temperature",
         roomId: "living",
-        nearWindowOf: "living",
-        atLeast: 19,
+        atLeast: 20,
+        atMost: 24,
+        windowAtLeast: 19,
       },
     ],
     viz: { maxSeeds: 8 },
@@ -481,12 +488,13 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // to travel through. Worth watching in the study: participants who reason this
     // way are right about buildings and wrong about this goal.
     success:
-      "Both rooms inside their comfort bands AND ≥ 19 °C in the strip of floor " +
-      "inside the living-room window, at 2 °C outdoors. Only the heater under " +
-      "that window clears the third goal (26.3 °C there, against 16–17 °C from " +
-      "anywhere else), and it needs the fan in the right-hand half of the living " +
-      "room to carry the warmth through the doorway — with the fan left over by " +
-      "the kitchen the bedroom lands at 17.4 °C and fails.",
+      "Both rooms inside their comfort bands, and the living-room line also " +
+      "requires ≥ 19 °C in the strip of floor inside its window, at 2 °C " +
+      "outdoors. Only the heater under that window clears the window condition " +
+      "(26.3 °C there, against 16–17 °C from anywhere else), and it needs the " +
+      "fan in the right-hand half of the living room to carry the warmth " +
+      "through the doorway — with the fan left over by the kitchen the bedroom " +
+      "lands at 17.4 °C and fails.",
     build: buildWinter,
   },
   summer: {

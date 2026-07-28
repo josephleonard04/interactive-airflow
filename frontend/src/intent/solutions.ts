@@ -499,4 +499,68 @@ export function goalDevices(goal: OptimizeGoal): string[] {
   return GOAL_DEVICES[goal];
 }
 
+/**
+ * Never hand back a finished task.
+ *
+ * A suggestion that satisfies every goal at once turns the tool into a button
+ * you press to win: the participant learns that asking works, and nothing about
+ * why the answer is the answer. The study wants to watch them converge over
+ * several turns — ask, look at what changed, ask again — so any option that
+ * completes the task is withheld.
+ *
+ * What is offered instead has to be real PROGRESS, though, or the feature is
+ * just broken. Withholding naively left the winter task offering "shut the
+ * interior doors", which passes the living room and drops the bedroom to the
+ * outdoor 2 °C — fewer goals met than doing nothing at all. So the survivors
+ * are ranked by how many goals they actually meet, and the best complete option
+ * is also offered in cut-down form: its primary device's move only (the heater
+ * for warming, the AC for cooling), with everything else back where the user
+ * had it. That is the strongest honest half-step — the right heater spot, the
+ * fan still to work out.
+ *
+ * Outside a study task there are no goals to complete and nothing is withheld.
+ */
+export function withholdComplete(
+  options: Solution[],
+  metCount: (plan: FloorPlan) => { met: number; total: number },
+  goal: OptimizeGoal,
+  current: FloorPlan,
+  targetIds: string[],
+  outdoorTemp: number,
+  want = 3,
+): Solution[] {
+  if (options.length === 0) return options;
+
+  const primary = PRIMARY_OF[goal];
+  /** The same solution with only the primary device moved. Re-scored, not
+   *  copied: the card prints the temperature the option will actually produce,
+   *  and half the moves produce a different temperature from all of them. */
+  const trim = (s: Solution): Solution => {
+    const plan: FloorPlan = {
+      ...s.plan,
+      items: s.plan.items.map((it) =>
+        it.type === primary ? it : current.items.find((o) => o.id === it.id) ?? it,
+      ),
+    };
+    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL);
+    return {
+      ...s,
+      id: `${s.id}-partial`,
+      plan,
+      metrics,
+      score,
+      detail: [`${DEVICE_LABEL[primary] ?? primary} only — the rest is yours to work out`],
+    };
+  };
+
+  const candidates = [...options, ...options.slice(0, 1).map(trim)];
+  const scored = candidates
+    .map((s) => ({ s, ...metCount(s.plan) }))
+    .filter((c) => c.total === 0 || c.met < c.total);
+  if (scored.length === 0) return [];
+
+  scored.sort((a, b) => b.met - a.met || b.s.score - a.s.score);
+  return scored.slice(0, want).map((c) => c.s);
+}
+
 export type { PlacedItem };
