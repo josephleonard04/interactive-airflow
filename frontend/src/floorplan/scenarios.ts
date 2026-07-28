@@ -74,11 +74,20 @@ export interface ScenarioGoal {
   /** Shown next to the tick-box. Phrased as the thing to achieve. */
   label: string;
   /** What to measure. */
-  metric: "temperature" | "smell";
-  /** Room it is measured in. */
+  metric: "temperature" | "smell" | "draft";
+  /** Room it is measured in. Ignored when `nearItem` is set. */
   roomId: string;
+  /** Measure over the footprint of this item type instead of the whole room —
+   *  a draught is felt where you lie, not averaged over the floor. */
+  nearItem?: string;
   /** Pass when the value is at least / at most this. °C for temperature,
-   *  0..1 for smell. */
+   *  0..1 for smell, m/s for draft.
+   *
+   *  COMFORT IS A BAND, NOT A FLOOR. `atLeast` alone let 29 °C tick a box
+   *  labelled "warm enough", which is not a comfortable room — it is an
+   *  overheated one, and it let a participant pass by turning the heater to
+   *  maximum, the exact instinct this task exists to challenge. Temperature
+   *  goals set both bounds. */
   atLeast?: number;
   atMost?: number;
 }
@@ -402,9 +411,16 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "Move the heater and the fan anywhere, and put the bedroom window on any wall of the bedroom. " +
       "There is one heater and one fan; the walls, doors and living-room window are already built.",
     tools: { movable: ["heater", "fan"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
+    // Bands, not floors. Living rooms sit in the ASHRAE 55 winter comfort zone
+    // (~20–24 °C); a bedroom is conventionally kept cooler, so it takes the WHO
+    // healthy-home minimum of 18 °C as its floor and shares the 24 °C ceiling.
+    // Measured across 30 heater placements/powers, exactly three configurations
+    // satisfy both — all of them medium power with the heat delivered toward
+    // the doorway. Every high-power setting overshoots and now fails, which is
+    // the point: cranking it is not a solution.
     goals: [
-      { label: "Bedroom is warm enough (18 °C or above)", metric: "temperature", roomId: "bedroom", atLeast: 18 },
-      { label: "Living + kitchen is warm enough (18 °C or above)", metric: "temperature", roomId: "living", atLeast: 18 },
+      { label: "Bedroom is comfortable (18–24 °C)", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
+      { label: "Living + kitchen is comfortable (20–24 °C)", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
     ],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
@@ -446,7 +462,15 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "room evenly and keep the air over the bed calm.",
     youCanChange: "Aim the air conditioner (you can't move it), and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: ["ac"], addable: ["fan"], walls: false, openings: true, resize: false },
-    goals: [{ label: "Studio is cool enough (26 °C or below)", metric: "temperature", roomId: "studio", atMost: 26 }],
+    // Cooling has the mirror problem: "26 °C or below" is satisfied by an
+    // over-chilled 18 °C room. 23–26 °C is the ASHRAE 55 summer zone. The
+    // second goal is the one that makes this task hard — the two pull against
+    // each other, since the cheapest way to hit the temperature is to point
+    // the air straight at the bed.
+    goals: [
+      { label: "Studio is comfortable (23–26 °C)", metric: "temperature", roomId: "studio", atLeast: 23, atMost: 26 },
+      { label: "Air over the bed is calm (no draught)", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.25 },
+    ],
     success:
       "Studio ≤ 26 °C at 33 °C outdoors AND mean air speed in the bed zone ≤ 0.25 m/s — " +
       "reached by angling the AC up/away and using the fan to mix, not by blasting the bed.",
