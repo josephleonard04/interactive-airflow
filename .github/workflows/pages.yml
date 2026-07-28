@@ -1,0 +1,68 @@
+# Publish the app to GitHub Pages on every push to main.
+#
+# The point is that a participant needs a URL, not a checkout. They open the
+# link on their own computer, whenever they like; nothing is installed, no
+# server of ours has to be awake, and the page cannot go stale because this
+# rebuilds it from main every time.
+#
+# ONE-TIME SETUP (has to be done in the browser, once):
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# After that the URL is https://<user>.github.io/<repo>/ and this keeps it fresh.
+#
+# The researcher's address is a repository SECRET, not a committed value — an
+# address in a public repo is an address in a scraper's list. Add it under
+# Settings -> Secrets and variables -> Actions -> New repository secret, named
+# RESEARCHER_EMAIL. Without it the app still builds; Submit just downloads the
+# session file instead of also opening a mail draft.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a run finish rather than cancelling it; queue anything that arrives mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_RESEARCHER_EMAIL: ${{ secrets.RESEARCHER_EMAIL }}
+          VITE_LOG_ENDPOINT: ${{ secrets.LOG_ENDPOINT }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
