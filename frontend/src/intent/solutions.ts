@@ -1,8 +1,9 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Vec3 } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean } from "../sim/sim3d";
+import { windowZone } from "./goals";
 import { candidateSpots } from "./searchOptimize";
-import { DEVICE_LABEL, GOAL_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
+import { DEVICE_LABEL, GOAL_DEVICES, ROOM_BOUND_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
 
 // Find SEVERAL good configurations for a goal, not one.
 //
@@ -78,6 +79,12 @@ export interface SolutionMetrics {
   outflow: number;
   /** Mean air speed across the target rooms — the draught constraint. */
   targetSpeed: number;
+  /** Coldest window strip among the rooms a heater is standing in (°C), or null
+   *  when nothing is heating. This is the cold pool a radiator under the glass
+   *  exists to cancel; a room mean cannot see it, so without this term the
+   *  search happily parks the heater on the far wall — a layout the task's own
+   *  checklist then fails. */
+  heaterWindowC: number | null;
 }
 
 export interface Solution {
@@ -149,8 +156,20 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   for (let s = 0; s < fid.steps; s++) built.sim.step(0.05);
   const { sim, nx, ny, nz, ambient, inside, roomIndex, roomIds } = built;
 
+  const temp = geodesicFields(built).temp;
   const roomTempC = new Map<string, number>();
-  for (const [id, d] of roomMeans(built, geodesicFields(built).temp)) roomTempC.set(id, outdoorTemp + d);
+  for (const [id, d] of roomMeans(built, temp)) roomTempC.set(id, outdoorTemp + d);
+
+  let heaterWindowC: number | null = null;
+  for (const it of plan.items) {
+    if (it.type !== "heater" || it.on === false) continue;
+    const zone = windowZone(plan, it.roomId);
+    if (!zone) continue;
+    const d = zoneMean(built, temp, zone);
+    if (d === null) continue;
+    const c = outdoorTemp + d;
+    if (heaterWindowC === null || c < heaterWindowC) heaterWindowC = c;
+  }
 
   // air movement, per room and house-wide, plus what actually leaves the house
   const sSum = new Float64Array(roomIds.length);
@@ -197,6 +216,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     worstRoomSpeed: Number.isFinite(worstRoomSpeed) ? worstRoomSpeed : 0,
     outflow,
     targetSpeed: tSpeedN ? tSpeedSum / tSpeedN : 0,
+    heaterWindowC,
   };
 }
 
@@ -211,7 +231,13 @@ function scoreOf(goal: OptimizeGoal, m: SolutionMetrics, targetTemps: number[]):
   }
   if (goal === "warm") {
     const worst = targetTemps.length ? Math.min(...targetTemps) : 0; // coldest room
-    return worst + 0.25 * m.meanTargetC - draft;
+    // The cold pool at the glazing counts too, at a third of a room's weight:
+    // enough to break the tie between two placements that warm the room equally,
+    // not enough to trade away the room the user actually asked about. Capped at
+    // the comfort ceiling so a heater pressed against the glass can't farm score
+    // by roasting one strip of floor.
+    const glass = m.heaterWindowC === null ? 0 : 0.35 * Math.min(m.heaterWindowC, 24);
+    return worst + 0.25 * m.meanTargetC + glass - draft;
   }
   if (goal === "ventilate") return m.outflow * 0.02 + m.houseMeanSpeed + m.worstRoomSpeed;
   return m.houseMeanSpeed + 2 * m.worstRoomSpeed;
@@ -306,7 +332,15 @@ function placeDevices(
     ...targets,
     ...base.rooms.filter((r) => !targets.some((t) => t.id === r.id)),
   ];
+  // Openings a placement must stay clear of. A DOORWAY has to stay walkable, so
+  // nothing may sit in front of one. A WINDOW does not: you cannot walk through
+  // it, and a radiator under the glass is where a radiator belongs. Treating the
+  // two alike slid the under-window candidate 1.1 m along the wall — far enough
+  // that it stopped killing the cold pool it exists to kill (16.5 °C at the
+  // glass instead of 26.4 °C), which is how the search kept ranking it level
+  // with the far wall.
   const openings = [...base.doors, ...base.windows];
+  const blockersFor = (type: string) => (type === "heater" ? base.doors : openings);
   const changes: string[] = [];
 
   let working = base;
@@ -325,9 +359,14 @@ function placeDevices(
     for (const dev of movable) {
       const it = working.items.find((o) => o.id === dev.id);
       if (!it) continue;
+      // A room-bound device (the heater) is searched only within the room it is
+      // already standing in — see ROOM_BOUND_DEVICES.
+      const rooms = ROOM_BOUND_DEVICES.includes(it.type)
+        ? roomOrder.filter((r) => r.id === it.roomId)
+        : roomOrder;
       let best: { pos: Vec3; rot: number; roomId: string; roomName: string; osc?: boolean; score: number } | null = null;
-      for (const room of roomOrder) {
-        for (const cand of candidateSpots(room, it.type, working.wallHeight)) {
+      for (const room of rooms) {
+        for (const cand of candidateSpots(room, it.type, working.wallHeight, openings)) {
           if (budget.left <= 0) break;
           const others = working.items.filter((o) => o.id !== it.id);
           const wallBound = cand.axis !== "area";
@@ -338,7 +377,7 @@ function placeDevices(
             cand.position,
             cand.axis,
             0.04,
-            openings,
+            blockersFor(it.type),
             !wallBound,
           );
           if (!pos) continue;

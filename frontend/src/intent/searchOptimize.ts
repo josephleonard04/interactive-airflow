@@ -1,6 +1,6 @@
 import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
 import { findFreeSpot, type SearchAxis } from "../floorplan/collision";
-import type { FloorPlan, PlacedItem, Rect, Vec3 } from "../floorplan/types";
+import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { DEVICE_LABEL, GOAL_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
 
 // Layout-adaptive optimization: instead of fixed spots, we SEARCH. For each
@@ -53,7 +53,22 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 /** Candidate spots for a device type in one room: each wall + the centre,
  *  facing into the room — derived from the room's actual geometry. Wall
  *  devices carry the axis of THEIR wall so they can only slide along it. */
-export function candidateSpots(room: { id: string; name: string; rect: Rect }, type: string, wallHeight: number): Candidate[] {
+export function candidateSpots(
+  room: { id: string; name: string; rect: Rect },
+  type: string,
+  wallHeight: number,
+  /** The home's openings — doors and windows. Two candidates are derived from
+   *  them, because a bare list of wall midpoints cannot express either one:
+   *
+   *  A HEATER gets a spot directly under each of this room's exterior windows —
+   *  the place a century of radiator practice says is right, and the only one
+   *  that kills the cold downdraught off the glass. The living-room window in
+   *  the winter task sits at 80% along its wall, so "under the window" was not
+   *  in the candidate set at all and the search could never propose it.
+   *
+   *  A FAN gets a spot behind each interior doorway, aimed through it. */
+  openings: Opening[] = [],
+): Candidate[] {
   const { x, z, w, d } = room.rect;
   const cx = x + w / 2;
   const cz = z + d / 2;
@@ -72,6 +87,19 @@ export function candidateSpots(room: { id: string; name: string; rect: Rect }, t
     mk(x + w - 0.2, 0.25, cz, -Math.PI / 2, "z");
     mk(cx, 0.25, z + 0.2, 0, "x");
     mk(cx, 0.25, z + d - 0.2, Math.PI, "x");
+    for (const o of openings) {
+      if (o.kind !== "window" || !o.rooms.includes(room.id) || !o.rooms.includes("outside")) continue;
+      const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // window runs along z
+      const mid = vertical ? (o.a[1] + o.b[1]) / 2 : (o.a[0] + o.b[0]) / 2;
+      const line = vertical ? o.a[0] : o.a[1];
+      if (vertical) {
+        const west = Math.abs(line - x) < Math.abs(line - (x + w));
+        mk(west ? x + 0.2 : x + w - 0.2, 0.25, clamp(mid, z + 0.4, z + d - 0.4), west ? Math.PI / 2 : -Math.PI / 2, "z");
+      } else {
+        const south = Math.abs(line - z) < Math.abs(line - (z + d));
+        mk(clamp(mid, x + 0.4, x + w - 0.4), 0.25, south ? z + 0.2 : z + d - 0.2, south ? 0 : Math.PI, "x");
+      }
+    }
   } else if (type === "supply") {
     mk(cx, wallHeight - 0.1, cz, 0, "area");
     mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0, "area");
@@ -82,6 +110,24 @@ export function candidateSpots(room: { id: string; name: string; rect: Rect }, t
     mk(cx, 0.65, cz, 0, "area", false);
     mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", true);
     mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", false);
+    // Plus, standing back from each interior doorway and pointing THROUGH it.
+    // A fan's whole job in a multi-room home is carrying conditioned air to the
+    // room next door, and neither of the spots above can express that: both sit
+    // mid-room facing +z whatever the doorway is doing. Without this the search
+    // could put the heater in exactly the right place and still leave the far
+    // room cold, offering a solution its own task marks as unfinished.
+    for (const o of openings) {
+      if (o.kind !== "door" || o.rooms.includes("outside") || !o.rooms.includes(room.id)) continue;
+      const dxm = (o.a[0] + o.b[0]) / 2;
+      const dzm = (o.a[1] + o.b[1]) / 2;
+      const back = 1.2; // metres back from the doorway, inside this room
+      const len = Math.hypot(dxm - cx, dzm - cz) || 1;
+      const px = clamp(dxm + ((cx - dxm) / len) * back, x + 0.4, x + w - 0.4);
+      const pz = clamp(dzm + ((cz - dzm) / len) * back, z + 0.4, z + d - 0.4);
+      const yaw = Math.atan2(dxm - px, dzm - pz); // yaw 0 = +z, +pi/2 = +x
+      mk(px, 0.65, pz, yaw, "area", false);
+      mk(px, 0.65, pz, yaw, "area", true);
+    }
   }
   return out;
 }
@@ -196,7 +242,7 @@ export function searchOptimize(
     let best: { cand: Candidate; score: number } | null = null;
     for (const room of roomsToTry) {
       if (evals >= B.maxEvals) break;
-      for (const cand of candidateSpots(room, it.type, plan.wallHeight)) {
+      for (const cand of candidateSpots(room, it.type, plan.wallHeight, [...plan.doors, ...plan.windows])) {
         if (evals >= B.maxEvals) break;
         const others = working.items.filter((o) => o.id !== it.id);
         // Wall devices (AC/heater) may only slide ALONG their wall — never into

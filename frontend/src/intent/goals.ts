@@ -1,7 +1,7 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneSpeed } from "../sim/sim3d";
-import { TEMP_MAX_C, TEMP_MIN_C, rgbCss, tempColor } from "../viz/temperature";
+import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor } from "../viz/temperature";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -50,7 +50,13 @@ export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
     // that is honestly where "before" sits — cold in winter, hot in summer.
     const lo = g.atLeast ?? TEMP_MIN_C;
     const hi = g.atMost ?? TEMP_MAX_C;
-    const target = (lo + hi) / 2;
+    // The WARM end of the band, not its midpoint. A bedroom band of 18–24 has
+    // its midpoint at 21 °C, which on the ramp is still light blue — so "goal:
+    // comfortable" was drawn in the colour of a cool room, and the picture
+    // argued against its own caption. TEMP_NEUTRAL_C is the ramp's neutral
+    // point by construction; clamped into the band it is the warmest reading
+    // the goal actually accepts in winter, and stays inside the band in summer.
+    const target = Math.min(hi, Math.max(lo, TEMP_NEUTRAL_C));
     return {
       before: { color: rgbCss(tempColor(outdoorTemp)), word: warmthWord(outdoorTemp, g) },
       after: { color: rgbCss(tempColor(target)), word: "comfortable" },
@@ -83,8 +89,10 @@ function itemZone(plan: FloorPlan, type: string): Rect | null {
 }
 
 /** The strip of floor just inside a room's exterior window — where the cold
- *  air spilling off the glass collects. */
-function windowZone(plan: FloorPlan, roomId: string): Rect | null {
+ *  air spilling off the glass collects. Exported because the solution search
+ *  scores the same strip: if the checklist marks a layout down for a cold pool
+ *  at the glass, the search must not be recommending that layout. */
+export function windowZone(plan: FloorPlan, roomId: string): Rect | null {
   const room = plan.rooms.find((r) => r.id === roomId);
   const win = plan.windows.find((w) => w.rooms.includes(roomId) && w.rooms.includes("outside"));
   if (!room || !win) return null;

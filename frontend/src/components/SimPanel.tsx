@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useSceneStore, PRESETS, type SimMode, type SimEngine, type AirflowPreset } from "../scene/store";
+import { useSceneStore, type SimMode } from "../scene/store";
 import { evaluateObjectives, resolveObjectives, type Evaluation } from "../intent/evaluate";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
@@ -7,8 +7,6 @@ import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { STREAMLINE_BLUE } from "../viz/streamlines";
 import { SketchCanvas } from "./SketchCanvas";
-
-const PRESET_IDS = Object.keys(PRESETS) as AirflowPreset[];
 
 const INTENT_TEMPLATES = [
   "Keep my bedroom cool",
@@ -19,6 +17,16 @@ const INTENT_TEMPLATES = [
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
 // 3D house via FlowField3D). Pressing Simulate runs the sim directly on the home
 // the user built — no separate 2D view.
+//
+// ONE ENGINE, ONE WAY IN. The real-time / accurate toggle is gone: everything
+// runs on the live in-browser solver. An engine choice is a question about the
+// tool rather than about the home, and the OpenFOAM path also needed a local
+// backend running to answer it. (The accurate engine itself is still in the
+// codebase — engine/accurate.ts and backend/ — just not offered here.)
+//
+// The quick presets are gone too. They set every device and door at once from a
+// fixed table, which meant the participant could reach a passing layout without
+// ever forming an intention — and the study is about watching them form one.
 
 export function SimPanel() {
   const plan = useSceneStore((s) => s.plan);
@@ -33,14 +41,6 @@ export function SimPanel() {
   const setSource = useSceneStore((s) => s.setSimSource);
   const addItem = useSceneStore((s) => s.addItem);
   const selectItem = useSceneStore((s) => s.selectItem);
-  const engine = useSceneStore((s) => s.engine);
-  const accurate = useSceneStore((s) => s.accurate);
-  const accurateRunning = useSceneStore((s) => s.accurateRunning);
-  const accurateHealth = useSceneStore((s) => s.accurateHealth);
-  const setEngine = useSceneStore((s) => s.setEngine);
-  const runAccurate = useSceneStore((s) => s.runAccurate);
-  const refreshAccurateHealth = useSceneStore((s) => s.refreshAccurateHealth);
-  const applyAirflowPreset = useSceneStore((s) => s.applyAirflowPreset);
   const applyBestSolution = useSceneStore((s) => s.applyBestSolution);
   const optimizing = useSceneStore((s) => s.optimizing);
   const pendingChange = useSceneStore((s) => s.pendingChange);
@@ -62,10 +62,6 @@ export function SimPanel() {
   const scenarioId = useSceneStore((s) => s.scenarioId);
   const [showSketch, setShowSketch] = useState(false);
   const smellCount = plan.items.filter((it) => it.type === "smell").length;
-
-  useEffect(() => {
-    if (engine === "openfoam") refreshAccurateHealth();
-  }, [engine, refreshAccurateHealth]);
 
   // After the placement search finishes, re-check the goal against the NEW plan.
   useEffect(() => {
@@ -121,94 +117,6 @@ export function SimPanel() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <strong style={{ fontSize: 13 }}>Airflow simulation</strong>
         <button className="ghost" onClick={toggleSim}>✕</button>
-      </div>
-
-      <div style={{ display: "flex", gap: 4, marginBottom: 10, background: "#eef0ea", borderRadius: 8, padding: 3 }}>
-        {(["realtime", "openfoam"] as SimEngine[]).map((e) => (
-          <button
-            key={e}
-            className={engine === e ? "tool active" : "tool"}
-            style={{ flex: 1 }}
-            onClick={() => setEngine(e)}
-            title={e === "realtime" ? "Live in-browser solver" : "Accurate OpenFOAM CFD (runs on the local backend)"}
-          >
-            {e === "realtime" ? "⚡ Real-time" : "🧪 Accurate"}
-          </button>
-        ))}
-      </div>
-
-      {engine === "openfoam" && (
-        <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: "#f7f5ef", border: "1px solid var(--line)" }}>
-          <button className="primary" style={{ width: "100%" }} disabled={accurateRunning} onClick={runAccurate}>
-            {accurateRunning ? "Running CFD…" : accurate ? "↻ Re-run accurate (OpenFOAM)" : "▶ Run accurate (OpenFOAM)"}
-          </button>
-          {accurate && (
-            <div style={{ marginTop: 8 }}>
-              <span
-                style={{
-                  display: "inline-block",
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  background: accurate.status === "ok" ? "#def3ed" : accurate.status === "mock" ? "#fdf0d8" : "#fadbd8",
-                  color: accurate.status === "ok" ? "#146a5f" : accurate.status === "mock" ? "#9a6a16" : "#a23226",
-                }}
-              >
-                {accurate.status === "ok" ? "CFD result" : accurate.status === "mock" ? "preview (no OpenFOAM)" : "error"}
-              </span>
-              {accurate.message && <p className="muted-line" style={{ marginTop: 6 }}>{accurate.message}</p>}
-              <p className="muted-line" style={{ marginTop: 6 }}>
-                Flux balance: {accurate.balance.inflow.toFixed(2)} in / {accurate.balance.outflow.toFixed(2)} out m³/s
-                {accurate.balance.balanced ? " ✓" : " ⚠"}
-              </p>
-              {accurate.balance.note && <p className="muted-line" style={{ marginTop: 4, color: "#9a6a16" }}>{accurate.balance.note}</p>}
-              {accurate.seconds != null && (
-                <p className="muted-line" style={{ marginTop: 4 }}>
-                  {accurate.status === "ok" ? "Solved" : "Computed"} in {accurate.seconds}s
-                </p>
-              )}
-            </div>
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 10, fontSize: 11, color: "var(--muted)" }}>
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: accurateHealth?.reachable ? (accurateHealth.openfoam ? "#2a9d8f" : "#d9a514") : "#c0392b",
-              }}
-            />
-            {accurateHealth == null
-              ? "Checking backend…"
-              : !accurateHealth.reachable
-                ? "Backend offline — run backend\\run.ps1"
-                : accurateHealth.openfoam
-                  ? `Backend online · OpenFOAM ready${accurateHealth.version ? ` (${accurateHealth.version})` : ""}`
-                  : "Backend online · OpenFOAM not installed (preview)"}
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 6, fontWeight: 700 }}>Quick presets</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-          {PRESET_IDS.map((id) => (
-            <button
-              key={id}
-              disabled={optimizing}
-              onClick={() => applyAirflowPreset(id)}
-              title={PRESETS[id].hint}
-              style={{
-                display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3,
-                textAlign: "left", padding: "10px 11px", borderRadius: 11, lineHeight: 1.25,
-              }}
-            >
-              <strong style={{ fontSize: 13 }}>{PRESETS[id].label}</strong>
-              <span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 500 }}>{PRESETS[id].hint.split(":")[0].split(",")[0]}</span>
-            </button>
-          ))}
-        </div>
       </div>
 
       {optimizing && (

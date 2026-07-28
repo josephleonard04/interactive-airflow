@@ -19,7 +19,6 @@ import {
   type BackendHealth,
 } from "../engine/accurate";
 import { type OptimizeGoal } from "../intent/optimize";
-import { searchOptimize } from "../intent/searchOptimize";
 import { findSolutions, type Solution } from "../intent/solutions";
 import { parseGoal } from "../intent/objectives";
 import type {
@@ -141,8 +140,6 @@ export interface SceneState {
   runAccurate: () => Promise<void>;
   refreshAccurateHealth: () => Promise<void>;
 
-  /** One-click device presets (set on/power + relocate devices + open/close doors). */
-  applyAirflowPreset: (preset: AirflowPreset) => void;
   /** Search a plain-language goal for SEVERAL good configurations to choose from. */
   applyBestSolution: (goalText: string) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
@@ -177,104 +174,12 @@ export interface LogEvent {
   data: Record<string, unknown>;
 }
 
-const PRESET_GOAL: Record<AirflowPreset, OptimizeGoal> = {
-  comfort: "balanced",
-  cooling: "cool",
-  freshair: "ventilate",
-  warmup: "warm",
-  circulate: "circulate",
-};
-
 export interface PendingChange {
   title: string;
   lines: string[];
 }
 
 export type SimEngine = "realtime" | "openfoam";
-export type AirflowPreset = "comfort" | "cooling" | "freshair" | "warmup" | "circulate";
-
-interface PresetDevice {
-  on: boolean;
-  power: number;
-  oscillate?: boolean;
-}
-export interface PresetSpec {
-  label: string;
-  hint: string;
-  /** Per-device {on,power,oscillate} keyed by item type. */
-  devices: Record<string, PresetDevice>;
-  /** Open interior doors so air/heat/odour circulate between rooms. */
-  interiorDoors: boolean;
-  /** Open exterior windows (& doors) to vent to outside. */
-  windows: boolean;
-}
-
-// A preset is a whole-home configuration: it sets every HVAC device's on/power
-// (and fan oscillation) AND opens/closes doors & windows, since cross-room
-// coverage depends on open interior doors and venting depends on open windows.
-export const PRESETS: Record<AirflowPreset, PresetSpec> = {
-  comfort: {
-    label: "Comfort",
-    hint: "Balanced cooling, gentle oscillating fan, doors open so the whole home stays even.",
-    devices: {
-      ac: { on: true, power: 2 },
-      fan: { on: true, power: 2, oscillate: true },
-      supply: { on: true, power: 2 },
-      heater: { on: false, power: 2 },
-    },
-    interiorDoors: true,
-    windows: false,
-  },
-  cooling: {
-    label: "Cool down",
-    hint: "AC on high to cool fast; doors open to spread the cool air, windows shut.",
-    devices: {
-      ac: { on: true, power: 3 },
-      fan: { on: true, power: 2, oscillate: true },
-      supply: { on: true, power: 2 },
-      heater: { on: false, power: 2 },
-    },
-    interiorDoors: true,
-    windows: false,
-  },
-  freshair: {
-    label: "Fresh air",
-    hint: "Purge stale air & odours: fan + vent on high, AC off, all windows and doors open.",
-    devices: {
-      ac: { on: false, power: 2 },
-      fan: { on: true, power: 3, oscillate: true },
-      supply: { on: true, power: 3 },
-      heater: { on: false, power: 2 },
-    },
-    interiorDoors: true,
-    windows: true,
-  },
-  warmup: {
-    label: "Warm up",
-    hint: "Heater on, fan circulates the warmth, doors open, windows shut to keep heat in.",
-    devices: {
-      ac: { on: false, power: 2 },
-      fan: { on: true, power: 2, oscillate: true },
-      supply: { on: false, power: 2 },
-      heater: { on: true, power: 3 },
-    },
-    interiorDoors: true,
-    windows: false,
-  },
-  circulate: {
-    label: "Circulate",
-    hint: "Just move air around the whole home: oscillating fan + vent, AC/heater off, doors open.",
-    devices: {
-      ac: { on: false, power: 2 },
-      fan: { on: true, power: 3, oscillate: true },
-      supply: { on: true, power: 2 },
-      heater: { on: false, power: 2 },
-    },
-    interiorDoors: true,
-    windows: false,
-  },
-};
-
 export type SimMode = "airflow" | "temperature" | "contamination" | "noise";
 export type AirflowStyle = "dots" | "lines";
 
@@ -422,52 +327,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     } finally {
       set({ accurateRunning: false });
     }
-  },
-
-  applyAirflowPreset: (preset) => {
-    if (get().optimizing) return;
-    const spec = PRESETS[preset];
-    set({ optimizing: true });
-    // Defer the sim-scored search a tick so the "Optimizing…" state paints.
-    window.setTimeout(() => {
-      try {
-        const s = get();
-        const before = s.plan;
-        const items = before.items.map((it) => {
-          const d = spec.devices[it.type];
-          if (!d) return it;
-          return { ...it, on: d.on, power: d.power, ...(it.type === "fan" ? { oscillate: !!d.oscillate } : {}) };
-        });
-        const exterior = (o: Opening) => o.rooms.includes("outside");
-        const setOpen = (o: Opening): Opening => {
-          // The entrance (an exterior door) is never auto-opened — people don't
-          // leave their front door wide open. Windows handle exterior venting.
-          if (o.kind === "door" && exterior(o)) return o;
-          const open = exterior(o) ? spec.windows : o.kind === "door" ? spec.interiorDoors : spec.windows;
-          return open === o.open ? o : { ...o, open };
-        };
-        const withOpenings: FloorPlan = {
-          ...before,
-          items,
-          doors: before.doors.map(setOpen),
-          windows: before.windows.map(setOpen),
-          walls: before.walls.map((w) => ({ ...w, openings: w.openings.map(setOpen) })),
-        };
-        // Search the user's actual layout for the best device placement.
-        const result = searchOptimize(withOpenings, PRESET_GOAL[preset], null);
-        const after: FloorPlan = { ...withOpenings, items: result.items };
-        const lines = [...diffPlan(before, after), ...result.changes];
-        get().logEvent("preset", { preset, lines });
-        set({
-          ...snapshot(s),
-          plan: after,
-          pendingChange: { title: spec.label, lines: lines.length ? lines : ["Already set — no change."] },
-          optimizing: false,
-        });
-      } catch {
-        set({ optimizing: false });
-      }
-    }, 30);
   },
 
   solutionOptions: [],
