@@ -14,6 +14,58 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
+Everything runs in the browser — the Euler solver, the goal checking and the
+placement search are all client-side. There is no server to stand up.
+
+## Giving it to someone else
+
+Two ways, neither of which asks them to install anything.
+
+**A link.** The normal build is a static site:
+
+```bash
+npm run build          # -> dist/
+```
+
+Drop `dist/` on any static host (Netlify drop, Vercel, GitHub Pages). `base` is
+relative, so a project page served from `/repo-name/` works as-is.
+
+**One file**, for someone who would rather not follow a link:
+
+```bash
+npm run build:single   # -> dist-single/interactive-airflow.html
+```
+
+A single ~1.5 MB HTML file with the stylesheet and the whole bundle inlined;
+nothing else is fetched. Small enough to email.
+
+Either way the LLM goal fallback (`intent/llmGoal.ts`) is unavailable, because it
+asks a local Python backend. That is by design: it is only consulted for
+phrasings the keyword parser misses and it fails back to that parser, so
+everything the seed vocabulary covers behaves identically.
+
+## Collecting sessions
+
+**Submit** scores the task one last time, seals the log, and always downloads it
+as JSON. Two optional build-time settings decide what else happens. Put them in
+`frontend/.env.local`, which is gitignored — an address committed to a public
+repo is an address in a scraper's list:
+
+```dotenv
+# Opens the participant's mail client with the message already written; they
+# attach the file that was just downloaded and press send.
+VITE_RESEARCHER_EMAIL=you@example.com
+
+# Optional: POST the same report as well, so they need do nothing at all.
+VITE_LOG_ENDPOINT=https://…
+```
+
+The report is the whole session — every manual move, rotation, device
+adjustment, door and window change, every typed goal and sketch, every
+suggestion offered and accepted, and the tick-box verdict each time it changed,
+each stamped with its offset from the start of the task — plus a final scoring
+of the goals against the plan as submitted.
+
 ## Flow
 
 1. **Setup screen** — pick a start mode, then enter Length × Width × Height in

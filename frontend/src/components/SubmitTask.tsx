@@ -3,14 +3,21 @@ import { useSceneStore, type SessionReport } from "../scene/store";
 
 // "I'm done." — the end of a session.
 //
-// Submitting seals the log and delivers it. Delivery is two things at once,
-// because a study runs in places the network doesn't always reach:
+// Submitting seals the log and delivers it. Three ways out, in order of how
+// little the participant has to do, because a study runs in places the network
+// doesn't reach and with people who won't debug anything:
 //
-//   1. it always downloads the report as JSON, so a participant sitting next to
-//      the facilitator can just hand the file over, and
-//   2. if the build was given a collection endpoint (VITE_LOG_ENDPOINT), it
-//      POSTs the same JSON there, so a participant trying the link from home
-//      needs to do nothing at all.
+//   1. it always downloads the report as JSON — a participant sitting next to
+//      the facilitator just hands the file over;
+//   2. if the build was given VITE_RESEARCHER_EMAIL it opens their mail client
+//      with the subject, the summary and the file name already written, so all
+//      they do is attach the file they just downloaded and press send;
+//   3. if the build was given VITE_LOG_ENDPOINT it POSTs the same JSON there and
+//      they do nothing at all.
+//
+// None of the three is hardcoded: an address baked into a public repo is an
+// address in a scraper's list. Put them in frontend/.env.local (gitignored) and
+// every build picks them up.
 //
 // The report is the whole timeline: every manual move, every typed goal, every
 // sketch, every suggestion offered and accepted, and the tick-box verdict each
@@ -19,14 +26,45 @@ import { useSceneStore, type SessionReport } from "../scene/store";
 // by asking them.
 
 const ENDPOINT = import.meta.env.VITE_LOG_ENDPOINT as string | undefined;
+const EMAIL = import.meta.env.VITE_RESEARCHER_EMAIL as string | undefined;
 
-function download(report: SessionReport) {
+function fileNameFor(report: SessionReport) {
+  return `airflow-session-${report.scenario ?? "free"}-${new Date(report.submittedAt)
+    .toISOString()
+    .slice(0, 19)
+    .replace(/[:T]/g, "-")}.json`;
+}
+
+function download(report: SessionReport, name: string) {
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `airflow-session-${report.scenario ?? "free"}-${Date.now()}.json`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/** A mail draft the participant only has to attach the file to and send. The
+ *  report itself is far too big for a mailto body (mail clients truncate around
+ *  a couple of thousand characters), so the body carries the summary and names
+ *  the file sitting in their downloads folder. */
+function mailtoFor(report: SessionReport, name: string) {
+  const met = report.goals.filter((g) => g.met).length;
+  const body = [
+    "Here is my session from the airflow study.",
+    "",
+    `Task: ${report.title ?? report.scenario ?? "free play"}`,
+    `Goals met: ${met} of ${report.goals.length}`,
+    `Time taken: ${Math.round(report.durationSec / 6) / 10} minutes`,
+    "",
+    `Please attach the file that was just downloaded: ${name}`,
+    "",
+    "Anything you found confusing:",
+    "",
+  ].join("\n");
+  return `mailto:${EMAIL}?subject=${encodeURIComponent(
+    `Airflow study session — ${report.title ?? report.scenario ?? "free play"}`,
+  )}&body=${encodeURIComponent(body)}`;
 }
 
 export function SubmitTask() {
@@ -35,6 +73,8 @@ export function SubmitTask() {
   const submitted = useSceneStore((s) => s.submitted);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<"none" | "ok" | "failed">("none");
+  const [file, setFile] = useState("");
+  const [copied, setCopied] = useState(false);
 
   if (!scenarioId) return null;
 
@@ -43,7 +83,12 @@ export function SubmitTask() {
     try {
       const report = submitSession();
       if (!report) return;
-      download(report);
+      const name = fileNameFor(report);
+      setFile(name);
+      download(report, name);
+      // Open the mail draft straight away — one click for them, and the file is
+      // already in their downloads by the time it appears.
+      if (EMAIL) window.location.href = mailtoFor(report, name);
       if (ENDPOINT) {
         try {
           const res = await fetch(ENDPOINT, {
@@ -62,6 +107,7 @@ export function SubmitTask() {
   };
 
   if (submitted) {
+    const name = file || fileNameFor(submitted);
     return (
       <section className="selected-box" style={{ borderLeft: "3px solid #2a9d8f" }}>
         <h2 style={{ marginBottom: 4 }}>Submitted — thank you</h2>
@@ -70,12 +116,35 @@ export function SubmitTask() {
             ? `${submitted.goals.filter((g) => g.met).length} of ${submitted.goals.length} goals met · `
             : ""}
           {Math.round(submitted.durationSec / 6) / 10} min
-          {ENDPOINT ? (sent === "ok" ? " · sent" : sent === "failed" ? " · not sent (saved to your downloads)" : "") : ""}
+          {ENDPOINT ? (sent === "ok" ? " · sent" : sent === "failed" ? " · not sent" : "") : ""}
         </p>
         <p className="muted-line" style={{ marginTop: 4 }}>
-          A copy of your session was saved to your downloads
-          {ENDPOINT && sent === "ok" ? " and sent to the researcher." : "."}
+          Saved to your downloads as <b>{name}</b>
+          {ENDPOINT && sent === "ok" ? ", and sent to the researcher." : "."}
         </p>
+        {EMAIL && (
+          <>
+            <p className="muted-line" style={{ marginTop: 6 }}>
+              Your email should have opened with a message ready — attach that file and send it.
+            </p>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <a className="tool" style={{ flex: 1, textAlign: "center", fontSize: 11.5, padding: "5px 8px" }} href={mailtoFor(submitted, name)}>
+                📧 Open the email again
+              </a>
+              <button
+                className="tool"
+                style={{ flex: 1, fontSize: 11.5 }}
+                title="Copy the whole report, if attaching a file is awkward"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(JSON.stringify(submitted, null, 2));
+                  setCopied(true);
+                }}
+              >
+                {copied ? "✓ Copied" : "Copy report"}
+              </button>
+            </div>
+          </>
+        )}
       </section>
     );
   }
@@ -86,7 +155,7 @@ export function SubmitTask() {
         {busy ? "Submitting…" : "✅ Submit — I'm done"}
       </button>
       <p className="muted-line" style={{ marginTop: 5 }}>
-        Ends the task and sends what you did to the researcher.
+        Ends the task and {EMAIL ? "opens an email so you can send what you did to the researcher." : "saves what you did."}
       </p>
     </section>
   );

@@ -73,3 +73,4 @@ simulator/lfm/
 
 # ---- TS build info ----
 *.tsbuildinfo
+dist-single/
