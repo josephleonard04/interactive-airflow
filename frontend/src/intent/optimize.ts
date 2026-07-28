@@ -24,6 +24,21 @@ export const GOAL_DEVICES: Record<OptimizeGoal, string[]> = {
 
 export const DEVICE_LABEL: Record<string, string> = { ac: "AC", fan: "Fan", heater: "Heater", supply: "Vent" };
 
+/** Device types a suggested solution may never move to a DIFFERENT room — it may
+ *  only reposition them inside the room they are already in.
+ *
+ *  The heater. Asked to warm the bedroom, the search's cheapest answer is to
+ *  carry the heater in there and stand it next to the bed, which is true, dull,
+ *  and not the problem: these tasks are about getting heat from where it is
+ *  produced to where it is wanted, through a doorway, and a suggestion that
+ *  relocates the source deletes the task instead of solving it. It is also not
+ *  how people live with a single heater in a living room. The fan is
+ *  deliberately NOT on this list — moving air between rooms is exactly its job.
+ *
+ *  This binds the SEARCH only. Dragging the heater wherever you like by hand is
+ *  still allowed; the participant is free to discover that for themselves. */
+export const ROOM_BOUND_DEVICES = ["heater"];
+
 export function largestRoom(plan: FloorPlan) {
   return plan.rooms.reduce((b, r) => (r.rect.w * r.rect.d > b.rect.w * b.rect.d ? r : b), plan.rooms[0]);
 }

@@ -434,9 +434,28 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // optimising toward a number instead of judging whether the home looks warm,
     // and the number is what the tool is supposed to be explaining to them.
     // The bands are still enforced — they are just not the interface.
+    // THE THIRD GOAL IS WHAT MAKES THE PLACEMENT MATTER. With only the two room
+    // means, a heater parked on the far wall by the TV passed both boxes, and so
+    // did mid-room and beside-the-doorway — a room mean cannot see the cold pool
+    // spilling off the glass, so almost any placement "solved" the task and the
+    // one real-world answer (a heater under the window) was indistinguishable
+    // from the rest. Measured at the glass, over a 4x3x4 sweep of fan position
+    // and aim, best case for each heater spot:
+    //     under the window     26.3        1 m off the window   18.1
+    //     far wall by the TV   16.7        beside the doorway   16.2
+    //     mid-room             16.1        as delivered         15.5
+    // 19 °C therefore separates "the heater is at the glass" from everything
+    // else with ~7 °C of headroom, and no fan trick closes the gap.
     goals: [
       { label: "Bedroom is comfortable", metric: "temperature", roomId: "bedroom", atLeast: 18, atMost: 24 },
       { label: "Living + kitchen is comfortable", metric: "temperature", roomId: "living", atLeast: 20, atMost: 24 },
+      {
+        label: "No cold draught off the living-room window",
+        metric: "temperature",
+        roomId: "living",
+        nearWindowOf: "living",
+        atLeast: 19,
+      },
     ],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
@@ -462,10 +481,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // to travel through. Worth watching in the study: participants who reason this
     // way are right about buildings and wrong about this goal.
     success:
-      "BOTH rooms ≥ 18 °C at 2 °C outdoors. Three levers and no single one is " +
-      "enough on medium: the heater near the doorway so warmth reaches it, the fan " +
-      "aimed through the doorway to carry it, and the bedroom glazing moved away " +
-      "from that path (or dropped). Turning the heater to high also passes.",
+      "Both rooms inside their comfort bands AND ≥ 19 °C in the strip of floor " +
+      "inside the living-room window, at 2 °C outdoors. Only the heater under " +
+      "that window clears the third goal (26.3 °C there, against 16–17 °C from " +
+      "anywhere else), and it needs the fan in the right-hand half of the living " +
+      "room to carry the warmth through the doorway — with the fan left over by " +
+      "the kitchen the bedroom lands at 17.4 °C and fails.",
     build: buildWinter,
   },
   summer: {

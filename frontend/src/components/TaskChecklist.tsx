@@ -27,9 +27,29 @@ import { tempGradientCss } from "../viz/temperature";
 /** Which simulation view answers each kind of goal. */
 const MODE_FOR = { temperature: "temperature", smell: "contamination", draft: "airflow" } as const;
 
+/** Ink that stays legible on the swatch it sits on. The cold end of the ramp is
+ *  a deep navy, and dark text on it was unreadable — the one word the picture
+ *  exists to say. Rec. 709 luminance, flipped at the usual mid-grey. */
+function inkOn(color: string): { color: string; textShadow: string } {
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)\)/.exec(color);
+  const [r, g, b] = m
+    ? [Number(m[1]), Number(m[2]), Number(m[3])]
+    : // hex fallback (#rgb / #rrggbb) for the smell/draught swatches
+      (() => {
+        const h = color.replace("#", "");
+        const f = h.length === 3 ? h.split("").map((c) => c + c) : [h.slice(0, 2), h.slice(2, 4), h.slice(4, 6)];
+        return f.map((v) => parseInt(v, 16) || 0);
+      })();
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum < 0.55
+    ? { color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,.45)" }
+    : { color: "#12212a", textShadow: "0 1px 0 rgba(255,255,255,.35)" };
+}
+
 /** One end of the before/after picture: a colour, what it is called, and which
  *  end of the story it is. */
 function Swatch({ caption, color, word, accent }: { caption: string; color: string; word: string; accent?: boolean }) {
+  const ink = inkOn(color);
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>{caption}</div>
@@ -44,11 +64,10 @@ function Swatch({ caption, color, word, accent }: { caption: string; color: stri
           justifyContent: "center",
           padding: "0 4px",
           textAlign: "center",
-          color: "#12212a",
           fontSize: 11.5,
           fontWeight: 600,
           lineHeight: 1.2,
-          textShadow: "0 1px 0 rgba(255,255,255,.35)",
+          ...ink,
         }}
       >
         {word}
