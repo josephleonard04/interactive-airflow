@@ -6,6 +6,7 @@ import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
+import { TaskChecklist } from "./TaskChecklist";
 
 /** One-per-home appliances in a study task — the Add button caps at this. */
 const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
@@ -144,6 +145,9 @@ export function Panel() {
           </p>
         </section>
       )}
+
+      {/* Live tick-list of what the task actually requires. */}
+      <TaskChecklist />
 
       <section>
         <h2>Edit the space</h2>

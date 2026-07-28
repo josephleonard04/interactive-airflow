@@ -146,7 +146,7 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // goal, because ±10 is the delta AT THE SOURCE and the room mean is well under
 // it. The heater is sized so a room containing it settles around 20–22 °C at
 // 2 °C outdoors; the AC is unchanged, since it was already landing correctly.
-const HEATER_T = 19;
+const HEATER_T = 24;
 const AC_T = -10;
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 /** The heater's OWN power curve, kept separate from POWER because POWER also
@@ -155,7 +155,7 @@ const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
  *  heater's "medium" was half of high and left the living room at 14.6 °C, which
  *  is not what medium on a real heater does: medium is the everyday setting that
  *  holds a room comfortable, and high is the extra push for a cold snap. */
-const HEATER_POWER: Record<number, number> = { 1: 0.72, 2: 1.3, 3: 1.6 };
+const HEATER_POWER: Record<number, number> = { 1: 0.85, 2: 1.3, 3: 1.75 };
 /** Temperature of a window's inner glass surface, as a delta from outdoor. Glass
  *  is the coldest surface in a heated room in winter: it sits a few degrees ABOVE
  *  the outside air (the pane is not the outdoors) but far below the room, so the

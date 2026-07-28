@@ -65,6 +65,24 @@ export interface ScenarioTools {
   resize: boolean;
 }
 
+/** One checkable line of the task, shown as a tick-box the participant watches.
+ *  A prose verdict ("Bedroom is 15.7 °C — not warm enough. Aim for 21 °C or
+ *  above — add a heater there…") buries the answer in advice and has to be
+ *  re-read every run; a tick-box answers "am I done yet?" at a glance and keeps
+ *  the goal on screen the whole time instead of only after a check. */
+export interface ScenarioGoal {
+  /** Shown next to the tick-box. Phrased as the thing to achieve. */
+  label: string;
+  /** What to measure. */
+  metric: "temperature" | "smell";
+  /** Room it is measured in. */
+  roomId: string;
+  /** Pass when the value is at least / at most this. °C for temperature,
+   *  0..1 for smell. */
+  atLeast?: number;
+  atMost?: number;
+}
+
 export interface Scenario {
   id: ScenarioId;
   /** Short label for the facilitator: "<home> · <task> · <type>". */
@@ -80,6 +98,8 @@ export interface Scenario {
   /** What the participant may change, in plain words, shown in the panel. */
   youCanChange: string;
   tools: ScenarioTools;
+  /** The task, as tick-boxes the participant can watch. Omitted = no checklist. */
+  goals?: ScenarioGoal[];
   /** Per-task airflow-visualization tuning. Line density is a per-task judgement
    *  — a two-room home with a doorway path needs far fewer lines to read clearly
    *  than a single room does — so it is set here rather than globally. Omitted =
@@ -382,6 +402,10 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "Move the heater and the fan anywhere, and put the bedroom window on any wall of the bedroom. " +
       "There is one heater and one fan; the walls, doors and living-room window are already built.",
     tools: { movable: ["heater", "fan"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
+    goals: [
+      { label: "Bedroom is warm enough (18 °C or above)", metric: "temperature", roomId: "bedroom", atLeast: 18 },
+      { label: "Living + kitchen is warm enough (18 °C or above)", metric: "temperature", roomId: "living", atLeast: 18 },
+    ],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
     // glazing modelled. THREE levers, and medium power needs at least two of them.
@@ -422,6 +446,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "room evenly and keep the air over the bed calm.",
     youCanChange: "Aim the air conditioner (you can't move it), and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: ["ac"], addable: ["fan"], walls: false, openings: true, resize: false },
+    goals: [{ label: "Studio is cool enough (26 °C or below)", metric: "temperature", roomId: "studio", atMost: 26 }],
     success:
       "Studio ≤ 26 °C at 33 °C outdoors AND mean air speed in the bed zone ≤ 0.25 m/s — " +
       "reached by angling the AC up/away and using the fan to mix, not by blasting the bed.",
@@ -436,6 +461,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "mould. Add one window and one extract vent so that damp corner dries out.",
     youCanChange: "Place an extract vent, and add a window; open, close or move doors and windows.",
     tools: { movable: ["return"], aimable: [], addable: ["return"], walls: false, openings: true, resize: false },
+    goals: [{ label: "The damp corner is drying out", metric: "smell", roomId: "bathroom", atMost: 0.12 }],
     success:
       "Moisture in the tub corner cleared (contaminant ≤ 0.12) with an open path " +
       "to outside — and NOT solved by putting the window and vent so close they " +
@@ -451,6 +477,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "two windows and an extract vent. Keep the smell away from the bed.",
     youCanChange: "Open or close either window, and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: [], addable: ["fan"], walls: false, openings: true, resize: false },
+    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.12 }],
     success:
       "Contaminant ≤ 0.12 in the bed zone with an open exterior path — reached by " +
       "opening the FAR window (cross-draught), not the near one (which short-" +
