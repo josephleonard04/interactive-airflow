@@ -538,10 +538,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           });
           return;
         }
+        // What the SEARCH may touch is what the PARTICIPANT may touch. Without
+        // this the studio task — a fan and two windows, with an extract that
+        // runs all night by definition — was offered layouts that relocate the
+        // extract vent.
+        const allowedDevices =
+          s.tools.movable.length || s.tools.addable.length || s.tools.aimable.length
+            ? Array.from(new Set([...s.tools.movable, ...s.tools.addable, ...s.tools.aimable]))
+            : undefined;
         const found = findSolutions(before, goal, targetIds, {
           outdoorTemp: s.outdoorTemp,
           want: 3,
           lockPower: s.tools.lockPower === true,
+          allowedDevices,
         });
         // Never hand back a finished task — see withholdComplete.
         const taskGoals = s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : [];
