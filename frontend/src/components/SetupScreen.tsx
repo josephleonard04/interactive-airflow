@@ -2,7 +2,16 @@ import { useState } from "react";
 import { MIN_HEIGHT, MIN_LENGTH, MIN_WIDTH } from "../floorplan/home";
 import type { StartMode } from "../floorplan/types";
 import { useSceneStore } from "../scene/store";
-import { SCENARIOS, SCENARIO_ORDER } from "../floorplan/scenarios";
+import { SCENARIOS, SCENARIO_ORDER, type ScenarioId } from "../floorplan/scenarios";
+
+/** One glyph per task, so the four cards are distinguishable at a glance rather
+ *  than four blocks of similar-looking text. */
+const SCENARIO_EMOJI: Record<ScenarioId, string> = {
+  winter: "❄️",
+  summer: "☀️",
+  humidity: "💧",
+  smell: "🍳",
+};
 
 // First screen: the homeowner enters their home's footprint (length × width ×
 // height) in metres or feet. On submit we generate the rooms, walls, windows,
@@ -110,15 +119,30 @@ export function SetupScreen() {
         <p className="setup-foot">You can change the size later, or edit walls and furniture anytime.</p>
 
         {/* Facilitator entry point for the user study. Each scenario loads its
-            own prebuilt home and shows only the controls that task is about. */}
+            own prebuilt home and shows only the controls that task is about.
+            Four cards on an even 2×2 grid: the old flex row put three on one
+            line and stretched the fourth across the next, and the titles wrap
+            to different depths so no two cards were the same height. The title
+            is "<home> · <task> · <type>", which reads badly as one run-on line —
+            the home leads, the rest sits under it as the qualifier it is. */}
         <div className="setup-scenarios">
           <div className="setup-scenarios-label">Study scenarios</div>
-          <div className="setup-scenario-row">
-            {SCENARIO_ORDER.map((id) => (
-              <button key={id} className="setup-scenario" onClick={() => startScenario(id)} title={SCENARIOS[id].brief}>
-                {SCENARIOS[id].title}
-              </button>
-            ))}
+          <div className="setup-scenario-grid">
+            {SCENARIO_ORDER.map((id) => {
+              const [home, ...rest] = SCENARIOS[id].title.split(" · ");
+              return (
+                <button
+                  key={id}
+                  className="setup-scenario"
+                  onClick={() => startScenario(id)}
+                  title={SCENARIOS[id].brief}
+                >
+                  <span className="setup-scenario-emoji">{SCENARIO_EMOJI[id]}</span>
+                  <strong>{home}</strong>
+                  <small>{rest.join(" · ")}</small>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
