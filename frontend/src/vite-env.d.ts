@@ -13,6 +13,11 @@ interface ImportMetaEnv {
    *  Put it in frontend/.env.local, which is gitignored — an address committed
    *  to a public repo is an address in a scraper's list. */
   readonly VITE_RESEARCHER_EMAIL?: string;
+  /** The same address, base64-encoded. This is what the deploy workflow sets,
+   *  because a published bundle is public whatever the repo's visibility is,
+   *  and a plaintext address in it is free food for a harvesting regex. Either
+   *  form works; this one wins when both are set. */
+  readonly VITE_RESEARCHER_EMAIL_B64?: string;
 }
 
 interface ImportMeta {
