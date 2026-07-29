@@ -582,7 +582,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  best case). "Blow the smell away from where you sleep" was not expressible,
    *  so the task could not be solved by the move it exists to teach. */
   const UPWIND = 1.35;
-  const costFromSources = (seeds: number[], kUp = 0): Float64Array => {
+  const costFromSources = (seeds: number[], kUp = 0, reverse = false): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
     //     dist[cc] = nc          // rounded to float32 on the way in
@@ -643,7 +643,11 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
         const cc = idx(a, b, d);
         if (sim.solid[cc]) continue;
-        const vd = u * di + v * dj + w * dk; // flow component along the move
+        // Flow component along the move. `reverse` walks the field the other
+        // way: cheap where the air is heading BACK toward the seed, which is
+        // "how quickly does this cell drain into that opening" rather than
+        // "how quickly does that opening's air get here".
+        const vd = (u * di + v * dj + w * dk) * (reverse ? -1 : 1);
         // Downwind is fast; upwind is slow but never free — the floor keeps
         // diffusion alive so a strong jet cannot make a region unreachable.
         const speed = Math.max(0.12, V0 + KADV * Math.max(0, vd) - kUp * Math.max(0, -vd));
@@ -709,11 +713,20 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   const smell = new Float32Array(n3);
   if (smellSeeds.length) {
     const dS = costFromSources(smellSeeds, UPWIND);
-    const dK = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND) : null;
+    // An opening cleans the air TWO ways, and a vent or a window does both:
+    // it puts fresh air in, which then travels downwind; and it takes stale air
+    // out, which cleans everything draining INTO it. The forward pass alone
+    // missed the second one entirely — an extract emits nothing, so nothing
+    // downstream of it existed, and the grille that is busy pulling the whole
+    // kitchen's air outside was scoring no better than the middle of the room.
+    // Whichever route reaches a cell sooner is the one that cleans it.
+    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND) : null;
+    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);
-      if (dK && dK[c] !== Infinity) v *= 1 - Math.exp(-dK[c] / FRESH_TAU);
+      const dK = Math.min(dFwd ? dFwd[c] : Infinity, dOut ? dOut[c] : Infinity);
+      if (dK !== Infinity) v *= 1 - Math.exp(-dK / FRESH_TAU);
       smell[c] = v;
     }
   }

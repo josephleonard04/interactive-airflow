@@ -257,7 +257,27 @@ function evaluate(
 
 // ---- strategies: the discrete variables that were never searched ----
 
-function strategiesFor(goal: OptimizeGoal, lockPower = false): Strategy[] {
+function strategiesFor(goal: OptimizeGoal, lockPower = false, allowed?: string[]): Strategy[] {
+  /** Strip device settings the task does not let anyone change, so a strategy
+   *  never quietly switches something the participant cannot reach. */
+  const only = (devices: Strategy["devices"]): Strategy["devices"] => {
+    if (!allowed) return devices;
+    const out: Strategy["devices"] = {};
+    for (const [type, spec] of Object.entries(devices)) if (allowed.includes(type)) out[type] = spec;
+    return out;
+  };
+  /** Name the devices a strategy is actually free to move, for its label. The
+   *  option card used to read "Move the fan and vents" on a task where the vent
+   *  is bolted to the wall and running all night — describing a change it was
+   *  no longer making. */
+  const movedNames = (devices: Strategy["devices"]): string => {
+    const names = Object.keys(devices)
+      .filter((t) => !allowed || allowed.includes(t))
+      .map((t) => (DEVICE_LABEL[t] ?? t).toLowerCase());
+    if (names.length === 0) return "the openings";
+    if (names.length === 1) return `the ${names[0]}`;
+    return `the ${names.slice(0, -1).join(", the ")} and the ${names[names.length - 1]}`;
+  };
   const out: Strategy[] = [];
   const add = (s: Strategy) => out.push(s);
 
@@ -271,20 +291,21 @@ function strategiesFor(goal: OptimizeGoal, lockPower = false): Strategy[] {
     // Interior doors are still searched: those move heat between rooms.
     for (const power of lockPower ? [2] : [2, 3]) {
       for (const doorsOpen of [true, false]) {
+        const devices = only({
+          [dev]: { on: true, power },
+          [other]: { on: false },
+          // Locked tasks keep the fan on medium too — it is a device dial like
+          // any other, and dropping it to low is a change the user cannot make.
+          fan: { on: true, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
+        });
         add({
           id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}`,
           // With the dial locked the only thing that varies is placement, so the
           // label must describe THAT rather than a power the user can't set.
           label: lockPower
-            ? `Move the ${(DEVICE_LABEL[dev] ?? dev).toLowerCase()} and the fan`
+            ? `Move ${movedNames(devices)}`
             : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
-          devices: {
-            [dev]: { on: true, power },
-            [other]: { on: false },
-            // Locked tasks keep the fan on medium too — it is a device dial like
-            // any other, and dropping it to low is a change the user cannot make.
-            fan: { on: true, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
-          },
+          devices,
           interiorDoors: doorsOpen,
           windows: false,
           note: [
@@ -300,10 +321,11 @@ function strategiesFor(goal: OptimizeGoal, lockPower = false): Strategy[] {
   // ventilate / circulate / balanced: the openings matter more than the power
   for (const power of lockPower ? [2] : [2, 3]) {
     for (const win of [true, false]) {
+      const devices = only({ fan: { on: true, power, oscillate: true }, supply: { on: true, power }, return: { on: true, power } });
       add({
         id: `air${power}-${win ? "win" : "nowin"}`,
-        label: lockPower ? "Move the fan and vents" : `Air movers on ${power === 3 ? "high" : "medium"}`,
-        devices: { fan: { on: true, power, oscillate: true }, supply: { on: true, power }, return: { on: true, power } },
+        label: lockPower ? `Move ${movedNames(devices)}` : `Air movers on ${power === 3 ? "high" : "medium"}`,
+        devices,
         interiorDoors: true,
         windows: win,
         note: win ? "windows open to purge stale air" : "windows shut, recirculating indoors",
@@ -323,8 +345,11 @@ function placeDevices(
   targetIds: string[],
   outdoorTemp: number,
   budget: { left: number },
+  allowed?: string[],
 ): { plan: FloorPlan; changes: string[] } {
-  const wanted = GOAL_DEVICES[goal];
+  const wanted = allowed
+    ? GOAL_DEVICES[goal].filter((t) => allowed.includes(t))
+    : GOAL_DEVICES[goal];
   const targets = targetIds.length
     ? targetIds.map((id) => base.rooms.find((r) => r.id === id)).filter((r): r is FloorPlan["rooms"][0] => !!r)
     : [largestRoom(base)];
@@ -425,6 +450,17 @@ function placeDevices(
 
 export interface FindOptions {
   outdoorTemp: number;
+  /** Device types the search is allowed to touch — move, aim or switch. Comes
+   *  from the task's own ScenarioTools, because a suggestion the participant
+   *  cannot carry out is not a suggestion.
+   *
+   *  The studio task is the case that forced this: it is about a fan and two
+   *  windows, and the extract vent runs all night by definition. The search had
+   *  no idea, read GOAL_DEVICES for the goal, and cheerfully proposed relocating
+   *  the extract — which is not a thing anyone can do at midnight, and answers a
+   *  question the task had deliberately closed. Undefined = no restriction (the
+   *  unrestricted app). */
+  allowedDevices?: string[];
   /** How many solutions to offer. */
   want?: number;
   /** Coarse screening evaluations to spend across all strategies. */
@@ -449,7 +485,7 @@ export function findSolutions(
 ): Solution[] {
   const want = opts.want ?? 3;
   const budget = { left: opts.screenBudget ?? 48 };
-  const strategies = strategiesFor(goal, opts.lockPower === true);
+  const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices);
 
   // Split the screening budget EVENLY across strategies. A single shared
   // counter let the first strategy consume everything and left the rest with no
@@ -460,7 +496,7 @@ export function findSolutions(
   for (const st of strategies) {
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.windows);
     const slice = { left: perStrategy };
-    const { plan: placed, changes } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice);
+    const { plan: placed, changes } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices);
     const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, SCREEN);
     screened.push({ strategy: st, plan: placed, score, changes });
   }
