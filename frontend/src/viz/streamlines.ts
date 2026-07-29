@@ -121,9 +121,17 @@ function seedPoints(
   }
 
   // Per-room: pick the strongest-flow cells, but spaced apart (min separation)
-  // so we get a few representative lines, not a cluster on one jet. Capped at 2
-  // per room — the important paths (vents, doorways) are already seeded above.
-  const perRoom = rooms.length ? Math.min(2, Math.max(1, Math.floor((maxSeeds - out.length) / rooms.length))) : 3;
+  // so we get a few representative lines, not a cluster on one jet.
+  //
+  // This was a hard cap of TWO per room, on the reasoning that the vents and
+  // doorways above already carry the important paths. That holds for a home
+  // whose story is "air gets from this room to that one" — and fails completely
+  // for a single open room, where there are no doorways, the whole question is
+  // how the air crosses the floor, and two lines plus a vent is a picture of
+  // nothing happening. It also made the per-task maxSeeds setting a no-op: the
+  // cap bound first, so asking for more lines changed nothing. The budget is
+  // now what decides, still spaced so a jet cannot collect a bundle.
+  const perRoom = rooms.length ? Math.max(1, Math.min(8, Math.floor((maxSeeds - out.length) / rooms.length))) : 3;
   const rlist: Rect[] = rooms.length ? rooms : [{ x: built.origin[0], z: built.origin[2], w: nx * built.dx, d: nz * built.dx, y: 0, h: 0 } as unknown as Rect];
   for (const r of rlist) {
     const cands: Array<{ p: THREE.Vector3; s: number }> = [];

@@ -161,11 +161,27 @@ function assemble(
   return { name, size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid: rasterize(rooms, bounds) };
 }
 
-const room = (id: string, type: RoomDef["type"], name: string, x: number, z: number, w: number, d: number): RoomDef => ({
+const room = (
+  id: string,
+  type: RoomDef["type"],
+  name: string,
+  x: number,
+  z: number,
+  w: number,
+  d: number,
+  /** Pin the name against auto-naming. Rooms are normally named from what is
+   *  standing in them, which is right for a home someone is designing and wrong
+   *  for a task whose whole point is that one room is several things at once:
+   *  the studio has a fridge and a sink in it, so the moment anything was moved
+   *  it renamed itself "Kitchen" — on the panel, and on the sketch map where the
+   *  participant is being asked to draw on their bedroom. */
+  fixedName = false,
+): RoomDef => ({
   id,
   type,
   name,
   rect: { x, z, w, d },
+  ...(fixedName ? { renamed: true } : {}),
 });
 
 const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -354,7 +370,7 @@ function buildStudio(): FloorPlan {
   // 6.4 × 4.8 — the same 4:3 proportions, scaled down to a studio someone would
   // actually rent. At 8 × 6 the two ends were far enough apart that the bin was
   // barely a problem from the bed.
-  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 6.4, 4.8)];
+  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 6.4, 4.8, true)];
   const plan = assemble(
     "Studio apartment",
     rooms,
@@ -646,6 +662,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     goals: [
       { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.15 },
     ],
+    // Denser than the default 14. This is ONE open room where the whole question
+    // is which way the air crosses it, and the two-room homes' reasoning — that
+    // a handful of lines through a doorway reads more clearly than a bundle —
+    // does not apply: there is no doorway, and a sparse picture here just looks
+    // like nothing is happening.
+    viz: { maxSeeds: 26 },
     success:
       "Smell over the bed ≤ 0.15, reached by opening the BOTTOM window beside the " +
       "bed. The right-hand window is the trap: it is a couple of metres from the " +

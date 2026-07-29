@@ -406,9 +406,16 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
         if (sim.solid[c]) sim.solid[c] = 0;
-        // only AC / supply generate air → seed airflow particles here; a fan only
-        // pushes existing air and a return only removes it, so neither seeds
-        if (isAC || isSupply) seeds.push(cellCenter(i, j, k));
+        // `seeds` is WHERE TO START DRAWING, not where air comes from — it is
+        // read only by the streamline seeding and the particle spawner, never by
+        // the solver. A fan does not generate air, and it is still the single
+        // most interesting place in the room to start a line from: it is the
+        // thing the participant just placed and is reasoning about. Without it,
+        // a studio with a fan and an open window had exactly two seeds — the
+        // window's two gateway points — and the fan appeared to do nothing.
+        // A return still does not seed: nothing is born at an extract, and its
+        // lines are drawn from `sinks` by tracing upstream instead.
+        if (isAC || isSupply || isFan) seeds.push(cellCenter(i, j, k));
         if (isReturn) {
           // one cell IN FRONT of the grille (dir faces into the room), so the
           // seed sits in open air rather than in the vent's own boundary cell
