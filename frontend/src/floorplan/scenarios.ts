@@ -82,7 +82,9 @@ export interface ScenarioGoal {
   /** Room it is measured in. Ignored when `nearItem` is set. */
   roomId: string;
   /** Measure over the footprint of this item type instead of the whole room —
-   *  a draught is felt where you lie, not averaged over the floor. */
+   *  a draught is felt where you lie, not averaged over the floor, and in a
+   *  studio a room-mean smell cannot tell the bed from the bin two metres away.
+   *  Applies to `draft` and `smell` goals. */
   nearItem?: string;
   /** Extra condition on a room temperature goal: the strip of floor just inside
    *  the room's exterior window must ALSO be at least this warm.
@@ -214,6 +216,14 @@ function entranceOnBottom(walls: ReturnType<typeof buildWalls>, gen: IdGen, room
   doors.push(ent);
 }
 
+/** The same, on the room's SOUTH wall (smallest z = screen-top). */
+function entranceOnTop(walls: ReturnType<typeof buildWalls>, gen: IdGen, roomId: string, rect: RoomDef["rect"], doors: Opening[], frac = 0.5): void {
+  const cx = clampf(rect.x + frac * rect.w, rect.x + DOOR_WIDTH, rect.x + rect.w - DOOR_WIDTH);
+  const ent = makeOpening(gen("door"), "door", "x", rect.z, cx - DOOR_WIDTH / 2, cx + DOOR_WIDTH / 2, [roomId, "outside"]);
+  carveOpening(walls, ent);
+  doors.push(ent);
+}
+
 // ---------------------------------------------------------------- winter
 
 /**
@@ -293,37 +303,71 @@ function buildWinter(): FloorPlan {
 // ---------------------------------------------------------------- summer
 
 /**
- * SUMMER · RENTED. A studio. The AC is fixed high on the east wall, blowing
- * straight west onto the bed — the classic bad placement. You cannot move it,
- * only re-aim it (angle it up / away) and add a fan, so the room cools evenly
- * without a draught on the sleeper.
+ * SUMMER · RENTED. A studio, 8 m across by 6 m deep, where the kitchen and the
+ * bed share one room. It is hot and the food waste in the kitchen bin has
+ * started to smell, and the participant has to sleep in there tonight.
+ *
+ * The layout puts the two things that must not meet as far apart as the room
+ * allows — bed in the near-left corner, kitchen diagonally opposite in the
+ * far-right — and then gives exactly three levers: which windows are open, and
+ * where a portable fan stands and which way it points. The extract vent over
+ * the kitchen runs the whole time and is not the participant's to touch.
+ *
+ * The tension the task is built on: a hot night wants moving air over the bed,
+ * and the cheapest way to get it is to stand the fan by the kitchen and blow
+ * across the room — which walks the smell straight onto the pillow. Air has to
+ * arrive at the bed from the window side and leave past the kitchen into the
+ * vent, which is a different arrangement from the obvious one.
  */
 function buildStudio(): FloorPlan {
-  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 4.2, 5.0)];
-  return assemble(
+  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 8.0, 6.0)];
+  const plan = assemble(
     "Studio apartment",
     rooms,
     (walls, gen, doors) => {
-      placeEntrance(walls, gen, rooms[0], doors);
+      // Front door on the SOUTH wall (screen-top), over on the left so it does
+      // not land in the kitchen corner.
+      entranceOnTop(walls, gen, "studio", rooms[0].rect, doors, 0.3);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
       const [studio] = rs;
       return [
-        against(gen, studio, c(studio), "west", 0.5, "bed", [1.5, 0.5, 2.0]),
-        inCorner(gen, studio, "north", "end", "closet", [1.0, 2.0, 0.6]),
-        against(gen, studio, c(studio), "south", 0.35, "desk", [1.2, 0.75, 0.6]),
-        // AC on the EAST wall, facing WEST (rotationY from `against(east)`), i.e.
-        // straight at the bed. Fixed in place — the participant re-aims it.
-        against(gen, studio, c(studio), "east", 0.5, "ac", [0.85, 0.32, 0.22], {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25, on: true,
+        // Sleeping half — near-left (screen bottom-left).
+        inCorner(gen, studio, "north", "start", "bed", [1.5, 0.5, 2.0]),
+        // Desk in the far-left corner (screen top-left).
+        inCorner(gen, studio, "south", "start", "desk", [1.2, 0.75, 0.6]),
+        // Kitchen, far-right corner (screen top-right): counter in the corner,
+        // fridge beside it, and the bin at the end of the run.
+        inCorner(gen, studio, "south", "end", "kitchen_sink", [1.0, 0.9, 0.6]),
+        against(gen, studio, c(studio), "east", 0.28, "fridge", [0.7, 1.8, 0.7]),
+        against(gen, studio, c(studio), "south", 0.72, "bin", [0.4, 0.7, 0.4]),
+        // …and the smell itself, at the bin. Separate from the bin model so the
+        // solver's source and the thing the participant can see are in the same
+        // place without the bin having to be a flow object.
+        against(gen, studio, c(studio), "south", 0.72, "smell", [0.34, 0.5, 0.34], {
+          category: "hvac", mount: "floor",
         }),
-        against(gen, studio, c(studio), "south", 0.8, "fan", [0.45, 1.3, 0.45], {
-          category: "hvac", mount: "floor", flow: 0, on: false,
+        // Extract vent high on the wall above the kitchen. Always running — the
+        // task is about where the air comes FROM, not whether the vent is on.
+        against(gen, studio, c(studio), "south", 0.86, "return", VENT_SIZE, {
+          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.06, on: true,
         }),
+        // NO FAN. The participant adds one from the palette and decides where it
+        // goes — "where would you even put it" is the question being asked.
       ];
     },
+    { windows: false },
   );
+  // Two windows, both starting closed. One on the RIGHT wall beside the kitchen
+  // — the short-circuit trap, since it sits a metre from the extract vent and
+  // air let in there goes straight back out without crossing the room. One on
+  // the NEAR wall (screen-bottom) by the bed, which is the one that actually
+  // sweeps the room from the sleeping end toward the kitchen.
+  addWindow(plan, "studio", "east", 0.22, false);
+  addWindow(plan, "studio", "north", 0.45, false);
+  for (const o of [...plan.doors, ...plan.windows]) o.fixed = true;
+  return plan;
 }
 
 // ---------------------------------------------------------------- humidity
@@ -503,26 +547,50 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   },
   summer: {
     id: "summer",
-    title: "Studio · Temperature (summer) · Rented",
-    outdoorTemp: 33,
+    title: "Studio · Hot night, kitchen smell · Rented",
+    outdoorTemp: 31,
     brief:
-      "It's a hot afternoon. The air conditioner is fixed to the wall and blows " +
-      "straight onto the bed, so it's a cold draught all night. Cool the whole " +
-      "room evenly and keep the air over the bed calm.",
-    youCanChange: "Aim the air conditioner (you can't move it), and add, move and aim a fan.",
-    tools: { movable: ["fan"], aimable: ["ac"], addable: ["fan"], walls: false, openings: true, resize: false },
-    // Cooling has the mirror problem: "26 °C or below" is satisfied by an
-    // over-chilled 18 °C room. 23–26 °C is the ASHRAE 55 summer zone. The
-    // second goal is the one that makes this task hard — the two pull against
-    // each other, since the cheapest way to hit the temperature is to point
-    // the air straight at the bed.
+      "It's hot, and the food waste in the kitchen bin has started to smell. " +
+      "The bed and the kitchen share one room, and you have to sleep in there " +
+      "tonight. Get some air moving over the bed without bringing the smell " +
+      "with it.",
+    youCanChange:
+      "Add a fan, then move it and aim it anywhere. Open or close either window. " +
+      "The kitchen's extract vent runs all night and can't be switched off.",
+    tools: { movable: ["fan"], aimable: ["fan"], addable: ["fan"], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
+    // TWO GOALS THAT PULL APART. A hot night wants air moving over the bed, and
+    // the obvious way to get it — stand the fan in the middle and sweep — walks
+    // the bin's smell across the pillow on the way. The pair can only be
+    // satisfied by air that arrives at the bed from the window and leaves past
+    // the kitchen into the extract, which is not the arrangement anyone reaches
+    // for first.
+    //
+    // Both are measured over the BED's footprint, not the room: this is a
+    // single open room, so a room mean cannot tell the sleeping end from the
+    // cooking end and would call every layout identical.
+    // Measured over a 192-configuration sweep of fan position and aim (6 × 4
+    // positions × 8 aims), with the near window open:
+    //     smell ≤ 0.12 over the bed                      43 of 192
+    //     …and air over the bed in 0.15–1.2 m/s          25 of 192
+    // With the KITCHEN-SIDE window open instead: 0 of 96 reach 0.12 at any fan
+    // placement — best case 0.191 — because that window sits a metre from the
+    // extract and the fresh air goes straight back out without crossing the
+    // room. Choosing the window is therefore the move that decides the task,
+    // and no amount of fan-fiddling rescues the wrong choice.
+    //
+    // The air band has a CEILING as well as a floor. Without one the answer is
+    // "stand the fan next to your pillow", which measures 1.97 m/s over the
+    // bed — a gale to sleep in, and not a lesson about airflow.
     goals: [
-      { label: "Studio is comfortable", metric: "temperature", roomId: "studio", atLeast: 23, atMost: 26 },
-      { label: "Air over the bed is calm", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.25 },
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.12 },
+      { label: "Air is moving over the bed, gently", metric: "draft", roomId: "studio", nearItem: "bed", atLeast: 0.15, atMost: 1.2 },
     ],
     success:
-      "Studio ≤ 26 °C at 33 °C outdoors AND mean air speed in the bed zone ≤ 0.25 m/s — " +
-      "reached by angling the AC up/away and using the fan to mix, not by blasting the bed.",
+      "Smell over the bed ≤ 0.12 AND mean air speed there 0.15–1.2 m/s — reached " +
+      "by opening the window BESIDE THE BED (the near wall) and standing the fan " +
+      "on the sleeping side, sweeping the room toward the kitchen extract. " +
+      "Opening the kitchen-side window instead short-circuits straight back out " +
+      "of the vent a metre away: unsolvable at every fan placement tried.",
     build: buildStudio,
   },
   humidity: {

@@ -295,6 +295,33 @@ function Smell(size: V): JSX.Element {
   );
 }
 
+/** Kitchen bin: a tapered body with a lid, standing slightly open. The lid is
+ *  the point — a closed bin is not a smell you have to design around, and the
+ *  participant has to be able to see at a glance where the smell is coming
+ *  from without reading a label. */
+function Bin(size: V): JSX.Element {
+  const r = Math.min(size[0], size[2]) * 0.5;
+  const h = size[1];
+  return (
+    <group>
+      <mesh position={[0, h * 0.45, 0]} castShadow>
+        <cylinderGeometry args={[r, r * 0.82, h * 0.9, 20]} />
+        <meshStandardMaterial color="#8d949b" roughness={0.55} metalness={0.25} />
+      </mesh>
+      {/* lid, tipped back so the bin reads as open */}
+      <mesh position={[0, h * 0.95, -r * 0.25]} rotation={[-0.45, 0, 0]} castShadow>
+        <cylinderGeometry args={[r * 1.06, r * 1.06, h * 0.07, 20]} />
+        <meshStandardMaterial color="#6f767d" roughness={0.5} metalness={0.3} />
+      </mesh>
+      {/* the bag inside, just visible over the rim */}
+      <mesh position={[0, h * 0.9, 0]}>
+        <cylinderGeometry args={[r * 0.9, r * 0.9, h * 0.06, 16]} />
+        <meshStandardMaterial color="#4b5563" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
 export function Model({ type, size }: { type: string; size: V }) {
   switch (type) {
     case "bed":
@@ -329,6 +356,8 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Vent(size);
     case "return":
       return Vent(size);
+    case "bin":
+      return Bin(size);
     case "smell":
       return Smell(size);
     default:

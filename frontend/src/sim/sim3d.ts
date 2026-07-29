@@ -568,7 +568,21 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   // of having a fan — was not a strategy the model rewarded. Now which way the
   // fan points measurably decides how far the warmth travels.
   const KADV = 1.6;
-  const costFromSources = (seeds: number[]): Float64Array => {
+  /** How much moving AGAINST the flow costs, as a fraction of KADV.
+   *
+   *  Zero for heat, which is the behaviour everything was calibrated against:
+   *  warmth also conducts and radiates, so a fan blowing away from a room does
+   *  not stop it warming.
+   *
+   *  Non-zero for a contaminant, because a contaminant only moves if the air
+   *  moves it. With no upwind penalty a fan could make smell travel FASTER in
+   *  every direction and never hold it back anywhere — measured on the studio
+   *  task, every fan placement raised the smell over the bed (0.19 with no fan,
+   *  0.26 blowing from the bed toward the kitchen, which should have been the
+   *  best case). "Blow the smell away from where you sleep" was not expressible,
+   *  so the task could not be solved by the move it exists to teach. */
+  const UPWIND = 1.35;
+  const costFromSources = (seeds: number[], kUp = 0): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
     //     dist[cc] = nc          // rounded to float32 on the way in
@@ -630,7 +644,9 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         const cc = idx(a, b, d);
         if (sim.solid[cc]) continue;
         const vd = u * di + v * dj + w * dk; // flow component along the move
-        const speed = V0 + KADV * Math.max(0, vd);
+        // Downwind is fast; upwind is slow but never free — the floor keeps
+        // diffusion alive so a strong jet cannot make a region unreachable.
+        const speed = Math.max(0.12, V0 + KADV * Math.max(0, vd) - kUp * Math.max(0, -vd));
         const nc = cost + dx / speed;
         if (nc < dist[cc]) { dist[cc] = nc; push(nc, cc); }
       }
@@ -640,7 +656,17 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
 
   const TAU = 23;        // temperature decay time (s) — fills a house, keeps a gradient
   const SMELL_TAU = 9;
-  const SINK_LAMBDA = 0.7; // smell drops to ~0 within ~3 cells of an open window/vent
+  // FRESH AIR IS CARRIED, NOT A HALO. This was a plain geodesic distance to the
+  // nearest opening with a 0.7 m falloff, i.e. "standing near a window helps and
+  // nothing else does". Two things were wrong with that. Opening a window on the
+  // far side of a room did nothing measurable anywhere a person actually was
+  // (0.190 over the bed with every window shut, 0.189 with both open — the
+  // control did nothing). And a fan could never clean anything: it had no way to
+  // bring the clean air TO you, so every fan placement only spread the smell
+  // further. Fresh air now travels from the opening on the same airflow-weighted
+  // cost the smell does, so blowing a window's air across the bed washes the bed
+  // — which is the whole move the studio task is trying to teach.
+  const FRESH_TAU = 5;
 
   // Glazing is HEAT LOSS, not a cold source. As a source it would drag the
   // reported temperature below the outdoor air, which a closed window cannot do.
@@ -682,12 +708,12 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   }
   const smell = new Float32Array(n3);
   if (smellSeeds.length) {
-    const dS = costFromSources(smellSeeds);
-    const dK = sinkSeeds.length ? bfs(sinkSeeds) : null;
+    const dS = costFromSources(smellSeeds, UPWIND);
+    const dK = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);
-      if (dK && dK[c] !== Infinity) v *= 1 - Math.exp(-dK[c] / SINK_LAMBDA);
+      if (dK && dK[c] !== Infinity) v *= 1 - Math.exp(-dK[c] / FRESH_TAU);
       smell[c] = v;
     }
   }

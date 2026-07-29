@@ -158,6 +158,18 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       return { label: g.label, met: ok, detail: speed.toFixed(2), word: ok ? "calm" : "you'd feel it" };
     }
 
+    // A smell goal can be measured over one object's footprint rather than the
+    // whole room — "the smell stays off the BED". In a studio the bed and the
+    // bin are in the same room, so a room mean cannot tell the sleeping end
+    // from the cooking end and would score every layout the same.
+    if (g.metric === "smell" && g.nearItem) {
+      const zone = itemZone(plan, g.nearItem);
+      const v = zone ? zoneMean(built, fields.smell, zone) : null;
+      if (v === null) return { label: g.label, met: false, detail: "", word: "" };
+      const met = (g.atLeast === undefined || v >= g.atLeast) && (g.atMost === undefined || v <= g.atMost);
+      return { label: g.label, met, detail: v.toFixed(3), word: met ? "clear" : "still there" };
+    }
+
     const raw = g.metric === "temperature" ? temps?.get(g.roomId) : smells?.get(g.roomId);
     if (raw === undefined || raw === null) return { label: g.label, met: false, detail: "", word: "" };
 
