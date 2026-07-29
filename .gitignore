@@ -74,3 +74,8 @@ simulator/lfm/
 # ---- TS build info ----
 *.tsbuildinfo
 dist-single/
+
+# ---- Private research notes: kept locally, never published ----
+# The repo is public so the app can be served from GitHub Pages; the meeting
+# notes, positioning, correspondence and study materials are not part of that.
+docs/
