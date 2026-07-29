@@ -3,21 +3,23 @@ import { useSceneStore, type SessionReport } from "../scene/store";
 
 // "I'm done." — the end of a session.
 //
-// Submitting seals the log and delivers it. Three ways out, in order of how
-// little the participant has to do, because a study runs in places the network
-// doesn't reach and with people who won't debug anything:
+// Submit downloads the session as one JSON file and says so, plainly, naming the
+// file. That is the whole delivery mechanism: these sessions are run with a
+// facilitator on a call or in the room, who asks for the file at the end. The
+// participant is told what to do by a person, so the screen's only job is to
+// make sure the file exists and is easy to name.
 //
-//   1. it always downloads the report as JSON — a participant sitting next to
-//      the facilitator just hands the file over;
-//   2. if the build was given VITE_RESEARCHER_EMAIL it opens their mail client
-//      with the subject, the summary and the file name already written, so all
-//      they do is attach the file they just downloaded and press send;
-//   3. if the build was given VITE_LOG_ENDPOINT it POSTs the same JSON there and
-//      they do nothing at all.
+// NOTHING OPENS BY ITSELF. An earlier version launched the mail client the
+// moment Submit was pressed. That is a surprise — a strange window over the top
+// of the study, in an app they may not use, at the exact moment they think they
+// have finished — and it replaced a person's clear instruction with a guess at
+// one. Emailing is still one click if they want it, but it is offered, not
+// sprung.
 //
-// None of the three is hardcoded: an address baked into a public repo is an
-// address in a scraper's list. Put them in frontend/.env.local (gitignored) and
-// every build picks them up.
+// Two backstops behind the download, because a file that never arrives is a
+// session that never happened: the report is also kept in localStorage under
+// `airflow-last-session`, and if the build was given VITE_LOG_ENDPOINT it is
+// POSTed there as well.
 //
 // The report is the whole timeline: every manual move, every typed goal, every
 // sketch, every suggestion offered and accepted, and the tick-box verdict each
@@ -106,16 +108,13 @@ export function SubmitTask() {
       const name = fileNameFor(report);
       setFile(name);
       download(report, name);
-      // Belt and braces: a participant who closes the tab without sending the
-      // mail has still left the session somewhere recoverable.
+      // Belt and braces: a participant who closes the tab without handing the
+      // file over has still left the session somewhere recoverable.
       try {
         localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(report));
       } catch {
-        /* private mode / quota — the download and the mail still happened */
+        /* private mode / quota — the download still happened */
       }
-      // Open the mail draft straight away — one click for them, and the file is
-      // already in their downloads by the time it appears.
-      if (EMAIL) window.location.href = mailtoFor(report, name);
       if (ENDPOINT) {
         try {
           const res = await fetch(ENDPOINT, {
@@ -145,33 +144,62 @@ export function SubmitTask() {
           {Math.round(submitted.durationSec / 6) / 10} min
           {ENDPOINT ? (sent === "ok" ? " · sent" : sent === "failed" ? " · not sent" : "") : ""}
         </p>
-        <p className="muted-line" style={{ marginTop: 4 }}>
-          Saved to your downloads as <b>{name}</b>
-          {ENDPOINT && sent === "ok" ? ", and sent to the researcher." : "."}
+        {/* The one instruction that matters, in plain words and not muted: the
+            file exists, here is what it is called, please pass it on. The
+            facilitator says the rest. */}
+        <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "8px 0 0" }}>
+          Your session was saved to your <b>Downloads</b> folder as:
         </p>
-        {EMAIL && (
-          <>
-            <p className="muted-line" style={{ marginTop: 6 }}>
-              Your email should have opened with a message ready — attach that file and send it.
-            </p>
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-              <a className="tool" style={{ flex: 1, textAlign: "center", fontSize: 11.5, padding: "5px 8px" }} href={mailtoFor(submitted, name)}>
-                📧 Open the email again
-              </a>
-              <button
-                className="tool"
-                style={{ flex: 1, fontSize: 11.5 }}
-                title="Copy the whole report, if attaching a file is awkward"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(JSON.stringify(submitted, null, 2));
-                  setCopied(true);
-                }}
-              >
-                {copied ? "✓ Copied" : "Copy report"}
-              </button>
-            </div>
-          </>
-        )}
+        <code
+          style={{
+            display: "block",
+            margin: "5px 0 8px",
+            padding: "6px 8px",
+            borderRadius: 8,
+            background: "#fff",
+            border: "1px solid var(--line)",
+            fontSize: 11,
+            wordBreak: "break-all",
+          }}
+        >
+          {name}
+        </code>
+        <p className="muted-line" style={{ margin: 0 }}>
+          {ENDPOINT && sent === "ok"
+            ? "It has also been sent to the researcher automatically — nothing else to do."
+            : "Please send that file to the researcher."}
+        </p>
+        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <button
+            className="tool"
+            style={{ flex: 1, fontSize: 11.5 }}
+            title="If the download did not appear, or you deleted it"
+            onClick={() => download(submitted, name)}
+          >
+            ⬇ Download again
+          </button>
+          {EMAIL && (
+            <a
+              className="tool"
+              style={{ flex: 1, textAlign: "center", fontSize: 11.5, padding: "5px 8px" }}
+              href={mailtoFor(submitted, name)}
+              title="Opens your email with the message written — attach the file above"
+            >
+              📧 Email it
+            </a>
+          )}
+          <button
+            className="tool"
+            style={{ flex: 1, fontSize: 11.5 }}
+            title="Copy the report itself, if sending the file is awkward"
+            onClick={() => {
+              void navigator.clipboard?.writeText(JSON.stringify(submitted, null, 2));
+              setCopied(true);
+            }}
+          >
+            {copied ? "✓ Copied" : "Copy"}
+          </button>
+        </div>
         {/* The way on. A session ends on this panel, and without a door out of
             it the only way to try the next task is to reload the page. */}
         <button
@@ -192,7 +220,7 @@ export function SubmitTask() {
         {busy ? "Submitting…" : "✅ Submit — I'm done"}
       </button>
       <p className="muted-line" style={{ marginTop: 5 }}>
-        Ends the task and {EMAIL ? "opens an email so you can send what you did to the researcher." : "saves what you did."}
+        Ends the task and saves what you did as a file to give to the researcher.
       </p>
     </section>
   );
