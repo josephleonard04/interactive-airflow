@@ -26,7 +26,26 @@ import { useSceneStore, type SessionReport } from "../scene/store";
 // by asking them.
 
 const ENDPOINT = import.meta.env.VITE_LOG_ENDPOINT as string | undefined;
-const EMAIL = import.meta.env.VITE_RESEARCHER_EMAIL as string | undefined;
+// Base64 first: that is the form the deploy workflow sets, so the published
+// bundle never carries the address in plain text. The plain variable stays
+// supported for a local .env.local, where nothing is published.
+const EMAIL = (() => {
+  const b64 = import.meta.env.VITE_RESEARCHER_EMAIL_B64;
+  if (b64) {
+    try {
+      return atob(b64);
+    } catch {
+      /* malformed — fall through to the plain variable */
+    }
+  }
+  return import.meta.env.VITE_RESEARCHER_EMAIL;
+})();
+
+/** Where the last submitted report is kept, so a session is not lost if the
+ *  participant closes the tab without sending the mail. The facilitator can
+ *  recover it from the browser console with
+ *  `localStorage.getItem("airflow-last-session")`. */
+const LAST_SESSION_KEY = "airflow-last-session";
 
 function fileNameFor(report: SessionReport) {
   return `airflow-session-${report.scenario ?? "free"}-${new Date(report.submittedAt)
@@ -87,6 +106,13 @@ export function SubmitTask() {
       const name = fileNameFor(report);
       setFile(name);
       download(report, name);
+      // Belt and braces: a participant who closes the tab without sending the
+      // mail has still left the session somewhere recoverable.
+      try {
+        localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(report));
+      } catch {
+        /* private mode / quota — the download and the mail still happened */
+      }
       // Open the mail draft straight away — one click for them, and the file is
       // already in their downloads by the time it appears.
       if (EMAIL) window.location.href = mailtoFor(report, name);
