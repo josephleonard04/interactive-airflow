@@ -588,8 +588,18 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  0.26 blowing from the bed toward the kitchen, which should have been the
    *  best case). "Blow the smell away from where you sleep" was not expressible,
    *  so the task could not be solved by the move it exists to teach. */
-  const UPWIND = 1.35;
-  const costFromSources = (seeds: number[], kUp = 0, reverse = false): Float64Array => {
+  const UPWIND = 2.4;
+  /** Base spread for FRESHNESS, far below V0.
+   *
+   *  A contaminant has been pouring off the bin for hours, so diffusion has had
+   *  time to fill the room and V0 is right for it. "How fresh is the air here"
+   *  is a different quantity: it is set by how much outdoor air is actually
+   *  delivered to this spot per unit time, and still air delivers almost none.
+   *  Giving freshness the same generous base spread meant an open window
+   *  cleaned the far side of the room by itself, whether or not any air was
+   *  moving — which made the fan optional in a task about moving air. */
+  const V0_FRESH = 0.45;
+  const costFromSources = (seeds: number[], kUp = 0, reverse = false, v0 = V0): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
     //     dist[cc] = nc          // rounded to float32 on the way in
@@ -657,7 +667,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         const vd = (u * di + v * dj + w * dk) * (reverse ? -1 : 1);
         // Downwind is fast; upwind is slow but never free — the floor keeps
         // diffusion alive so a strong jet cannot make a region unreachable.
-        const speed = Math.max(0.12, V0 + KADV * Math.max(0, vd) - kUp * Math.max(0, -vd));
+        const speed = Math.max(0.05, v0 + KADV * Math.max(0, vd) - kUp * Math.max(0, -vd));
         const nc = cost + dx / speed;
         if (nc < dist[cc]) { dist[cc] = nc; push(nc, cc); }
       }
@@ -727,8 +737,8 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     // downstream of it existed, and the grille that is busy pulling the whole
     // kitchen's air outside was scoring no better than the middle of the room.
     // Whichever route reaches a cell sooner is the one that cleans it.
-    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND) : null;
-    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true) : null;
+    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH) : null;
+    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);

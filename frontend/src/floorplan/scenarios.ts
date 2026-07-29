@@ -645,22 +645,34 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // first — before it reaches the extract. That is the difference between the
     // two, and it is why one of them does nothing.
     //
-    // The threshold is 0.15, which the bottom window clears on its own (0.142)
-    // and the right-hand window cannot reach with any fan (best 0.236 over 216
-    // collision-valid placements). So the WINDOW is the decision, and the fan is
-    // a help rather than a second lock: standing it between that window and the
-    // bed takes the bed down to 0.108.
+    // Threshold 0.12. Nothing you can do with the windows ALONE reaches it, so
+    // the fan is genuinely required, and every wrong window choice is shut out.
+    // Measured over the 54 spots a fan physically fits in (the editor forbids
+    // standing one on the bed) × 8 aims:
+    //     everything shut, no fan        0.307
+    //     right-hand window only         0.300      the short circuit
+    //     BOTH windows open              0.164      the right one adds nothing
+    //     bottom window only, no fan     0.162
+    //     bottom window + fan            0.095      6 placements under 0.12
+    //     right-hand window + fan        0.423      worse than doing nothing
+    // Opening both is not a way round it: the right-hand window sits ~2 m from
+    // the extract, its air is pulled straight back out, and all it does is rob
+    // the bottom window of the inflow that was crossing the room.
     //
-    // An earlier 0.12 tried to make the fan compulsory. It does not survive
-    // contact with the room: the window alone gives 0.142 and the best a fan can
-    // add is 0.108, so any threshold that makes the fan necessary sits inside a
-    // 0.03 band, and only ONE of the 54 spots a fan physically fits in cleared
-    // it. That is not a task, it is a needle — and the earlier sweeps missed it
-    // because they placed fans on top of the bed, which the editor's own
-    // collision rules forbid. Widening that gap needs the layout to change (the
-    // bin nearer the bed, or a smaller window), not the number.
+    // WHAT THE PHYSICS DOES NOT AGREE WITH — recorded so nobody re-derives it.
+    // The intended answer was "aim the fan at the kitchen vent". The winning
+    // placements are all the fan standing AT the bottom window pushing that air
+    // across the bed (0.095); aiming at the vent from mid-room is much weaker
+    // (0.142, barely better than the 0.162 of not having a fan). The reason is
+    // this room's geometry: the window is BETWEEN the bed and the kitchen, so
+    // air travelling window → vent never passes over the bed. Tried and rejected
+    // — flow-dependent freshness (V0_FRESH 0.14), stronger upstream protection
+    // (UPWIND 1.35 → 2.4), and moving the window left behind the bed, which
+    // makes the bed so clean (0.066) that no fan is needed at all. Making "aim
+    // at the vent" correct needs the bed to sit between the window and the
+    // kitchen, which is a different room.
     goals: [
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.15 },
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.12 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
     // is which way the air crosses it, and the two-room homes' reasoning — that
@@ -669,12 +681,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // like nothing is happening.
     viz: { maxSeeds: 26 },
     success:
-      "Smell over the bed ≤ 0.15, reached by opening the BOTTOM window beside the " +
-      "bed. The right-hand window is the trap: it is a couple of metres from the " +
-      "extract, so its air short-circuits straight back out without crossing the " +
-      "room — 0.284, against 0.295 for leaving everything shut — and no fan " +
-      "placement rescues it (best 0.236 of 216 tried). A fan standing between " +
-      "the bottom window and the bed improves it further, to 0.108.",
+      "Smell over the bed ≤ 0.12: the BOTTOM window open, the right-hand one " +
+      "shut, and the fan standing by that open window driving its air across " +
+      "the bed (0.095). Both levers are needed — the window alone gets to 0.162 " +
+      "and the fan alone to 0.307. The right-hand window is the trap: two metres " +
+      "from the extract, its air goes straight back out, so it changes nothing " +
+      "on its own (0.300) and makes things worse with a fan (0.423). Opening " +
+      "BOTH is no shortcut either (0.164) — the second window only robs the " +
+      "first of the inflow that was crossing the room.",
     build: buildStudio,
   },
   humidity: {
