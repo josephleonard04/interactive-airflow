@@ -600,8 +600,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "It's hot, and the food waste in the kitchen bin has started to smell. " +
       "The bed and the kitchen share one room, and you have to sleep in there " +
       "tonight. The air conditioner is broken and the landlord can't come until " +
-      "next week. Get some air moving over the bed without bringing the smell " +
-      "with it.",
+      "next week. Keep the smell away from the bed.",
     youCanChange:
       "Add a fan, then move it and aim it anywhere. Open or close either window. " +
       "The kitchen's extract vent runs all night and can't be switched off, and " +
@@ -617,34 +616,35 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // Both are measured over the BED's footprint, not the room: this is a
     // single open room, so a room mean cannot tell the sleeping end from the
     // cooking end and would call every layout identical.
-    // Calibrated on the 6.4 × 4.8 room over 192 fan configurations per window
-    // state (6 × 4 positions × 8 aims). Doing nothing but opening a window:
-    //     shut  smell 0.303, air 0.05      right-hand window  0.284, 0.05
-    //     near window  0.146, 0.06         both               0.150, 0.06
-    // and the best a fan can do: 0.095 with the near window open, against 0.253
-    // with the right-hand one — which fails at every one of the 192 placements
-    // tried, by a margin of 58%. Choosing the window is the move that decides
-    // the task, and no fan placement rescues the wrong one.
+    // ONE GOAL: keep the smell off the bed. The short-circuit is the whole
+    // lesson, and it is what the numbers say. Doing nothing but opening a
+    // window, smell over the bed:
+    //     everything shut         0.303
+    //     RIGHT-hand window       0.284   — 6% better, i.e. nothing
+    //     BOTTOM window (the bed) 0.146   — 52% better
+    // The right-hand window sits about 2 m from the kitchen extract, so the air
+    // it lets in is pulled straight along the kitchen wall and back out of the
+    // vent without ever crossing the room. The bottom window is the far end of
+    // the same path, so its air has to traverse the whole studio — past the bed
+    // first — before it reaches the extract. That is the difference between the
+    // two, and it is why one of them does nothing.
     //
-    // BOTH BOUNDS ON THE AIR GOAL EARN THEIR PLACE. The floor is well above the
-    // 0.06 m/s an open window gives on its own, so the fan has to do something —
-    // at an earlier floor of 0.15 the correct window ALONE passed the whole task
-    // and the fan was decoration. The ceiling stops the answer being "stand the
-    // fan next to your pillow", which measures 2.21 m/s over the bed: a gale to
-    // sleep in, and not a lesson about airflow. 20 of 192 configurations satisfy
-    // both bounds with the near window open — about as findable as the winter
-    // task's answer.
+    // The threshold sits at 0.12, BELOW the 0.146 the right window alone gives.
+    // Opening it is the move that makes the task solvable, but it is not by
+    // itself the answer: the fan still has to sweep that clean air across the
+    // bed and on toward the kitchen. Best measured over 192 fan placements is
+    // 0.095 with the bottom window open, against 0.253 with the right-hand one —
+    // which fails at every single placement tried, by a factor of two.
     goals: [
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.16 },
-      { label: "Air is moving over the bed, gently", metric: "draft", roomId: "studio", nearItem: "bed", atLeast: 0.25, atMost: 1.5 },
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.12 },
     ],
     success:
-      "Smell over the bed ≤ 0.16 AND mean air speed there 0.25–1.5 m/s — reached " +
-      "by opening the window BESIDE THE BED (the near wall) and standing the fan " +
-      "on the sleeping side, sweeping the room toward the kitchen extract. The " +
-      "right-hand window is the trap: the air it lets in is drawn along the " +
-      "kitchen wall into the extract without ever reaching the bed, and it fails " +
-      "at every fan placement tried (best 0.253 against a 0.16 threshold).",
+      "Smell over the bed ≤ 0.12, reached by opening the BOTTOM window beside the " +
+      "bed and aiming the fan so the clean air sweeps across the bed and on " +
+      "toward the kitchen extract. The right-hand window is the trap: it is a " +
+      "couple of metres from the extract, so its air short-circuits straight " +
+      "back out without crossing the room — 0.284 against 0.303 for leaving " +
+      "everything shut, and no fan placement rescues it (best 0.253).",
     build: buildStudio,
   },
   humidity: {
