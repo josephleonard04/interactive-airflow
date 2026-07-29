@@ -293,17 +293,30 @@ export function Panel() {
         </section>
       )}
 
-      {selectedWallId && !selected && (
+      {/* Nothing here is offered on a task that has fixed the building: cutting
+          a new window or knocking a wall out is not one of the moves, and a
+          panel full of buttons that would rewrite the room is worse than no
+          panel at all — it invites the participant to solve the task by
+          demolishing the wall the smell is on the other side of. */}
+      {selectedWallId && !selected && (tools.walls || tools.editOpeningSet !== false) && (
         <section className="selected-box">
           <h2>Selected · wall</h2>
-          <p className="muted-line">Add a door or window to this wall, or remove it.</p>
-          <div className="btn-row">
-            <button onClick={() => addToWall("door")}>🚪 Add door</button>
-            <button onClick={() => addToWall("window")}>🪟 Add window</button>
-          </div>
-          <button className="danger" onClick={removeSelected}>
-            🗑 Remove this wall
-          </button>
+          <p className="muted-line">
+            {tools.editOpeningSet === false
+              ? "Remove this wall."
+              : "Add a door or window to this wall, or remove it."}
+          </p>
+          {tools.editOpeningSet !== false && (
+            <div className="btn-row">
+              <button onClick={() => addToWall("door")}>🚪 Add door</button>
+              <button onClick={() => addToWall("window")}>🪟 Add window</button>
+            </div>
+          )}
+          {tools.walls && (
+            <button className="danger" onClick={removeSelected}>
+              🗑 Remove this wall
+            </button>
+          )}
         </section>
       )}
 

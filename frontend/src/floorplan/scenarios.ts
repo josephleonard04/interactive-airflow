@@ -645,7 +645,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // first — before it reaches the extract. That is the difference between the
     // two, and it is why one of them does nothing.
     //
-    // Threshold 0.12. Nothing you can do with the windows ALONE reaches it, so
+    // Threshold 0.15. Nothing you can do with the windows ALONE reaches it, so
     // the fan is genuinely required, and every wrong window choice is shut out.
     // Measured over the 54 spots a fan physically fits in (the editor forbids
     // standing one on the bed) × 8 aims:
@@ -653,11 +653,21 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     //     right-hand window only         0.300      the short circuit
     //     BOTH windows open              0.164      the right one adds nothing
     //     bottom window only, no fan     0.162
-    //     bottom window + fan            0.095      6 placements under 0.12
-    //     right-hand window + fan        0.423      worse than doing nothing
+    //     right-hand window + fan        0.327      worse than doing nothing
+    //     bottom window + fan near the bed, aimed at the extract   0.140
+    //     bottom window + fan at that window, sweeping the bed     0.095
     // Opening both is not a way round it: the right-hand window sits ~2 m from
     // the extract, its air is pulled straight back out, and all it does is rob
     // the bottom window of the inflow that was crossing the room.
+    //
+    // WHY 0.15 AND NOT 0.12. At 0.12 the only placements that cleared it were
+    // the fan standing in the open window; "fan beside the bed, pointed at the
+    // extract" — the move a person actually reaches for, and the one this task
+    // is meant to teach — measured 0.140 and FAILED. A threshold that rejects
+    // the reasoning the task exists to reward is the wrong threshold, not the
+    // wrong reasoning. 0.15 admits that family (0.140–0.146 near the bed) while
+    // still rejecting every no-fan arrangement, the nearest of which is 0.162.
+    // That is a 10% margin: thin, and the honest number.
     //
     // WHAT THE PHYSICS DOES NOT AGREE WITH — recorded so nobody re-derives it.
     // The intended answer was "aim the fan at the kitchen vent". The winning
@@ -672,7 +682,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // at the vent" correct needs the bed to sit between the window and the
     // kitchen, which is a different room.
     goals: [
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.12 },
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.15 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
     // is which way the air crosses it, and the two-room homes' reasoning — that
@@ -681,14 +691,15 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // like nothing is happening.
     viz: { maxSeeds: 26 },
     success:
-      "Smell over the bed ≤ 0.12: the BOTTOM window open, the right-hand one " +
-      "shut, and the fan standing by that open window driving its air across " +
-      "the bed (0.095). Both levers are needed — the window alone gets to 0.162 " +
-      "and the fan alone to 0.307. The right-hand window is the trap: two metres " +
-      "from the extract, its air goes straight back out, so it changes nothing " +
-      "on its own (0.300) and makes things worse with a fan (0.423). Opening " +
-      "BOTH is no shortcut either (0.164) — the second window only robs the " +
-      "first of the inflow that was crossing the room.",
+      "Smell over the bed ≤ 0.15: the BOTTOM window open and a fan working with " +
+      "it. Both levers are needed — the window alone reaches 0.162 and the fan " +
+      "alone 0.307. Two families of placement clear it: the fan beside the bed " +
+      "aimed at the kitchen extract (0.140), and the fan standing in the open " +
+      "window sweeping across the bed (0.095), which is stronger. The right-hand " +
+      "window is the trap: two metres from the extract, its air goes straight " +
+      "back out, so it changes nothing alone (0.300) and makes things worse with " +
+      "a fan (0.327). Opening BOTH is no shortcut (0.164) — the second window " +
+      "only robs the first of the inflow that was crossing the room.",
     build: buildStudio,
   },
   humidity: {
