@@ -21,14 +21,33 @@ function roomName(id: string | "outside", rooms: RoomDef[]) {
   return rooms.find((r) => r.id === id)?.name ?? id;
 }
 
+/** Which wall of its room an opening sits on, in the words someone looking at
+ *  the screen would use. Two windows in ONE room both came out as
+ *  "Window · Studio", which is unusable in a task where choosing between them
+ *  IS the task — the list has to say which is which. Screen-down is +z. */
+function openingSide(o: Opening, rooms: RoomDef[]): string {
+  const room = rooms.find((r) => r.id === o.rooms[0]);
+  if (!room) return "";
+  const { x, z, w, d } = room.rect;
+  const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // runs along z → on a left/right wall
+  if (vertical) return Math.abs(o.a[0] - x) < Math.abs(o.a[0] - (x + w)) ? "left wall" : "right wall";
+  return Math.abs(o.a[1] - z) < Math.abs(o.a[1] - (z + d)) ? "top wall" : "bottom wall";
+}
+
 function openingLabel(o: Opening, rooms: RoomDef[]) {
   const kind = o.kind === "door" ? "Door" : "Window";
   if (o.rooms[1] === "outside") {
-    return o.kind === "door"
-      ? `Entrance · ${roomName(o.rooms[0], rooms)}`
-      : `Window · ${roomName(o.rooms[0], rooms)}`;
+    const room = roomName(o.rooms[0], rooms);
+    return o.kind === "door" ? `Entrance · ${room}` : `Window · ${room}`;
   }
   return `${kind} · ${roomName(o.rooms[0], rooms)} ↔ ${roomName(o.rooms[1], rooms)}`;
+}
+
+/** The label plus a wall, used when one room has several exterior windows. */
+function openingLabelDetailed(o: Opening, rooms: RoomDef[], disambiguate: boolean) {
+  const base = openingLabel(o, rooms);
+  if (!disambiguate || o.rooms[1] !== "outside" || o.kind !== "window") return base;
+  return `${base} · ${openingSide(o, rooms)}`;
 }
 
 export function Panel() {
@@ -356,7 +375,14 @@ export function Panel() {
               onClick={() => selectOpening(o.id)}
             >
               <span className="op-ico">{o.kind === "door" ? "🚪" : "🪟"}</span>
-              <span className="name">{openingLabel(o, plan.rooms)}</span>
+              <span className="name">
+                {openingLabelDetailed(
+                  o,
+                  plan.rooms,
+                  // …only when this room has more than one window to tell apart.
+                  plan.windows.filter((x) => x.rooms[0] === o.rooms[0] && x.rooms[1] === "outside").length > 1,
+                )}
+              </span>
               <button
                 className={o.open ? "toggle on" : "toggle"}
                 title={o.open ? "Open — click to close" : "Closed — click to open"}
@@ -384,8 +410,10 @@ export function Panel() {
         </ul>
         {tools.editOpeningSet === false ? (
           <p className="muted-line">
-            The doors and windows are part of the building. You can open and close them, and drag the
-            window this task is about onto any wall of its room.
+            The doors and windows are part of the building.{" "}
+            {[...plan.doors, ...plan.windows].some((o) => !o.fixed)
+              ? "You can open and close them, and drag the window this task is about onto any wall of its room."
+              : "You can open and close them, but not move them."}
           </p>
         ) : (
           <p className="muted-line">To add one: click a wall in the view, then “Add door / window”.</p>

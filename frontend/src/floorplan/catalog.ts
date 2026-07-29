@@ -42,13 +42,14 @@ export const CATALOG: Record<string, ItemSpec> = {
   // than the old mid-ceiling diffuser.
   supply: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Fresh-air inlet" },
   return: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Extract vent" },
+  bin: { size: [0.4, 0.7, 0.4], category: "furniture", mount: "floor", label: "Kitchen bin" },
   smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
 };
 
 /** Items offered in the "add" palette, grouped. */
 export const PALETTE: Array<{ group: string; types: string[] }> = [
   { group: "Furniture", types: ["bed", "desk", "closet", "table", "couch", "tv"] },
-  { group: "Kitchen", types: ["fridge", "kitchen_sink"] },
+  { group: "Kitchen", types: ["fridge", "kitchen_sink", "bin"] },
   { group: "Bathroom", types: ["sink", "toilet", "bathtub"] },
   { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply", "return"] },
   { group: "Simulation", types: ["smell"] },
