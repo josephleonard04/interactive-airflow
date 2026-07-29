@@ -57,17 +57,26 @@ everything the seed vocabulary covers behaves identically.
 
 ## Collecting sessions
 
-**Submit** scores the task one last time, seals the log, and always downloads it
-as JSON. Two optional build-time settings decide what else happens. Put them in
-`frontend/.env.local`, which is gitignored — an address committed to a public
-repo is an address in a scraper's list:
+**Submit** scores the task one last time, seals the log, and downloads it as
+JSON, naming the file on screen. That is the delivery mechanism: these sessions
+are run with a facilitator on a call or in the room, who asks for the file at the
+end. Nothing opens by itself — a mail client launching over the top of the study
+is a surprise, and it replaces a person's clear instruction with a guess at one.
+
+The report is also kept in `localStorage` under `airflow-last-session`, so a
+participant who closes the tab has not taken the session with them.
+
+Two optional build-time settings add to that. Put them in `frontend/.env.local`,
+which is gitignored:
 
 ```dotenv
-# Opens the participant's mail client with the message already written; they
-# attach the file that was just downloaded and press send.
+# Adds an "Email it" button (offered, never automatic) with the message already
+# written. The deploy workflow sets the base64 form instead — a published bundle
+# is public whatever the repo is, and a plaintext address in it is free food for
+# a harvesting regex.
 VITE_RESEARCHER_EMAIL=you@example.com
 
-# Optional: POST the same report as well, so they need do nothing at all.
+# POST the same report here as well, so the participant need do nothing at all.
 VITE_LOG_ENDPOINT=https://…
 ```
 
