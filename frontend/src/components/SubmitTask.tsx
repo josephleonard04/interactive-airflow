@@ -71,6 +71,7 @@ export function SubmitTask() {
   const scenarioId = useSceneStore((s) => s.scenarioId);
   const submitSession = useSceneStore((s) => s.submitSession);
   const submitted = useSceneStore((s) => s.submitted);
+  const exitScenario = useSceneStore((s) => s.exitScenario);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<"none" | "ok" | "failed">("none");
   const [file, setFile] = useState("");
@@ -145,6 +146,16 @@ export function SubmitTask() {
             </div>
           </>
         )}
+        {/* The way on. A session ends on this panel, and without a door out of
+            it the only way to try the next task is to reload the page. */}
+        <button
+          className="primary"
+          style={{ width: "100%", marginTop: 10 }}
+          onClick={exitScenario}
+          title="Back to the start screen, where you can pick another task"
+        >
+          ← Back to the start
+        </button>
       </section>
     );
   }
