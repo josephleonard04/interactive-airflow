@@ -470,20 +470,30 @@ function buildBathroom(): FloorPlan {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
       const [bath] = rs;
       return [
-        // A real bathroom's wet half and dry half. Tub along the right-hand
-        // wall, shower boxed into the far-right corner beyond it, toilet and
-        // basin down the left where you can reach them from the door.
-        against(gen, bath, c(bath), "east", 0.62, "bathtub", [1.6, 0.6, 0.75]),
-        inCorner(gen, bath, "south", "end", "shower", [0.9, 2.0, 0.9]),
-        against(gen, bath, c(bath), "west", 0.42, "toilet", [0.55, 0.75, 0.7]),
-        against(gen, bath, c(bath), "west", 0.82, "sink", [0.7, 0.9, 0.55]),
-        // The damp corner — behind the tub, at the far end from the door, which
-        // is where the air is stillest and where the black mould actually grows.
-        // Modelled with the contaminant field standing in for moisture.
-        inCorner(gen, bath, "north", "end", "damp", [0.5, 0.5, 0.5], { category: "hvac", mount: "floor" }),
-        // ONE extract vent, already fitted and running, and the participant's to
-        // move: this task is "where does it go", not "should there be one".
-        against(gen, bath, c(bath), "south", 0.5, "return", VENT_SIZE, {
+        // The WET half is the top-right: a full-size bath across the far corner
+        // with the shower cubicle directly below it on the same wall. Putting
+        // the two together is what makes the steam one problem in one place
+        // rather than two small ones.
+        inCorner(gen, bath, "south", "end", "bathtub", [1.8, 0.6, 0.85]),
+        against(gen, bath, c(bath), "east", 0.5, "shower", [0.9, 2.0, 0.9]),
+        // The DRY half is the near wall: toilet in the corner, basin beside it.
+        inCorner(gen, bath, "north", "end", "toilet", [0.55, 0.75, 0.7]),
+        against(gen, bath, c(bath), "north", 0.67, "sink", [0.7, 0.9, 0.55]),
+        // The steam, between the bath and the shower — where it actually comes
+        // from. It used to sit in a far corner as an abstract "damp patch",
+        // which invites the question "why is that corner wet?" instead of the
+        // one the task is asking. Hot water is the source; the corner going
+        // black is the consequence.
+        // Sized to the gap the bath and the shower leave between them (z 0.91 to
+        // 1.65): any bigger and the overlap pass shoulders it out into the middle
+        // of the floor, away from the two things it is supposed to be steaming
+        // off.
+        spot(gen, bath, "damp", [0.72, 0.72, 0.72], 2.95, 1.28, 0, { category: "hvac" }),
+        // ONE extract vent — an EXTRACT: it pulls air out of the room, and the
+        // outdoor air to replace it has to get in somewhere, which is the whole
+        // reason where the window goes matters. Already fitted, always running,
+        // one speed. The participant moves it; there is nothing to switch.
+        against(gen, bath, c(bath), "south", 0.28, "return", VENT_SIZE, {
           category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.05, on: true,
         }),
       ];
@@ -492,13 +502,18 @@ function buildBathroom(): FloorPlan {
   );
   // ONE window, and NOT fixed — a window can be dragged to any wall of its own
   // room (moveOpeningToPoint), which is exactly the choice this task is about.
-  // Starts shut, and starts on the RIGHT-HAND wall a metre from the extract:
-  // the pair as-built is the bad arrangement, so simply opening the window is
-  // not the answer. Left where it was — diagonally opposite the vent — merely
-  // opening it dried the room in 32 minutes and the placement question never
-  // came up.
-  addWindow(plan, "bathroom", "east", 0.2, false);
-  for (const d of plan.doors) d.fixed = true;
+  // It starts SHUT and around the corner from the extract, close enough that
+  // the two short-circuit: the pair as-built is the bad arrangement, so simply
+  // opening the window is not the answer. Not on the extract's OWN wall, where
+  // a 1.2 m window would be cut straight through the grille.
+  addWindow(plan, "bathroom", "west", 0.2, false);
+  // The door is not a ventilation strategy here. You do not leave the bathroom
+  // door open to dry it out, and letting the participant do so replaces the
+  // question with a shortcut nobody would actually take.
+  for (const d of plan.doors) {
+    d.fixed = true;
+    d.locked = true;
+  }
   return plan;
 }
 
@@ -751,7 +766,10 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     youCanChange:
       "Move the extract vent and the window to any outside wall, and open or " +
       "close the window. The room and its fittings are already laid out.",
-    tools: { movable: ["return"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
+    // lockPower: the extract has one speed and runs all night. An on/off switch
+    // and a Low/Med/High row invite "turn it up" as a substitute for thinking
+    // about where it goes, which is the only thing this task is about.
+    tools: { movable: ["return"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
     // Only the two views this task is about. Temperature and noise are real
     // things the solver knows, and neither is being asked about here — four tabs
     // where two would do is four things to rule out before you can start.

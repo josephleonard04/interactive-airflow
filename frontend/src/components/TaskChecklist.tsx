@@ -68,32 +68,140 @@ function inkOn(color: string): { color: string; textShadow: string } {
  *  "still wet two hours later" is a sentence about a bathroom in a way that
  *  0.27 on a contaminant scale is not. */
 function DryPlan({ map, limit }: { map: DryMap; limit: number }) {
-  const W = 190;
+  const W = 250;
   const H = Math.round((W * map.d) / map.w);
   const cw = W / map.cols;
   const ch = H / map.rows;
   const worst = map.minutes.reduce<number>((a, m) => (m != null && m > a ? m : a), 0);
+  const mins = (v: number) => (v >= 90 ? `${(v / 60).toFixed(1)} hours` : `${Math.round(v)} minutes`);
   return (
     <div>
-      <svg width={W} height={H} style={{ display: "block", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}>
+      <svg
+        width={W}
+        height={H}
+        style={{ display: "block", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
+      >
         {map.minutes.map((m, i) => {
           if (m == null) return null;
           const c = i % map.cols;
           const r = (i / map.cols) | 0;
           return <rect key={i} x={c * cw} y={r * ch} width={cw + 0.6} height={ch + 0.6} fill={drySwatch(m)} />;
         })}
+        {/* The furniture, outlined and NAMED. Without it the map is a blur of
+            colour and "the corner behind the bath" is not locatable on it. */}
+        {map.items.map((it, i) => {
+          const x = it.x * W;
+          const y = it.z * H;
+          const w = Math.max(10, it.w * W);
+          const h = Math.max(10, it.d * H);
+          const steam = it.label === "steam";
+          return (
+            <g key={i}>
+              <rect
+                x={x}
+                y={y}
+                width={w}
+                height={h}
+                fill={steam ? "rgba(74,127,158,0.28)" : "rgba(255,255,255,0.5)"}
+                stroke={steam ? "#2f6b8a" : "#7d8790"}
+                strokeWidth={steam ? 1.4 : 1}
+                strokeDasharray={steam ? "3 2" : undefined}
+                rx={2}
+              />
+              <text
+                x={x + w / 2}
+                y={y + h / 2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={Math.min(10, Math.max(7, Math.min(w, h) * 0.45))}
+                fill={steam ? "#1d4f68" : "#41505b"}
+                fontWeight={steam ? 700 : 500}
+                pointerEvents="none"
+              >
+                {it.label}
+              </text>
+            </g>
+          );
+        })}
+        {/* Where the air can actually get in and out. */}
+        {map.openings.map((o, i) => (
+          <rect
+            key={`o${i}`}
+            x={o.x * W - (o.w ? 0 : 2.5)}
+            y={o.z * H - (o.d ? 0 : 2.5)}
+            width={Math.max(5, o.w * W)}
+            height={Math.max(5, o.d * H)}
+            fill={o.open ? "#2a9d8f" : "#c2ccd2"}
+            rx={1.5}
+          />
+        ))}
+        {map.vent && (
+          <g>
+            <circle cx={map.vent.x * W} cy={map.vent.z * H} r={7} fill="#f0f4f6" stroke="#5b6a74" strokeWidth={1.2} />
+            <text
+              x={map.vent.x * W}
+              y={map.vent.z * H + 0.5}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={7.5}
+              fill="#3d4a53"
+              fontWeight={700}
+            >
+              out
+            </text>
+          </g>
+        )}
       </svg>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-        <div style={{ flex: 1, height: 7, borderRadius: 4, border: "1px solid var(--line)", background: `linear-gradient(90deg, ${drySwatch(0)}, ${drySwatch(60)}, ${drySwatch(140)})` }} />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+        <div
+          style={{
+            flex: 1,
+            height: 12,
+            borderRadius: 6,
+            border: "1px solid var(--line)",
+            background: `linear-gradient(90deg, ${drySwatch(0)}, ${drySwatch(60)}, ${drySwatch(140)})`,
+          }}
+        />
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, fontWeight: 600, color: "var(--ink)", marginTop: 3 }}>
         <span>dries quickly</span>
         <span>stays wet</span>
       </div>
-      <p className="muted-line" style={{ marginTop: 5 }}>
-        {worst >= 999
-          ? `The slowest corner never really dries. Goal: everywhere dry within ${limit} minutes.`
-          : `The slowest corner takes about ${worst >= 90 ? `${(worst / 60).toFixed(1)} hours` : `${Math.round(worst)} minutes`}. Goal: under ${limit} minutes, everywhere.`}
+      <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: 10.5, color: "var(--muted)" }}>
+        <span>
+          <b style={{ color: "#2a9d8f" }}>▬</b> open
+        </span>
+        <span>
+          <b style={{ color: "#8b98a1" }}>▬</b> shut
+        </span>
+        <span>◯ extract</span>
+      </div>
+
+      {/* The verdict, said plainly and not in muted grey — it is the point of
+          the picture, and at 10.5 px in --muted it read as a footnote. */}
+      <p
+        style={{
+          marginTop: 8,
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: worst <= limit ? "rgba(42,157,143,0.10)" : "rgba(196,110,84,0.10)",
+          border: `1px solid ${worst <= limit ? "rgba(42,157,143,0.45)" : "rgba(196,110,84,0.45)"}`,
+          fontSize: 12.5,
+          lineHeight: 1.45,
+          color: "var(--ink)",
+        }}
+      >
+        {worst >= 999 ? (
+          <>
+            The slowest spot <b>never really dries</b>.
+          </>
+        ) : (
+          <>
+            Slowest spot: <b>{mins(worst)}</b>.
+          </>
+        )}{" "}
+        <span style={{ color: "var(--muted)" }}>Goal: under {limit} minutes, everywhere.</span>
       </p>
     </div>
   );

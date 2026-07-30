@@ -774,6 +774,24 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         return centre + half > sp.s - 0.06 && centre - half < sp.e + 0.06;
       });
       if (clash) return {};
+      // …or on top of something TALL standing against that wall. A window cut
+      // behind a shower cubicle opens into the glass: you could not reach it,
+      // could not open it, and the air would not get past the screen. Only
+      // full-height items block — a basin under a window is normal.
+      const blocked = s.plan.items.some((it) => {
+        if (it.mount !== "floor" || it.size[1] < 1.4) return false;
+        const swapped = Math.abs(Math.round(it.rotationY / (Math.PI / 2))) % 2 === 1;
+        const hx = (swapped ? it.size[2] : it.size[0]) / 2;
+        const hz = (swapped ? it.size[0] : it.size[2]) / 2;
+        // does it stand against THIS wall, and does it overlap the new span?
+        if (side.axis === "x") {
+          if (Math.abs(it.position[2] - side.line) > hz + 0.35) return false;
+          return centre + half > it.position[0] - hx - 0.05 && centre - half < it.position[0] + hx + 0.05;
+        }
+        if (Math.abs(it.position[0] - side.line) > hx + 0.35) return false;
+        return centre + half > it.position[2] - hz - 0.05 && centre - half < it.position[2] + hz + 0.05;
+      });
+      if (blocked) return {};
       const moved: Opening = {
         ...o,
         a: side.axis === "z" ? [side.line, centre - half] : [centre - half, side.line],
