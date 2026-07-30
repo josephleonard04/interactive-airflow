@@ -80,6 +80,14 @@ export function SimPanel() {
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
   const hasChecklist = !!(checklistScenario && SCENARIOS[checklistScenario].goals?.length);
+  // A task can narrow the views to the ones that answer it, and the contaminant
+  // view takes its name from what the task is actually about — the same field
+  // carries kitchen odour in one scenario and bathroom moisture in another, and
+  // calling it "Smell" in a task about mould just reads as a bug.
+  const views: SimMode[] =
+    (checklistScenario ? SCENARIOS[checklistScenario].views : undefined) ??
+    (["airflow", "temperature", "contamination", "noise"] as SimMode[]);
+  const contaminantLabel = checklistScenario === "humidity" ? "Humidity" : "Smell";
 
   // Plain-language goal → physical objectives → checked against the result, and
   // the matching view is shown so the user sees what's happening.
@@ -250,9 +258,9 @@ export function SimPanel() {
       </div>
 
       <div className="tools">
-        {(["airflow", "temperature", "contamination", "noise"] as SimMode[]).map((m) => (
+        {views.map((m) => (
           <button key={m} className={mode === m ? "tool active" : "tool"} onClick={() => setSimMode(m)}>
-            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : m === "contamination" ? "Smell" : "Noise"}
+            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : m === "contamination" ? contaminantLabel : "Noise"}
           </button>
         ))}
       </div>
@@ -278,7 +286,10 @@ export function SimPanel() {
           locked={scenarioId !== null}
         />
       )}
-      {mode === "contamination" && (
+      {/* Adding and relocating sources is an authoring tool, not a move in a
+          task: the bin and the damp corner are the PROBLEM, and being able to
+          drag the problem somewhere else is not a solution to it. */}
+      {mode === "contamination" && !scenarioId && (
         <div style={{ marginTop: 8 }}>
           <div className="btn-row">
             <button
@@ -309,7 +320,7 @@ export function SimPanel() {
           ⏳ Computing the steady state…
         </p>
       )}
-      <Legend mode={mode} outdoorTemp={outdoorTemp} />
+      <Legend mode={mode} outdoorTemp={outdoorTemp} contaminant={contaminantLabel} />
       <button
         className="ghost"
         style={{ marginTop: 10, fontSize: 11, width: "100%" }}
@@ -517,7 +528,7 @@ function TempControls({
   );
 }
 
-function Legend({ mode, outdoorTemp }: { mode: SimMode; outdoorTemp: number }) {
+function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp: number; contaminant: string }) {
   if (mode === "temperature") {
     const ticks = [TEMP_MIN_C, 18, TEMP_NEUTRAL_C, 30, TEMP_MAX_C];
     return (
@@ -540,13 +551,19 @@ function Legend({ mode, outdoorTemp }: { mode: SimMode; outdoorTemp: number }) {
   if (mode === "contamination") {
     return (
       <div style={{ marginTop: 10 }}>
-        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Contaminant concentration</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>
+          {contaminant === "Humidity" ? "Moisture in the air" : "Contaminant concentration"}
+        </div>
         <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#efe7fb,#c9a0f0,#8a3fd0,#5a1d96)" }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>Low</span>
-          <span>High</span>
+          <span>{contaminant === "Humidity" ? "Dry" : "Low"}</span>
+          <span>{contaminant === "Humidity" ? "Damp" : "High"}</span>
         </div>
-        <p className="muted-line" style={{ marginTop: 6 }}>Carried by the airflow; reaches rooms with an open door, blocked by walls. Lower near open windows &amp; vents.</p>
+        <p className="muted-line" style={{ marginTop: 6 }}>
+          {contaminant === "Humidity"
+            ? "Carried by the airflow, and it only leaves where the air does — dries out near an open window or an extract, and sits where the air is still."
+            : "Carried by the airflow; reaches rooms with an open door, blocked by walls. Lower near open windows & vents."}
+        </p>
       </div>
     );
   }

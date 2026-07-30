@@ -295,6 +295,35 @@ function Smell(size: V): JSX.Element {
   );
 }
 
+/** Shower: a tiled tray with two glass panels and a head on the back wall. The
+ *  glass is what makes it read as a shower rather than a tub from above, and it
+ *  is a real flow obstacle — a screen in the corner is exactly the sort of thing
+ *  that keeps air off the wall behind it. */
+function Shower([w, h, d]: V): JSX.Element {
+  const glass = { color: "#cfe3ea", roughness: 0.1, metalness: 0.05 };
+  return (
+    <group>
+      {/* tray */}
+      <Box size={[w, h * 0.06, d]} position={[0, -h / 2 + h * 0.03, 0]} color="#e9eef0" roughness={0.5} />
+      {/* back and side glass, open toward +x/+z so the corner it sits in stays reachable */}
+      <mesh position={[0, 0, -d / 2 + 0.02]} castShadow>
+        <boxGeometry args={[w, h * 0.94, 0.03]} />
+        <meshStandardMaterial {...glass} transparent opacity={0.35} />
+      </mesh>
+      <mesh position={[-w / 2 + 0.02, 0, 0]} castShadow>
+        <boxGeometry args={[0.03, h * 0.94, d]} />
+        <meshStandardMaterial {...glass} transparent opacity={0.35} />
+      </mesh>
+      {/* riser and head */}
+      <Box size={[0.05, h * 0.55, 0.05]} position={[0, h * 0.1, -d / 2 + 0.08]} color="#b9c2c7" metalness={0.6} roughness={0.3} />
+      <mesh position={[0, h * 0.36, -d / 2 + 0.16]} rotation={[Math.PI / 2.6, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.09, 0.09, 0.03, 16]} />
+        <meshStandardMaterial color="#c8d0d4" metalness={0.7} roughness={0.25} />
+      </mesh>
+    </group>
+  );
+}
+
 /** Kitchen bin: a tapered body with a lid, standing slightly open. The lid is
  *  the point — a closed bin is not a smell you have to design around, and the
  *  participant has to be able to see at a glance where the smell is coming
@@ -356,6 +385,8 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Vent(size);
     case "return":
       return Vent(size);
+    case "shower":
+      return Shower(size);
     case "bin":
       return Bin(size);
     case "smell":

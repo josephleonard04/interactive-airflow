@@ -13,6 +13,9 @@ import { VENT_SIZE, ventMountY } from "./catalog";
 import { rasterize } from "./raster";
 import { resolveOverlaps } from "./collision";
 import type { FloorPlan, Opening, PlacedItem, RoomDef, Vec3 } from "./types";
+// Type-only, so it is erased at build time and cannot close the import loop
+// with the store (which imports this module for the scenario table).
+import type { SimMode } from "../scene/store";
 
 // Study scenarios — the four tasks agreed with Prof. Igarashi, one prebuilt home
 // each, plus the exact set of controls that task is allowed to touch.
@@ -126,6 +129,12 @@ export interface Scenario {
   tools: ScenarioTools;
   /** The task, as tick-boxes the participant can watch. Omitted = no checklist. */
   goals?: ScenarioGoal[];
+  /** Which of the four simulation views this task offers, in order. Omitted =
+   *  all of them. A task about moisture has no business showing a noise tab:
+   *  every view that cannot answer the question is one more thing to try and
+   *  rule out before starting. The contamination view is labelled from the goal
+   *  it serves — "Humidity" here, "Smell" elsewhere. */
+  views?: SimMode[];
   /** Per-task airflow-visualization tuning. Line density is a per-task judgement
    *  — a two-room home with a doorway path needs far fewer lines to read clearly
    *  than a single room does — so it is set here rather than globally. Omitted =
@@ -443,27 +452,47 @@ function buildStudio(): FloorPlan {
  * and the corner never dries.
  */
 function buildBathroom(): FloorPlan {
-  const rooms = [room("bathroom", "bathroom", "Bathroom", 0, 0, 3.0, 3.4)];
-  return assemble(
+  // 3.6 × 4.2. The old 3.0 × 3.4 was a cupboard: with a tub down one side there
+  // was barely a metre of floor left, so "where does the vent go" had almost no
+  // room to be a question, and every answer short-circuited with every other.
+  const rooms = [room("bathroom", "bathroom", "Bathroom", 0, 0, 3.6, 4.2, true)];
+  const plan = assemble(
     "Bathroom",
     rooms,
     (walls, gen, doors) => {
-      placeEntrance(walls, gen, rooms[0], doors);
+      // Door on the SOUTH wall (screen-top), toward the left.
+      entranceOnTop(walls, gen, "bathroom", rooms[0].rect, doors, 0.28);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
       const [bath] = rs;
       return [
-        against(gen, bath, c(bath), "east", 0.6, "bathtub", [1.6, 0.6, 0.75]),
-        against(gen, bath, c(bath), "west", 0.25, "toilet", [0.55, 0.75, 0.7]),
-        against(gen, bath, c(bath), "west", 0.72, "sink", [0.7, 0.9, 0.55]),
-        // Damp corner behind the tub — moisture that must be vented out. Uses the
-        // contaminant ("smell") field as a stand-in for humidity.
+        // A real bathroom's wet half and dry half. Tub along the right-hand
+        // wall, shower boxed into the far-right corner beyond it, toilet and
+        // basin down the left where you can reach them from the door.
+        against(gen, bath, c(bath), "east", 0.62, "bathtub", [1.6, 0.6, 0.75]),
+        inCorner(gen, bath, "south", "end", "shower", [0.9, 2.0, 0.9]),
+        against(gen, bath, c(bath), "west", 0.42, "toilet", [0.55, 0.75, 0.7]),
+        against(gen, bath, c(bath), "west", 0.82, "sink", [0.7, 0.9, 0.55]),
+        // The damp corner — behind the tub, at the far end from the door, which
+        // is where the air is stillest and where the black mould actually grows.
+        // Modelled with the contaminant field standing in for moisture.
         inCorner(gen, bath, "north", "end", "smell", [0.34, 0.5, 0.34], { category: "hvac", mount: "floor" }),
+        // ONE extract vent, already fitted and running, and the participant's to
+        // move: this task is "where does it go", not "should there be one".
+        against(gen, bath, c(bath), "south", 0.5, "return", VENT_SIZE, {
+          category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.05, on: true,
+        }),
       ];
     },
-    { windows: false }, // the participant places the window
+    { windows: false },
   );
+  // ONE window, on the near wall to start, and NOT fixed — a window can be
+  // dragged to any wall of its own room (moveOpeningToPoint), which is exactly
+  // the choice this task is about. Starts shut.
+  addWindow(plan, "bathroom", "north", 0.35, false);
+  for (const d of plan.doors) d.fixed = true;
+  return plan;
 }
 
 // ---------------------------------------------------------------- smell
@@ -707,15 +736,54 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     title: "Bathroom · Humidity · Design",
     outdoorTemp: 24,
     brief:
-      "The corner behind the bathtub stays wet after every shower and grows " +
-      "mould. Add one window and one extract vent so that damp corner dries out.",
-    youCanChange: "Place an extract vent, and add a window; open, close or move doors and windows.",
-    tools: { movable: ["return"], aimable: [], addable: ["return"], walls: false, openings: true, resize: false },
-    goals: [{ label: "The damp corner is drying out", metric: "smell", roomId: "bathroom", atMost: 0.12 }],
+      "You are designing a new home in a place with damp, humid summers and cold " +
+      "winters — the kind of home where the bathroom corner goes black with mould " +
+      "and the windows drip with condensation on a winter morning. You can still " +
+      "decide where the window and the extract vent go, on any of the outside " +
+      "walls. Get the damp corner behind the bath drying out.",
+    youCanChange:
+      "Move the extract vent and the window to any outside wall, and open or " +
+      "close the window. The room and its fittings are already laid out.",
+    tools: { movable: ["return"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false },
+    // Only the two views this task is about. Temperature and noise are real
+    // things the solver knows, and neither is being asked about here — four tabs
+    // where two would do is four things to rule out before you can start.
+    views: ["airflow", "contamination"],
+    // TWO MEASUREMENTS, AND THEY PULL APART. The first is taken AT the damp
+    // corner, not over the room: a room mean in a single room cannot tell the
+    // corner from the doorway, and it is the corner that grows the mould.
+    // Reading the source's own cell is not circular — moisture there is exp(0)
+    // × the ventilation term, so it depends on nothing except how well that
+    // corner is actually served by moving air.
+    //
+    // On its own that goal is satisfied by putting an opening right on top of
+    // the corner and letting the air go straight back out, which leaves the
+    // rest of the room as damp as it was. So the second goal watches the whole
+    // room, and the two together are the short-circuit lesson: the corner needs
+    // an opening AT it, and the room needs the other opening FAR from that one,
+    // so the air has to cross the floor to get between them.
+    //
+    // Measured over 11 vent positions × 12 window positions (4 walls × 3), all
+    // with the window open. Corner ranges 0.031–0.801, room 0.198–0.297:
+    //     as built, window shut                  corner 0.819  room 0.387
+    //     window to the damp corner, vent beside  corner 0.031  room 0.295
+    //     window to the damp corner, vent far     corner 0.032  room 0.245
+    //     window far from it, vent at the corner  corner 0.265  room 0.223
+    // Every configuration that clears the corner has the WINDOW at the corner —
+    // that decision is 1 of the 12 window placements. The vent is then more
+    // forgiving: 5 of 11 positions get the room under 0.26, all of them well
+    // away from the window. 16 of the 132 fix the corner and fail the room,
+    // which is exactly the short circuit.
+    goals: [
+      { label: "The damp corner is drying out", metric: "smell", roomId: "bathroom", nearItem: "smell", atMost: 0.12 },
+      { label: "The rest of the bathroom stays dry", metric: "smell", roomId: "bathroom", atMost: 0.26 },
+    ],
     success:
-      "Moisture in the tub corner cleared (contaminant ≤ 0.12) with an open path " +
-      "to outside — and NOT solved by putting the window and vent so close they " +
-      "short-circuit past the corner.",
+      "Moisture at the tub corner ≤ 0.12 AND across the room ≤ 0.26 — the window " +
+      "moved to the damp corner so the wet air has somewhere to go, and the " +
+      "extract put well away from it so the air crosses the room instead of " +
+      "turning straight round. Putting the two together clears the corner " +
+      "(0.031) and leaves the room at 0.295: the short circuit.",
     build: buildBathroom,
   },
   smell: {
