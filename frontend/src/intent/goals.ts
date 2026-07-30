@@ -163,7 +163,27 @@ export interface DryMap {
   w: number;
   d: number;
   minutes: Array<number | null>;
+  /** Everything standing in the room, in room-relative 0..1 coordinates, so the
+   *  map can draw and NAME it. A heat map of an empty rectangle is unreadable —
+   *  you cannot tell which dark patch is "behind the bath" without the bath. */
+  items: Array<{ label: string; x: number; z: number; w: number; d: number }>;
+  /** Openings on the room's walls, same coordinates: which one is the window
+   *  and where the air is actually getting in. */
+  openings: Array<{ kind: "door" | "window"; open: boolean; x: number; z: number; w: number; d: number }>;
+  /** The extract, if there is one. */
+  vent: { x: number; z: number } | null;
 }
+
+/** Short names for the plan. Long ones do not fit in a 190 px map. */
+const MAP_LABEL: Record<string, string> = {
+  bathtub: "bath",
+  kitchen_sink: "sink",
+  return: "extract",
+  supply: "inlet",
+  damp: "steam",
+  smell: "smell",
+  ac: "AC",
+};
 
 export function dryingMap(plan: FloorPlan, outdoorTemp: number, roomId: string, cols = 12): DryMap | null {
   const rect = plan.rooms.find((r) => r.id === roomId)?.rect;
@@ -194,7 +214,36 @@ export function dryingMap(plan: FloorPlan, outdoorTemp: number, roomId: string, 
       minutes.push(n ? sum / n : null);
     }
   }
-  return { cols, rows, w: rect.w, d: rect.d, minutes };
+
+  const rel = (x: number, z: number) => ({ x: (x - rect.x) / rect.w, z: (z - rect.z) / rect.d });
+  const items = plan.items
+    .filter((it) => it.roomId === roomId && it.type !== "return")
+    .map((it) => {
+      const swapped = Math.abs(Math.round(it.rotationY / (Math.PI / 2))) % 2 === 1;
+      const iw = swapped ? it.size[2] : it.size[0];
+      const id = swapped ? it.size[0] : it.size[2];
+      const p = rel(it.position[0] - iw / 2, it.position[2] - id / 2);
+      return { label: MAP_LABEL[it.type] ?? it.type.replace(/_/g, " "), x: p.x, z: p.z, w: iw / rect.w, d: id / rect.d };
+    });
+  const openings = [...plan.doors, ...plan.windows]
+    .filter((o) => o.rooms.includes(roomId))
+    .map((o) => {
+      const x0 = Math.min(o.a[0], o.b[0]);
+      const z0 = Math.min(o.a[1], o.b[1]);
+      const p = rel(x0, z0);
+      return {
+        kind: o.kind,
+        open: o.open,
+        x: p.x,
+        z: p.z,
+        w: Math.abs(o.b[0] - o.a[0]) / rect.w,
+        d: Math.abs(o.b[1] - o.a[1]) / rect.d,
+      };
+    });
+  const ventItem = plan.items.find((it) => it.type === "return" && it.roomId === roomId);
+  const vent = ventItem ? rel(ventItem.position[0], ventItem.position[2]) : null;
+
+  return { cols, rows, w: rect.w, d: rect.d, minutes, items, openings, vent };
 }
 
 export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: number): GoalStatus[] {

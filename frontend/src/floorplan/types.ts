@@ -72,6 +72,11 @@ export interface Opening {
    *  wall, relocated, or removed. Used to pin doors and any glazing a task has
    *  already decided, so only the opening the task is ABOUT stays editable. */
   fixed?: boolean;
+  /** Cannot be opened or closed either — the state it was built in is the state
+   *  it stays in. `fixed` pins WHERE an opening is; this pins WHETHER it is
+   *  open. A bathroom door is the case: propping it open is not a ventilation
+   *  design, and offering the toggle replaces the question with a shortcut. */
+  locked?: boolean;
 }
 
 export type WallAxis = "x" | "z";

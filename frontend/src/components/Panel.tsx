@@ -12,8 +12,20 @@ import { SubmitTask } from "./SubmitTask";
 /** One-per-home appliances in a study task — the Add button caps at this. */
 const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
 
+/** Item type → what a person would call it. "Return vent" is HVAC jargon and,
+ *  worse, ambiguous about which way the air goes — the whole task turns on it
+ *  pulling air OUT, so the name says so. */
+const PRETTY: Record<string, string> = {
+  return: "extract vent",
+  supply: "fresh-air inlet",
+  damp: "steam",
+  smell: "smell source",
+  kitchen_sink: "kitchen sink",
+  ac: "air conditioner",
+};
+
 function pretty(t: string) {
-  return t.replace(/_/g, " ");
+  return PRETTY[t] ?? t.replace(/_/g, " ");
 }
 
 function roomName(id: string | "outside", rooms: RoomDef[]) {
@@ -274,12 +286,22 @@ export function Panel() {
               )}
             </>
           )}
-          <RotationDial
-            valueRad={selected.rotationY}
-            onChange={(rad) => setPosition(selected.id, selected.position, rad)}
-          />
+          {/* An EXTRACT has no aim. It pulls air in from every direction at
+              once, so a dial captioned "way it blows" is both meaningless and
+              actively misleading about which way the air is going — and this
+              task turns on understanding exactly that. */}
+          {selected.type !== "return" && (
+            <>
+              <RotationDial
+                valueRad={selected.rotationY}
+                onChange={(rad) => setPosition(selected.id, selected.position, rad)}
+              />
+              <div className="btn-row">
+                <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ 90°</button>
+              </div>
+            </>
+          )}
           <div className="btn-row">
-            <button onClick={() => rotateItem(selected.id, Math.PI / 2)}>↻ 90°</button>
             {/* Removal is offered only if the task would let you put it back.
                 With an empty "add" palette a delete is unrecoverable — the
                 participant loses the one heater the task depends on and has to
@@ -327,7 +349,9 @@ export function Panel() {
           <div className="btn-row">
             <button
               className={selectedOpening.open ? "toggle on" : "toggle"}
-              onClick={() => toggleOpening(selectedOpening.id)}
+              disabled={selectedOpening.locked}
+              title={selectedOpening.locked ? "This one stays as it is for this task" : undefined}
+              onClick={() => !selectedOpening.locked && toggleOpening(selectedOpening.id)}
             >
               {selectedOpening.open ? "Open ✓" : "Closed"}
             </button>
@@ -398,10 +422,17 @@ export function Panel() {
               </span>
               <button
                 className={o.open ? "toggle on" : "toggle"}
-                title={o.open ? "Open — click to close" : "Closed — click to open"}
+                disabled={o.locked}
+                title={
+                  o.locked
+                    ? "Stays as it is for this task"
+                    : o.open
+                      ? "Open — click to close"
+                      : "Closed — click to open"
+                }
                 onClick={(e) => {
                   e.stopPropagation();
-                  toggleOpening(o.id);
+                  if (!o.locked) toggleOpening(o.id);
                 }}
               >
                 {o.open ? "Open" : "Closed"}
@@ -472,7 +503,7 @@ export function Panel() {
                       onClick={() => selectItem(it.id)}
                     >
                       <span className="swatch" style={{ background: itemColor(it.type) }} />
-                      <span className="name">{pretty(it.type === "supply" ? "supply vent" : it.type === "return" ? "return vent" : it.type)}</span>
+                      <span className="name">{pretty(it.type)}</span>
                       <button
                         className="x"
                         title="Remove"
