@@ -295,6 +295,36 @@ function Smell(size: V): JSX.Element {
   );
 }
 
+/** Damp: a puddle with steam rising off it. The smell marker is a violet blob
+ *  and reads as "something smells here", which is the wrong sentence in a
+ *  bathroom — this has to say "this patch is wet" at a glance. */
+function Damp(size: V): JSX.Element {
+  const r = Math.min(size[0], size[2]) * 0.5;
+  return (
+    <group>
+      {/* the wet patch itself, lying on the floor */}
+      <mesh position={[0, -size[1] / 2 + 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[r, 24]} />
+        <meshStandardMaterial color="#4a7f9e" roughness={0.15} metalness={0.2} transparent opacity={0.75} />
+      </mesh>
+      {/* three drifting wisps of steam */}
+      {[0, 1, 2].map((i) => (
+        <mesh key={i} position={[(i - 1) * r * 0.5, size[1] * (0.25 + i * 0.22), (i % 2 ? 1 : -1) * r * 0.2]}>
+          <sphereGeometry args={[r * (0.38 - i * 0.06), 12, 12]} />
+          <meshStandardMaterial
+            color="#dbeaf2"
+            emissive="#9fc4d6"
+            emissiveIntensity={0.35}
+            toneMapped={false}
+            transparent
+            opacity={0.42 - i * 0.1}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 /** Shower: a tiled tray with two glass panels and a head on the back wall. The
  *  glass is what makes it read as a shower rather than a tub from above, and it
  *  is a real flow obstacle — a screen in the corner is exactly the sort of thing
@@ -387,6 +417,8 @@ export function Model({ type, size }: { type: string; size: V }) {
       return Vent(size);
     case "shower":
       return Shower(size);
+    case "damp":
+      return Damp(size);
     case "bin":
       return Bin(size);
     case "smell":

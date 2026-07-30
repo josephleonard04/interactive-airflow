@@ -1,6 +1,6 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean, zoneSpeed } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean, zoneSpeed } from "../sim/sim3d";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -54,6 +54,14 @@ export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
       onTempScale: true,
     };
   }
+  if (g.metric === "drying") {
+    // The two ends are times, because the goal is a time.
+    return {
+      before: { color: drySwatch(999), word: "still wet hours later" },
+      after: { color: drySwatch(g.atMost ?? 30), word: `dry in under ${Math.round(g.atMost ?? 30)} min` },
+      onTempScale: false,
+    };
+  }
   if (g.metric === "smell") {
     // Same violet ramp the contamination view draws.
     return {
@@ -105,6 +113,14 @@ export function windowZone(plan: FloorPlan, roomId: string): Rect | null {
   return { x: x0, z: inward > 0 ? line : line - DEPTH, w: x1 - x0, d: DEPTH };
 }
 
+/** Swatch colour for a drying time: dry sand through to a wet blue-grey. Same
+ *  ramp the bathroom mini-map uses, so the picture and the map agree. */
+export function drySwatch(minutes: number): string {
+  const t = Math.min(1, Math.max(0, (minutes - 10) / 110)); // 10 min dry → 120 min soaked
+  const lerp = (a: number, b: number) => Math.round(a + (b - a) * t);
+  return `rgb(${lerp(246, 74)},${lerp(238, 127)},${lerp(222, 158)})`;
+}
+
 /** Swatch colour for a temperature state in the task picture.
  *
  *  Deliberately NOT the Temp view's ramp. The ramp is an absolute scale, so a
@@ -132,6 +148,55 @@ function warmthWord(c: number, g: ScenarioGoal): string {
   return "comfortable";
 }
 
+/** A drying-time map of one room, as a coarse grid the panel can draw as a
+ *  little plan. Minutes per cell, row-major from the room's (x, z) origin, and
+ *  null where the cell is furniture or outside the room.
+ *
+ *  A pair of colour swatches cannot say "this corner is the slow one" — and
+ *  WHERE the slow patch is happens to be the entire lesson here. A picture of
+ *  the room says it without a word, which also keeps the no-numbers rule: the
+ *  participant sees a dark patch behind the bath, not "0.27". */
+export interface DryMap {
+  cols: number;
+  rows: number;
+  /** Room aspect, so the caller can draw it the right shape. */
+  w: number;
+  d: number;
+  minutes: Array<number | null>;
+}
+
+export function dryingMap(plan: FloorPlan, outdoorTemp: number, roomId: string, cols = 12): DryMap | null {
+  const rect = plan.rooms.find((r) => r.id === roomId)?.rect;
+  if (!rect) return null;
+  const rows = Math.max(4, Math.round((cols * rect.d) / rect.w));
+  const built = buildSim3D(plan, {
+    targetCells: REPORT_FIDELITY.targetCells,
+    iterations: REPORT_FIDELITY.iterations,
+    openingDriveDT: Math.abs(outdoorTemp - 21),
+  });
+  for (let s = 0; s < REPORT_FIDELITY.steps; s++) built.sim.step(0.05);
+  const { dry } = geodesicFields(built);
+  const minutes: Array<number | null> = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = rect.x + ((c + 0.5) / cols) * rect.w;
+      const z = rect.z + ((r + 0.5) / rows) * rect.d;
+      // Average the standing-height air over this patch of floor.
+      let sum = 0;
+      let n = 0;
+      for (const y of [0.4, 1.0, 1.6]) {
+        const [i, j, k] = built.worldToCell(x, y, z);
+        const cell = built.sim.cIdx(i, j, k);
+        if (built.sim.solid[cell] || !built.inside[cell]) continue;
+        sum += dry[cell];
+        n++;
+      }
+      minutes.push(n ? sum / n : null);
+    }
+  }
+  return { cols, rows, w: rect.w, d: rect.d, minutes };
+}
+
 export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: number): GoalStatus[] {
   const needsTemp = goals.some((g) => g.metric === "temperature");
   const needsSmell = goals.some((g) => g.metric === "smell");
@@ -149,6 +214,24 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
   const smells = needsSmell ? roomMeans(built, fields.smell) : null;
 
   return goals.map((g) => {
+    // "How long does it stay wet?" — the question a person actually asks about
+    // a bathroom, answered in minutes rather than on a 0–1 scale nobody has an
+    // intuition for. Scored on the SLOWEST corner, since that is the one that
+    // goes black.
+    if (g.metric === "drying") {
+      const rect = plan.rooms.find((r) => r.id === g.roomId)?.rect;
+      if (!rect) return { label: g.label, met: false, detail: "", word: "" };
+      const mins = slowestDry(built, fields.dry, rect);
+      const met = (g.atLeast === undefined || mins >= g.atLeast) && (g.atMost === undefined || mins <= g.atMost);
+      return {
+        label: g.label,
+        met,
+        detail: mins >= 999 ? "never" : mins >= 90 ? `${(mins / 60).toFixed(1)} h` : `${Math.round(mins)} min`,
+        word: met ? "dries quickly" : mins >= 120 ? "still wet hours later" : "slow to dry",
+        color: drySwatch(mins),
+      };
+    }
+
     if (g.metric === "draft") {
       const zone = g.nearItem ? itemZone(plan, g.nearItem) : plan.rooms.find((r) => r.id === g.roomId)?.rect ?? null;
       const speed = zone ? zoneSpeed(built, zone) : null;
