@@ -81,7 +81,10 @@ export interface ScenarioGoal {
   /** Shown next to the tick-box. Phrased as the thing to achieve. */
   label: string;
   /** What to measure. */
-  metric: "temperature" | "smell" | "draft";
+  /** `drying` is measured in MINUTES and scored on the slowest corner of the
+   *  room — how long it stays wet after a shower, which is the question people
+   *  actually ask about a bathroom. The others are levels, not durations. */
+  metric: "temperature" | "smell" | "draft" | "drying";
   /** Room it is measured in. Ignored when `nearItem` is set. */
   roomId: string;
   /** Measure over the footprint of this item type instead of the whole room —
@@ -477,7 +480,7 @@ function buildBathroom(): FloorPlan {
         // The damp corner — behind the tub, at the far end from the door, which
         // is where the air is stillest and where the black mould actually grows.
         // Modelled with the contaminant field standing in for moisture.
-        inCorner(gen, bath, "north", "end", "smell", [0.34, 0.5, 0.34], { category: "hvac", mount: "floor" }),
+        inCorner(gen, bath, "north", "end", "damp", [0.5, 0.5, 0.5], { category: "hvac", mount: "floor" }),
         // ONE extract vent, already fitted and running, and the participant's to
         // move: this task is "where does it go", not "should there be one".
         against(gen, bath, c(bath), "south", 0.5, "return", VENT_SIZE, {
@@ -487,10 +490,14 @@ function buildBathroom(): FloorPlan {
     },
     { windows: false },
   );
-  // ONE window, on the near wall to start, and NOT fixed — a window can be
-  // dragged to any wall of its own room (moveOpeningToPoint), which is exactly
-  // the choice this task is about. Starts shut.
-  addWindow(plan, "bathroom", "north", 0.35, false);
+  // ONE window, and NOT fixed — a window can be dragged to any wall of its own
+  // room (moveOpeningToPoint), which is exactly the choice this task is about.
+  // Starts shut, and starts on the RIGHT-HAND wall a metre from the extract:
+  // the pair as-built is the bad arrangement, so simply opening the window is
+  // not the answer. Left where it was — diagonally opposite the vent — merely
+  // opening it dried the room in 32 minutes and the placement question never
+  // came up.
+  addWindow(plan, "bathroom", "east", 0.2, false);
   for (const d of plan.doors) d.fixed = true;
   return plan;
 }
@@ -749,41 +756,35 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // things the solver knows, and neither is being asked about here — four tabs
     // where two would do is four things to rule out before you can start.
     views: ["airflow", "contamination"],
-    // TWO MEASUREMENTS, AND THEY PULL APART. The first is taken AT the damp
-    // corner, not over the room: a room mean in a single room cannot tell the
-    // corner from the doorway, and it is the corner that grows the mould.
-    // Reading the source's own cell is not circular — moisture there is exp(0)
-    // × the ventilation term, so it depends on nothing except how well that
-    // corner is actually served by moving air.
+    // ONE GOAL, MEASURED AS A TIME. "How long does it stay wet after a shower"
+    // is the question a person actually asks about a bathroom; 0.27 on a
+    // contaminant scale is not. Scored on the 90th percentile of the room, so a
+    // genuinely stagnant corner fails while the single crevice behind the tub
+    // that no arrangement can reach does not decide the task.
     //
-    // On its own that goal is satisfied by putting an opening right on top of
-    // the corner and letting the air go straight back out, which leaves the
-    // rest of the room as damp as it was. So the second goal watches the whole
-    // room, and the two together are the short-circuit lesson: the corner needs
-    // an opening AT it, and the room needs the other opening FAR from that one,
-    // so the air has to cross the floor to get between them.
+    // Measured over 11 vent positions × 12 window positions (4 walls × 3):
+    //     window SHUT (any vent)                    59 min
+    //     as built — window open beside the vent    51 min   the short circuit
+    //     openings on opposite sides of the room    31 min
+    // Range with the window open is 31–53 min, and the slowest arrangements are
+    // all the two openings clustered in the same corner: the air crosses a metre
+    // of wall and leaves, and the rest of the room never moves. 29 of the 132
+    // get under 35 minutes, all of them with the window and the extract on
+    // opposite sides.
     //
-    // Measured over 11 vent positions × 12 window positions (4 walls × 3), all
-    // with the window open. Corner ranges 0.031–0.801, room 0.198–0.297:
-    //     as built, window shut                  corner 0.819  room 0.387
-    //     window to the damp corner, vent beside  corner 0.031  room 0.295
-    //     window to the damp corner, vent far     corner 0.032  room 0.245
-    //     window far from it, vent at the corner  corner 0.265  room 0.223
-    // Every configuration that clears the corner has the WINDOW at the corner —
-    // that decision is 1 of the 12 window placements. The vent is then more
-    // forgiving: 5 of 11 positions get the room under 0.26, all of them well
-    // away from the window. 16 of the 132 fix the corner and fail the room,
-    // which is exactly the short circuit.
+    // The window STARTS beside the extract, so opening it is not the answer —
+    // left diagonally opposite the vent where it used to be, merely opening it
+    // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      { label: "The damp corner is drying out", metric: "smell", roomId: "bathroom", nearItem: "smell", atMost: 0.12 },
-      { label: "The rest of the bathroom stays dry", metric: "smell", roomId: "bathroom", atMost: 0.26 },
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 35 },
     ],
     success:
-      "Moisture at the tub corner ≤ 0.12 AND across the room ≤ 0.26 — the window " +
-      "moved to the damp corner so the wet air has somewhere to go, and the " +
-      "extract put well away from it so the air crosses the room instead of " +
-      "turning straight round. Putting the two together clears the corner " +
-      "(0.031) and leaves the room at 0.295: the short circuit.",
+      "Everywhere in the bathroom dry within 35 minutes, measured on the slow " +
+      "90% of the room. Reached by opening the window AND moving it away from " +
+      "the extract, so the air has to cross the floor to get from one to the " +
+      "other. Shut, the room takes about an hour; open but left beside the " +
+      "extract, 51 minutes — the air short-circuits along one wall and the damp " +
+      "corner never clears.",
     build: buildBathroom,
   },
   smell: {

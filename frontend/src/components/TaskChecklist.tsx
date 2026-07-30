@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { SCENARIOS } from "../floorplan/scenarios";
-import { SWATCH_SCALE_CSS, checkGoals, goalPicture, type GoalStatus } from "../intent/goals";
+import {
+  SWATCH_SCALE_CSS,
+  checkGoals,
+  drySwatch,
+  dryingMap,
+  goalPicture,
+  type DryMap,
+  type GoalStatus,
+} from "../intent/goals";
 import { useSceneStore } from "../scene/store";
 
 
@@ -25,7 +33,13 @@ import { useSceneStore } from "../scene/store";
 // actually is now, so the same picture doubles as progress.
 
 /** Which simulation view answers each kind of goal. */
-const MODE_FOR = { temperature: "temperature", smell: "contamination", draft: "airflow" } as const;
+const MODE_FOR = {
+  temperature: "temperature",
+  smell: "contamination",
+  draft: "airflow",
+  // Drying is read off the same moisture field the contamination view draws.
+  drying: "contamination",
+} as const;
 
 /** Ink that stays legible on the swatch it sits on. The cold end of the ramp is
  *  a deep navy, and dark text on it was unreadable — the one word the picture
@@ -44,6 +58,45 @@ function inkOn(color: string): { color: string; textShadow: string } {
   return lum < 0.55
     ? { color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,.45)" }
     : { color: "#12212a", textShadow: "0 1px 0 rgba(255,255,255,.35)" };
+}
+
+/** The room, drawn as a plan, shaded by how long each patch stays wet.
+ *
+ *  No numbers on it, and no "high"/"low" either: the participant reads a dark
+ *  patch behind the bath and a pale floor by the door, which is the finding.
+ *  The caption is the one number that IS the goal — a time in minutes, because
+ *  "still wet two hours later" is a sentence about a bathroom in a way that
+ *  0.27 on a contaminant scale is not. */
+function DryPlan({ map, limit }: { map: DryMap; limit: number }) {
+  const W = 190;
+  const H = Math.round((W * map.d) / map.w);
+  const cw = W / map.cols;
+  const ch = H / map.rows;
+  const worst = map.minutes.reduce<number>((a, m) => (m != null && m > a ? m : a), 0);
+  return (
+    <div>
+      <svg width={W} height={H} style={{ display: "block", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}>
+        {map.minutes.map((m, i) => {
+          if (m == null) return null;
+          const c = i % map.cols;
+          const r = (i / map.cols) | 0;
+          return <rect key={i} x={c * cw} y={r * ch} width={cw + 0.6} height={ch + 0.6} fill={drySwatch(m)} />;
+        })}
+      </svg>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+        <div style={{ flex: 1, height: 7, borderRadius: 4, border: "1px solid var(--line)", background: `linear-gradient(90deg, ${drySwatch(0)}, ${drySwatch(60)}, ${drySwatch(140)})` }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)" }}>
+        <span>dries quickly</span>
+        <span>stays wet</span>
+      </div>
+      <p className="muted-line" style={{ marginTop: 5 }}>
+        {worst >= 999
+          ? `The slowest corner never really dries. Goal: everywhere dry within ${limit} minutes.`
+          : `The slowest corner takes about ${worst >= 90 ? `${(worst / 60).toFixed(1)} hours` : `${Math.round(worst)} minutes`}. Goal: under ${limit} minutes, everywhere.`}
+      </p>
+    </div>
+  );
 }
 
 /** One end of the before/after picture: a colour, what it is called, and which
@@ -89,6 +142,7 @@ export function TaskChecklist() {
   const [rows, setRows] = useState<GoalStatus[]>([]);
   const [checking, setChecking] = useState(false);
   const [shown, setShown] = useState<string | null>(null);
+  const [dryMap, setDryMap] = useState<DryMap | null>(null);
 
   const goals = scenarioId ? SCENARIOS[scenarioId].goals : undefined;
 
@@ -100,6 +154,27 @@ export function TaskChecklist() {
   const simulated = simActive && simReady && !recorded.includes(simMode) ? [...recorded, simMode] : recorded;
   const unlocked = (goals ?? []).some((g) => simulated.includes(MODE_FOR[g.metric]));
   const pending = (goals ?? []).filter((g) => !simulated.includes(MODE_FOR[g.metric]));
+  const dryingGoal = (goals ?? []).find((g) => g.metric === "drying");
+
+  // The room's drying map, computed only while its picture is actually open —
+  // it is a full solve, and paying for one on every edit to draw something
+  // nobody is looking at would cost a frame each time.
+  useEffect(() => {
+    if (!dryingGoal || !shown) {
+      setDryMap(null);
+      return;
+    }
+    let cancelled = false;
+    const id = window.setTimeout(() => {
+      const m = dryingMap(plan, outdoorTemp, dryingGoal.roomId);
+      if (!cancelled) setDryMap(m);
+    }, 40);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dryingGoal, shown, plan, outdoorTemp]);
 
   useEffect(() => {
     if (!goals?.length || !unlocked) {
@@ -192,12 +267,18 @@ export function TaskChecklist() {
               </div>
               {open && (
                 <div style={{ marginTop: 6, marginLeft: 25 }}>
-                  {/* Where it is now → where it has to get to. */}
-                  <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
-                    <Swatch caption={r.color ? "now" : "at the start"} color={now.color} word={now.word} />
-                    <span style={{ alignSelf: "center", color: "var(--muted)", fontSize: 15 }}>→</span>
-                    <Swatch caption="goal" color={pic.after.color} word={pic.after.word} accent />
-                  </div>
+                  {/* A drying goal gets a plan of the room instead of two
+                      swatches: WHERE the slow patch is happens to be the whole
+                      lesson, and no pair of colour chips can say that. */}
+                  {goal.metric === "drying" && dryMap ? (
+                    <DryPlan map={dryMap} limit={goal.atMost ?? 45} />
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+                      <Swatch caption={r.color ? "now" : "at the start"} color={now.color} word={now.word} />
+                      <span style={{ alignSelf: "center", color: "var(--muted)", fontSize: 15 }}>→</span>
+                      <Swatch caption="goal" color={pic.after.color} word={pic.after.word} accent />
+                    </div>
+                  )}
                   {pic.onTempScale && (
                     <>
                       {/* Where those colours sit between cold and warm — still no numbers. */}

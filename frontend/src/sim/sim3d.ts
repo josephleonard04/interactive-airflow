@@ -492,11 +492,13 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     }
   }
 
-  // Smell sources the user placed in the scene (drag-and-drop icons). These are
-  // the base smell sources; setSource can add a whole-room source on top.
+  // Sources of whatever the contaminant field is carrying in this scene. One
+  // field, two costumes: "smell" for odour, "damp" for moisture. They behave
+  // identically — what differs is the model the participant sees and the words
+  // the panel uses, and a violet stink-blob in a bathroom is the wrong sentence.
   const baseSmell: number[] = [];
   for (const it of plan.items) {
-    if (it.type !== "smell" || it.on === false) continue;
+    if ((it.type !== "smell" && it.type !== "damp") || it.on === false) continue;
     for (const [i, j, k] of cellsOf(itemAabb(it))) {
       const c = sim.cIdx(i, j, k);
       if (!sim.solid[c]) baseSmell.push(c);
@@ -535,7 +537,41 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
 // distance. So a heater/AC fills its whole connected part of the house (hot near
 // the source, cooler further away, nothing past a shut door), and smell reads
 // low near open windows / vents (fresh-air sinks). O(cells) — instant.
-export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Array } {
+/** How long this spot takes to dry out, in MINUTES, once the shower is off.
+ *
+ *  Drying is governed by the local air-change rate: damp air has to be replaced
+ *  by drier air, and a spot the fresh air barely reaches exchanges slowly and
+ *  stays wet. The ventilation term already computed for the moisture field —
+ *  `1 − exp(−dK / FRESH_TAU)`, which is 0 right at an opening and approaches 1
+ *  where no outdoor air arrives — is exactly that effectiveness, inverted. So
+ *  the drying time is proportional to it.
+ *
+ *  DRY_UNVENTILATED sets the scale: three hours for a corner the air never
+ *  reaches, which is what an interior bathroom with the door shut actually
+ *  behaves like, and a handful of minutes right beside an open window.
+ *
+ *  NOT the raw transport cost. dK is a travel time in SECONDS — a few metres at
+ *  half a metre per second is under a minute — so scaling minutes off it
+ *  reported the entire room as "0 min" and the goal could never fail.
+ *
+ *  Reported in minutes because that is the unit a person owns: "the corner is
+ *  still wet two hours later" is a sentence about a bathroom, and 0.27 on a
+ *  contaminant scale is not. */
+const DRY_UNVENTILATED = 180;
+/** The transport cost at which a spot is drying at roughly half the sealed-room
+ *  rate. Its OWN constant, not FRESH_TAU: that one is tuned to 5 s for the
+ *  moisture level in the studio task, and at 5 s the drying term saturates —
+ *  almost every cell in a bathroom is more than five seconds of travel from an
+ *  opening, so every layout reported the same two-and-a-half hours and the
+ *  placement made no visible difference. Sized instead to the spread of costs
+ *  ACROSS a bathroom (roughly 5–30 s), which is what has to be resolved. */
+const DRY_TAU = 25;
+/** Minutes reported when the cell has NO opening anywhere in reach — a sealed
+ *  room never dries, and the checklist needs a finite number to print rather
+ *  than an infinity. */
+const DRY_NEVER = 999;
+
+export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Array; dry: Float32Array } {
   const { sim, nx, ny, nz, dx, ambient, ventDilute } = s;
   const n3 = nx * ny * nz;
   const idx = (i: number, j: number, k: number) => i + nx * (j + ny * k);
@@ -728,6 +764,17 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     if (ambient[c] || ventDilute[c]) sinkSeeds.push(c);
   }
   const smell = new Float32Array(n3);
+  const dry = new Float32Array(n3).fill(DRY_NEVER);
+  {
+    const dFwd0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH) : null;
+    const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH) : null;
+    for (let c = 0; c < n3; c++) {
+      if (sim.solid[c]) continue;
+      const dK = Math.min(dFwd0 ? dFwd0[c] : Infinity, dOut0 ? dOut0[c] : Infinity);
+      if (dK === Infinity) continue;
+      dry[c] = DRY_UNVENTILATED * (1 - Math.exp(-dK / DRY_TAU));
+    }
+  }
   if (smellSeeds.length) {
     const dS = costFromSources(smellSeeds, UPWIND);
     // An opening cleans the air TWO ways, and a vent or a window does both:
@@ -747,7 +794,37 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
       smell[c] = v;
     }
   }
-  return { temp, smell };
+  return { temp, smell, dry };
+}
+
+/** How long the SLOW parts of a room stay wet, in minutes.
+ *
+ *  The 90th percentile, not the maximum. A mean would let a well-aired doorway
+ *  pay for a dead corner, which is the failure the task is about — but the
+ *  outright maximum is worse: every room has one cell wedged behind the tub or
+ *  under the shower screen that no arrangement can reach, and it pinned every
+ *  layout to the same ~2.5 hours whatever the participant did. The 90th
+ *  percentile still fails a genuinely stagnant corner while ignoring the single
+ *  crevice nobody towels down.
+ *
+ *  Ignores the top of the room: a ceiling void would otherwise dominate, and
+ *  nothing anyone cares about is drying up there. */
+export function slowestDry(s: Sim3D, dry: Float32Array, rect: Rect): number {
+  const { sim, nx, ny, nz, cellCenter, inside } = s;
+  const vals: number[] = [];
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const c = sim.cIdx(i, j, k);
+        if (sim.solid[c] || !inside[c]) continue;
+        const [x, y, z] = cellCenter(i, j, k);
+        if (y > 2.0) continue;
+        if (x < rect.x || x > rect.x + rect.w || z < rect.z || z > rect.z + rect.d) continue;
+        vals.push(dry[c]);
+      }
+  if (!vals.length) return 0;
+  vals.sort((a, b) => a - b);
+  return vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.9))];
 }
 
 /** Mean of a per-cell field over an arbitrary ZONE — a corner, a bed, a couch —
