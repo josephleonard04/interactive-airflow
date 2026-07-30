@@ -33,6 +33,7 @@ export const CATALOG: Record<string, ItemSpec> = {
   kitchen_sink: { size: [1.0, 0.9, 0.6], category: "furniture", mount: "floor", label: "Kitchen sink" },
   toilet: { size: [0.55, 0.75, 0.7], category: "furniture", mount: "floor", label: "Toilet" },
   bathtub: { size: [1.6, 0.6, 0.75], category: "furniture", mount: "floor", label: "Bathtub" },
+  shower: { size: [0.9, 2.0, 0.9], category: "furniture", mount: "floor", label: "Shower" },
   ac: { size: [0.85, 0.32, 0.22], category: "hvac", mount: "wall", flow: 0.25, label: "AC unit" },
   heater: { size: [0.8, 0.5, 0.18], category: "hvac", mount: "floor", flow: 0, label: "Heater" },
   fan: { size: [0.45, 1.3, 0.45], category: "hvac", mount: "floor", flow: 0, label: "Fan" },
@@ -50,7 +51,7 @@ export const CATALOG: Record<string, ItemSpec> = {
 export const PALETTE: Array<{ group: string; types: string[] }> = [
   { group: "Furniture", types: ["bed", "desk", "closet", "table", "couch", "tv"] },
   { group: "Kitchen", types: ["fridge", "kitchen_sink", "bin"] },
-  { group: "Bathroom", types: ["sink", "toilet", "bathtub"] },
+  { group: "Bathroom", types: ["sink", "toilet", "bathtub", "shower"] },
   { group: "Heating, cooling & air", types: ["ac", "heater", "fan", "supply", "return"] },
   { group: "Simulation", types: ["smell"] },
 ];
