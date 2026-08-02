@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
-import { tempColor } from "../viz/temperature";
+import { flowColor, tempColor } from "../viz/temperature";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
@@ -73,6 +73,9 @@ export function FlowField3D() {
   const steps = useRef(0);
   const converged = useRef(false);
   const fieldsRef = useRef<{ temp: Float32Array; smell: Float32Array; noise: Float32Array } | null>(null);
+  /** Cold end, mean and warm end of the current solution, computed once when the
+   *  fields land rather than per frame — the dot loop needs it 850 times a frame. */
+  const rangeRef = useRef<[number, number, number] | null>(null);
   const [ready, setReady] = useState(false);
   const [paths, setPaths] = useState<StreamlinePaths | null>(null);
   const dashRef = useRef<React.ComponentRef<typeof Line> | null>(null);
@@ -178,6 +181,34 @@ export function FlowField3D() {
     [built, outdoorTemp],
   );
 
+  /** The coldest, average and warmest air inside the home right now — what the
+   *  flow colours are scaled between, so a device's own air saturates instead of
+   *  landing somewhere in the middle of an absolute comfort ramp. The MEAN is
+   *  what makes the picture readable: it is the pale centre, so a line reads warm
+   *  or cold relative to the air in this home rather than to an abstract scale.
+   *  Interior cells only: past an open window the field is outdoor air, and
+   *  letting 2 °C outdoors set the cold end would flatten every indoor
+   *  difference against it. */
+  const tempRangeOf = useCallback(
+    (temp: Float32Array): [number, number, number] => {
+      const { sim, inside } = built;
+      let lo = Infinity;
+      let hi = -Infinity;
+      let sum = 0;
+      let n = 0;
+      for (let c = 0; c < temp.length; c++) {
+        if (sim.solid[c] || !inside[c]) continue;
+        const t = outdoorTemp + temp[c];
+        if (t < lo) lo = t;
+        if (t > hi) hi = t;
+        sum += t;
+        n++;
+      }
+      return n > 0 ? [lo, sum / n, hi] : [outdoorTemp, outdoorTemp, outdoorTemp];
+    },
+    [built, outdoorTemp],
+  );
+
   // Build smooth streamlines from the frozen steady-state velocity field. Called
   // once the fields exist, so the colour sampler always has one to read.
   const buildPaths = useCallback(
@@ -192,9 +223,10 @@ export function FlowField3D() {
           walls: wallBoxes,
           gaps: gapBoxes,
           tempAt: tempSampler,
+          tempRange: rangeRef.current ?? undefined,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes, tempSampler],
+    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes, tempSampler, tempRangeOf],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
@@ -308,6 +340,7 @@ export function FlowField3D() {
         applyFieldToSim(built, accurate.field);
         { const gf = geodesicFields(built);
           fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(plan, built) };
+          rangeRef.current = tempRangeOf(gf.temp);
           setRoomTemps(roomMeans(built, gf.temp)); }
         converged.current = true;
         buildPaths();
@@ -326,6 +359,7 @@ export function FlowField3D() {
           smell: gf.smell,
           noise: computeNoiseField(plan, built),
         };
+        rangeRef.current = tempRangeOf(gf.temp);
         setRoomTemps(roomMeans(built, gf.temp));
         converged.current = true;
         buildPaths();
@@ -386,10 +420,11 @@ export function FlowField3D() {
       // with each other and with the Temp view. Falls back to the flat blue
       // before the fields exist.
       const tc = tempSampler(x, y, z);
+      const rg = rangeRef.current;
       if (tc == null) {
         headCol[p * 3] = DOT_RGB[0]; headCol[p * 3 + 1] = DOT_RGB[1]; headCol[p * 3 + 2] = DOT_RGB[2];
       } else {
-        const c = tempColor(tc);
+        const c = rg ? flowColor(tc, rg[0], rg[1], rg[2]) : tempColor(tc);
         headCol[p * 3] = c.r; headCol[p * 3 + 1] = c.g; headCol[p * 3 + 2] = c.b;
       }
     }
@@ -428,7 +463,10 @@ export function FlowField3D() {
           <bufferAttribute attach="attributes-position" args={[hazePos, 3]} usage={THREE.DynamicDrawUsage} />
           <bufferAttribute attach="attributes-color" args={[hazeCol, 3]} usage={THREE.DynamicDrawUsage} />
         </bufferGeometry>
-        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.2} opacity={0.62} />
+        {/* Was 0.62, which laid the temperature over the floor as a wash — the
+            difference between a 17 °C bedroom and a 23 °C living room survived
+            the ramp and then got diluted by the beige floor underneath it. */}
+        <pointsMaterial map={soft} vertexColors transparent depthWrite={false} sizeAttenuation size={built.dx * 4.2} opacity={0.82} />
       </points>
 
       <points ref={headRef} frustumCulled={false} visible={false} renderOrder={FLOW_RENDER_ORDER}>
