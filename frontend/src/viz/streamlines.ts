@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { Sim3D } from "../sim/sim3d";
 import type { Rect } from "../floorplan/types";
-import { tempColor } from "./temperature";
+import { flowColor, tempColor } from "./temperature";
 
 // Smooth, speed-coloured streamlines for the home airflow view (Xie-style).
 // Paths are integrated through the steady velocity field with a midpoint (RK2)
@@ -191,6 +191,10 @@ export function buildStreamlinePaths(
      *  streamline looks identical in both. Colour separates them at a glance,
      *  which is the whole lesson of the winter task. */
     tempAt?: (x: number, y: number, z: number) => number | null;
+    /** The coldest, MEAN and warmest interior air in this solution. The line
+     *  colour is scaled to it, so the heater's own air is fully red, the draught
+     *  off the glass fully blue, and ordinary room air pale — see flowColor. */
+    tempRange?: [number, number, number];
   } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
@@ -214,12 +218,12 @@ export function buildStreamlinePaths(
   const lineColor = new THREE.Color(opts.color ?? STREAMLINE_BLUE);
   // Per-vertex colour. Without a temperature field every vertex gets the same
   // flat line colour, which is the old behaviour exactly.
-  const { tempAt } = opts;
+  const { tempAt, tempRange } = opts;
   const colorAt = (p: THREE.Vector3): THREE.Color => {
     if (!tempAt) return lineColor.clone();
     const c = tempAt(p.x, p.y, p.z);
     if (c == null) return lineColor.clone();
-    const { r, g, b } = tempColor(c);
+    const { r, g, b } = tempRange ? flowColor(c, tempRange[0], tempRange[1], tempRange[2]) : tempColor(c);
     return new THREE.Color(r, g, b);
   };
   const MIN_SPEED = 0.08; // a line must carry real air somewhere, else it's noise

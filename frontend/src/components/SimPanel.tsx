@@ -4,7 +4,7 @@ import { evaluateObjectives, resolveObjectives, type Evaluation } from "../inten
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
-import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
+import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { SketchCanvas } from "./SketchCanvas";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -599,14 +599,16 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         />
         <span style={{ color: "var(--muted)" }}>one path the air actually takes</span>
       </div>
-      <div style={{ height: 9, borderRadius: 5, background: tempGradientCss(), marginTop: 6 }} />
+      <div style={{ height: 9, borderRadius: 5, background: flowGradientCss(), marginTop: 6 }} />
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
-        <span>cold air</span>
-        <span>warm air</span>
+        <span>coldest air here</span>
+        <span>warmest air here</span>
       </div>
       <p className="muted-line" style={{ marginTop: 6 }}>
         The colour of a line is how warm that air is: <b>red</b> where it is carrying heat from the
-        heater, <b>blue</b> where it is cold off the glass, and in between where the two have mixed.
+        heater, <b>blue</b> where it is cold off the glass, and blending through the middle where the
+        two have mixed. The two ends are the warmest and coldest air in this home right now, so the
+        scale stretches to whatever is actually going on — use the <b>Temp</b> view for real degrees.
         The moving dashes travel the way the air flows — through open doors, out of open windows and
         the entrance, and never through a wall.
       </p>

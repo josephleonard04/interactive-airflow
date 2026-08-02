@@ -493,6 +493,12 @@ export function Panel() {
         )}
       </section>
 
+      {/* An inventory of a home the participant did not furnish and mostly may
+          not touch. Everything in it is already on screen in 3D, where it can be
+          clicked directly — the list is a second way to reach the same objects
+          and a long one, pushing the two things that matter (the heater and the
+          fan) below the fold. */}
+      {!scenario && (
       <section>
         <h2>Rooms &amp; objects</h2>
         <div className="rooms">
@@ -562,6 +568,7 @@ export function Panel() {
           })}
         </div>
       </section>
+      )}
 
       {/* Exporting the solver scene is a developer's button. In a task it sits
           one row above "Submit — I'm done" and looks like the way to hand the
