@@ -5,14 +5,7 @@ import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
-import { STREAMLINE_BLUE } from "../viz/streamlines";
 import { SketchCanvas } from "./SketchCanvas";
-
-const INTENT_TEMPLATES = [
-  "Keep my bedroom cool",
-  "Keep the kitchen smell out of the bedroom",
-  "Warm up the living room",
-];
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
 // 3D house via FlowField3D). Pressing Simulate runs the sim directly on the home
@@ -79,7 +72,10 @@ export function SimPanel() {
   const [goal, setGoal] = useState("");
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
-  const hasChecklist = !!(checklistScenario && SCENARIOS[checklistScenario].goals?.length);
+  // A task with scored goals never shows a prose verdict: the goals are graded
+  // silently into the log, and telling the participant "not warm enough yet" is
+  // the tick-box back by another name.
+  const hasScoredGoals = !!(checklistScenario && SCENARIOS[checklistScenario].goals?.length);
   // A task can narrow the views to the ones that answer it, and the contaminant
   // view takes its name from what the task is actually about — the same field
   // carries kitchen odour in one scenario and bathroom moisture in another, and
@@ -182,12 +178,10 @@ export function SimPanel() {
               rows={3}
               style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
             />
+            {/* No example goals. Three ready-made sentences under the box are
+                three sentences a participant will pick instead of writing their
+                own — and what they would have written is the data. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 7 }}>
-              {INTENT_TEMPLATES.map((t) => (
-                <button key={t} className="chip" style={{ fontSize: 11 }} onClick={() => { setGoal(t); checkGoalText(t); }}>
-                  {t}
-                </button>
-              ))}
               <button
                 className="primary"
                 style={{ marginLeft: "auto" }}
@@ -238,7 +232,7 @@ export function SimPanel() {
         {/* The prose verdict is suppressed whenever the task has a tick-list —
             two answers to "am I done?" in one panel, one of them contradicting
             the other's thresholds, is worse than either alone. */}
-        {!hasChecklist && results.map((r, i) => (
+        {!hasScoredGoals && results.map((r, i) => (
           <div
             key={i}
             style={{
@@ -440,7 +434,9 @@ function TempControls({
   locked: boolean;
 }) {
   const absOf = (id: string) => (deltas.has(id) ? outdoorTemp + deltas.get(id)! : null);
-  const selected = tempRoomId ? rooms.find((r) => r.id === tempRoomId) ?? null : null;
+  // `locked` also pins the readout to every room, so a selection left over from
+  // free play cannot follow the participant into a task.
+  const selected = !locked && tempRoomId ? rooms.find((r) => r.id === tempRoomId) ?? null : null;
   const selectedT = selected ? absOf(selected.id) : null;
 
   return (
@@ -473,15 +469,21 @@ function TempControls({
         </>
       )}
 
-      <div className="field" style={{ marginTop: 8 }}>
-        <span>show room</span>
-        <select value={tempRoomId ?? ""} onChange={(e) => setTempRoom(e.target.value || null)} style={{ maxWidth: 140 }}>
-          <option value="">All rooms</option>
-          {rooms.map((r) => (
-            <option key={r.id} value={r.id}>{r.name}</option>
-          ))}
-        </select>
-      </div>
+      {/* In a task, every room is always shown. The picker only ever narrowed
+          the readout to one room, which hides the comparison the task is about —
+          a bedroom is "warm enough" relative to the room next door, and you
+          cannot see that one room at a time. */}
+      {!locked && (
+        <div className="field" style={{ marginTop: 8 }}>
+          <span>show room</span>
+          <select value={tempRoomId ?? ""} onChange={(e) => setTempRoom(e.target.value || null)} style={{ maxWidth: 140 }}>
+            <option value="">All rooms</option>
+            {rooms.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {!ready ? (
         <p className="muted-line" style={{ marginTop: 6 }}>Waiting for the steady state…</p>
@@ -580,15 +582,33 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
       </div>
     );
   }
+  // Airflow. The lines are coloured by the temperature of the air they carry, on
+  // the same ramp the Temp view uses — so "the warm air off the heater goes
+  // straight up and out of the door" is one picture instead of two.
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11.5 }}>
-        <span style={{ width: 22, height: 3, borderRadius: 2, background: STREAMLINE_BLUE, flex: "0 0 auto" }} />
+        <span
+          style={{
+            width: 22,
+            height: 3,
+            borderRadius: 2,
+            flex: "0 0 auto",
+            background: `linear-gradient(90deg, ${rgbCss(tempColor(TEMP_MIN_C))}, ${rgbCss(tempColor(TEMP_NEUTRAL_C))}, ${rgbCss(tempColor(TEMP_MAX_C))})`,
+          }}
+        />
         <span style={{ color: "var(--muted)" }}>one path the air actually takes</span>
       </div>
+      <div style={{ height: 9, borderRadius: 5, background: tempGradientCss(), marginTop: 6 }} />
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "var(--muted)", marginTop: 3 }}>
+        <span>cold air</span>
+        <span>warm air</span>
+      </div>
       <p className="muted-line" style={{ marginTop: 6 }}>
-        The moving dashes travel the way the air flows. Air passes through open doors and leaves by
-        open windows &amp; the entrance — nothing crosses a wall.
+        The colour of a line is how warm that air is: <b>red</b> where it is carrying heat from the
+        heater, <b>blue</b> where it is cold off the glass, and in between where the two have mixed.
+        The moving dashes travel the way the air flows — through open doors, out of open windows and
+        the entrance, and never through a wall.
       </p>
     </div>
   );

@@ -161,7 +161,25 @@ export function FlowField3D() {
     return { wallBoxes: wb, gapBoxes: gb };
   }, [plan.walls, plan.doors, plan.windows]);
 
-  // Build smooth streamlines from the frozen steady-state velocity field.
+  // Absolute air temperature (°C) at a world point, read off the same geodesic
+  // field the Temp view draws. The solver's field is a DELTA from the outdoor
+  // baseline, so the baseline is added back here — the ramp is anchored on real
+  // temperatures, not on whatever this run's maximum happened to be.
+  const tempSampler = useCallback(
+    (x: number, y: number, z: number): number | null => {
+      const F = fieldsRef.current;
+      if (!F) return null;
+      const { sim, worldToCell } = built;
+      const [i, j, k] = worldToCell(x, y, z);
+      const c = sim.cIdx(i, j, k);
+      if (sim.solid[c]) return null;
+      return outdoorTemp + F.temp[c];
+    },
+    [built, outdoorTemp],
+  );
+
+  // Build smooth streamlines from the frozen steady-state velocity field. Called
+  // once the fields exist, so the colour sampler always has one to read.
   const buildPaths = useCallback(
     () =>
       setPaths(
@@ -173,9 +191,10 @@ export function FlowField3D() {
           obstacles,
           walls: wallBoxes,
           gaps: gapBoxes,
+          tempAt: tempSampler,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes],
+    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes, tempSampler],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
@@ -362,8 +381,17 @@ export function FlowField3D() {
       } else { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       if (ageA[p] > maxAgeA[p]) { spawn(p); x = head[p * 3]; y = head[p * 3 + 1]; z = head[p * 3 + 2]; }
       head[p * 3] = x; head[p * 3 + 1] = y; head[p * 3 + 2] = z;
-      // the same single blue as the streamlines, so the two airflow views agree
-      headCol[p * 3] = DOT_RGB[0]; headCol[p * 3 + 1] = DOT_RGB[1]; headCol[p * 3 + 2] = DOT_RGB[2];
+      // Coloured by the warmth of the air the dot is sitting in — the same ramp
+      // and the same meaning as the streamlines, so the two airflow styles agree
+      // with each other and with the Temp view. Falls back to the flat blue
+      // before the fields exist.
+      const tc = tempSampler(x, y, z);
+      if (tc == null) {
+        headCol[p * 3] = DOT_RGB[0]; headCol[p * 3 + 1] = DOT_RGB[1]; headCol[p * 3 + 2] = DOT_RGB[2];
+      } else {
+        const c = tempColor(tc);
+        headCol[p * 3] = c.r; headCol[p * 3 + 1] = c.g; headCol[p * 3 + 2] = c.b;
+      }
     }
     (headPts.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (headPts.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
