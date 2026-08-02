@@ -11,11 +11,19 @@
 // anchored on human comfort. Every interior cell gets a colour, the legend can
 // print real numbers, and blue always means the same temperature.
 
-/** Ends of the scale. Anything outside is clamped to the end colour. */
-export const TEMP_MIN_C = 12;
-export const TEMP_MAX_C = 36;
+/** Ends of the scale. Anything outside is clamped to the end colour.
+ *
+ *  THE SCALE HAS TO END WHERE INDOOR AIR ENDS. Reserving red for 36 °C meant
+ *  nothing in a heating task was ever red: measured on the winter home, the
+ *  hottest air in the house — the heater's own — is 26.5 °C, which on a 12–36
+ *  ramp is a mild orange. The air was doing the right thing and the picture
+ *  refused to say so. Room air in these tasks runs from a cold pane at ~8 °C to
+ *  a heatwave studio at ~31 °C, so that is what the ramp now spends its colour
+ *  on, and 32 °C+ clamps to the deepest red. */
+export const TEMP_MIN_C = 10;
+export const TEMP_MAX_C = 32;
 /** Middle of the comfort band — where the ramp is neutral. */
-export const TEMP_NEUTRAL_C = 24;
+export const TEMP_NEUTRAL_C = 22;
 
 export interface RGB {
   r: number;
@@ -26,29 +34,24 @@ export interface RGB {
 // Perceptually ordered stops: deep blue (cold) → light blue (cool) → warm-neutral
 // (comfortable) → orange → deep red (hot). Distinct enough in lightness that the
 // bands stay readable for colour-vision-deficient viewers and in greyscale.
-// STEEP THROUGH THE MIDDLE, WHICH IS WHERE ROOMS ACTUALLY LIVE. The first
-// version spread its colour evenly over 12–36 °C, so an ordinary winter home —
-// a 17 °C bedroom next to a 23 °C living room, a 6 °C difference that is the
-// whole task — came out as two shades of pale, and the heater itself, at ~27 °C,
-// was a mild sand colour. Nothing looked hot because nothing in a heating
-// problem ever reaches 32 °C.
-//
-// So the ramp is compressed onto 15–29 °C, where indoor air sits, and the ends
-// are kept for the extremes. Every stop is also more saturated: the neutral is a
-// light warm grey rather than near-white, so "comfortable" still reads as a
-// colour and not as blank floor.
+// STEEP THROUGH THE MIDDLE, WHICH IS WHERE ROOMS ACTUALLY LIVE, and ending where
+// indoor air ends. The neutral sits at 22 °C, so the two things a heating task is
+// about are unmistakable: a heater's air (~26.5 °C measured) is red, and a cold
+// bedroom (~17.5 °C) is a strong blue. Every stop is saturated — the neutral is a
+// light warm grey rather than near-white, so "comfortable" reads as a colour and
+// not as blank floor.
 const STOPS: Array<{ c: number; rgb: RGB }> = [
-  { c: 12, rgb: { r: 0.03, g: 0.07, b: 0.38 } }, // deep navy — coldest
-  { c: 15, rgb: { r: 0.05, g: 0.24, b: 0.78 } }, // strong blue
-  { c: 17.5, rgb: { r: 0.13, g: 0.47, b: 0.95 } }, // azure — a cold room
-  { c: 20, rgb: { r: 0.42, g: 0.71, b: 0.99 } }, // mid blue — cool
-  { c: 22, rgb: { r: 0.72, g: 0.87, b: 0.98 } }, // pale blue — slightly cool
-  { c: 23.5, rgb: { r: 0.94, g: 0.92, b: 0.86 } }, // light warm grey — comfortable
-  { c: 25, rgb: { r: 0.99, g: 0.83, b: 0.48 } }, // amber
-  { c: 27, rgb: { r: 0.99, g: 0.60, b: 0.18 } }, // orange — a heater's air
-  { c: 29, rgb: { r: 0.94, g: 0.31, b: 0.09 } }, // red
-  { c: 32, rgb: { r: 0.83, g: 0.13, b: 0.07 } }, // strong red
-  { c: 36, rgb: { r: 0.55, g: 0.02, b: 0.06 } }, // deep red — hottest
+  { c: 10, rgb: { r: 0.02, g: 0.05, b: 0.33 } }, // deep navy — a freezing pane
+  { c: 13, rgb: { r: 0.04, g: 0.19, b: 0.74 } }, // strong blue
+  { c: 16, rgb: { r: 0.09, g: 0.41, b: 0.94 } }, // azure — a cold room
+  { c: 18.5, rgb: { r: 0.33, g: 0.65, b: 0.99 } }, // mid blue — too cool to sit in
+  { c: 20.5, rgb: { r: 0.67, g: 0.85, b: 0.99 } }, // pale blue — slightly cool
+  { c: 22, rgb: { r: 0.95, g: 0.93, b: 0.88 } }, // light warm grey — comfortable
+  { c: 23.5, rgb: { r: 0.99, g: 0.82, b: 0.45 } }, // amber
+  { c: 25, rgb: { r: 0.99, g: 0.59, b: 0.19 } }, // orange
+  { c: 26.5, rgb: { r: 0.96, g: 0.32, b: 0.10 } }, // red — a heater's own air
+  { c: 28, rgb: { r: 0.88, g: 0.12, b: 0.06 } }, // strong red
+  { c: 32, rgb: { r: 0.60, g: 0.02, b: 0.05 } }, // deep red — a heatwave room
 ];
 
 /** Colour for an absolute air temperature in °C. */

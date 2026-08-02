@@ -532,7 +532,7 @@ function TempControls({
 
 function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp: number; contaminant: string }) {
   if (mode === "temperature") {
-    const ticks = [TEMP_MIN_C, 18, TEMP_NEUTRAL_C, 30, TEMP_MAX_C];
+    const ticks = [TEMP_MIN_C, 16, TEMP_NEUTRAL_C, 27, TEMP_MAX_C];
     return (
       <div style={{ marginTop: 10 }}>
         <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>Air temperature (°C)</div>
