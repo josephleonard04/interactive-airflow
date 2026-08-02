@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { Sim3D } from "../sim/sim3d";
 import type { Rect } from "../floorplan/types";
+import { tempColor } from "./temperature";
 
 // Smooth, speed-coloured streamlines for the home airflow view (Xie-style).
 // Paths are integrated through the steady velocity field with a midpoint (RK2)
@@ -178,6 +179,18 @@ export function buildStreamlinePaths(
     walls?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
     /** Open doorways/windows, which punch holes back through `walls`. */
     gaps?: Array<{ min: [number, number, number]; max: [number, number, number] }>;
+    /** Absolute air temperature (°C) at a world point, or null where there is
+     *  no temperature field. Supplied → each vertex is coloured by the warmth of
+     *  the air passing through it, on the same fixed ramp the Temp view uses:
+     *  red where the line is carrying heat off the heater, blue where it is cold
+     *  off the glass, neutral where they have mixed.
+     *
+     *  This is the one thing a flat blue line could never say. "The heater is on
+     *  and the bedroom is still cold" has two possible causes — the air is not
+     *  going there, or it is going there and arriving cold — and a single-colour
+     *  streamline looks identical in both. Colour separates them at a glance,
+     *  which is the whole lesson of the winter task. */
+    tempAt?: (x: number, y: number, z: number) => number | null;
   } = {},
 ): StreamlinePaths {
   const points: THREE.Vector3[] = [];
@@ -199,6 +212,16 @@ export function buildStreamlinePaths(
     p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1 && p.z > z0 && p.z < z1 && inHouse(p);
 
   const lineColor = new THREE.Color(opts.color ?? STREAMLINE_BLUE);
+  // Per-vertex colour. Without a temperature field every vertex gets the same
+  // flat line colour, which is the old behaviour exactly.
+  const { tempAt } = opts;
+  const colorAt = (p: THREE.Vector3): THREE.Color => {
+    if (!tempAt) return lineColor.clone();
+    const c = tempAt(p.x, p.y, p.z);
+    if (c == null) return lineColor.clone();
+    const { r, g, b } = tempColor(c);
+    return new THREE.Color(r, g, b);
+  };
   const MIN_SPEED = 0.08; // a line must carry real air somewhere, else it's noise
   const MIN_POINTS = 6; // and trace a real path, not a stub
   const step = dx * 0.75;
@@ -329,7 +352,8 @@ export function buildStreamlinePaths(
     const curve = new THREE.CatmullRomCurve3(raw, false, "centripetal");
     const divisions = Math.min(80, raw.length * 3);
     const smooth = curve.getPoints(divisions);
-    // single flat colour — no speed gradient, so the view stays clean.
+    // Colour carries TEMPERATURE, never speed. A speed gradient made the picture
+    // busy and answered a question nobody was asking; warmth is the question.
     // The integration never steps into a wall, but Catmull-Rom then interpolates
     // BETWEEN those valid points and can cut the corner on a tight bend, which
     // draws a segment clipping through a wall or a couch. Drop any segment that
@@ -345,7 +369,7 @@ export function buildStreamlinePaths(
       }
       if (clipped) continue;
       points.push(a, b);
-      colors.push(lineColor.clone(), lineColor.clone());
+      colors.push(colorAt(a), colorAt(b));
     }
   }
 

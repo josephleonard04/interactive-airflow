@@ -6,7 +6,7 @@ import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
-import { TaskChecklist } from "./TaskChecklist";
+import { GoalLogger } from "./GoalLogger";
 import { SubmitTask } from "./SubmitTask";
 
 /** One-per-home appliances in a study task — the Add button caps at this. */
@@ -141,21 +141,34 @@ export function Panel() {
 
   return (
     <aside className="panel">
-      <h1>Interactive Airflow</h1>
-      <p className="subtitle">design your home’s airflow — no expertise needed</p>
+      {/* Product branding, and the home's dimensions, are for the app — not for
+          a task. In a study session the participant has one job, and a title, a
+          tagline and a "7.0 × 8.0 × 2.7 m" they cannot change are three things
+          to read past before reaching it. The room legend stays: it names the
+          rooms the brief talks about. */}
+      {!scenario && (
+        <>
+          <h1>Interactive Airflow</h1>
+          <p className="subtitle">design your home’s airflow — no expertise needed</p>
+        </>
+      )}
 
       <section>
-        <h2>Your home</h2>
-        <div className="home-size">
-          <span>
-            {length.toFixed(1)} × {width.toFixed(1)} × {height.toFixed(1)} m
-          </span>
-          {tools.resize && (
-            <button className="ghost" onClick={openSetup}>
-              Change size
-            </button>
-          )}
-        </div>
+        {!scenario && (
+          <>
+            <h2>Your home</h2>
+            <div className="home-size">
+              <span>
+                {length.toFixed(1)} × {width.toFixed(1)} × {height.toFixed(1)} m
+              </span>
+              {tools.resize && (
+                <button className="ghost" onClick={openSetup}>
+                  Change size
+                </button>
+              )}
+            </div>
+          </>
+        )}
         <div className="legend">
           {plan.rooms.map((r) => (
             <span key={r.id} className="leg">
@@ -167,19 +180,35 @@ export function Panel() {
       </section>
 
       {/* The brief stays on screen for the whole task — participants should not
-          have to remember it, and re-reading it is not a finding. */}
+          have to remember it, and re-reading it is not a finding.
+          Four labelled parts rather than one paragraph: the situation, what done
+          looks like, and both halves of the boundary. They are what the tick-list
+          used to imply and never said. */}
       {scenario && (
         <section className="selected-box" style={{ borderLeft: "3px solid var(--accent)" }}>
-          <h2 style={{ marginBottom: 4 }}>{scenario.title}</h2>
-          <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 6px" }}>{scenario.brief}</p>
-          <p className="muted-line" style={{ margin: 0 }}>
-            <b>You can change:</b> {scenario.youCanChange}
-          </p>
+          <h2 style={{ marginBottom: 6 }}>{scenario.title}</h2>
+          {scenario.situation ? (
+            <>
+              <BriefPart label="Situation" text={scenario.situation} />
+              <BriefPart label="Your goal" text={scenario.goal ?? ""} accent />
+              <BriefPart label="You can change" text={scenario.youCanChange} />
+              {scenario.youCannotChange && <BriefPart label="You cannot change" text={scenario.youCannotChange} />}
+            </>
+          ) : (
+            // Tasks not yet split into parts still show the one-paragraph brief.
+            <>
+              <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 6px" }}>{scenario.brief}</p>
+              <p className="muted-line" style={{ margin: 0 }}>
+                <b>You can change:</b> {scenario.youCanChange}
+              </p>
+            </>
+          )}
         </section>
       )}
 
-      {/* Live tick-list of what the task actually requires. */}
-      <TaskChecklist />
+      {/* Scores the task's goals silently into the session log. Renders nothing:
+          the participant decides when they are done, not a tick-box. */}
+      <GoalLogger />
 
       {/* …and the way out of it. Directly under the tick-list, because "am I
           done?" and "I'm done" are the same thought. */}
@@ -487,13 +516,17 @@ export function Panel() {
                   ) : (
                     <span className="name" style={{ flex: 1 }}>{room.name}</span>
                   )}
-                  <button
-                    className="x"
-                    title="Rename this room (goals like 'keep the bedroom cool' match by name)"
-                    onClick={() => setEditingRoomId(editingRoomId === room.id ? null : room.id)}
-                  >
-                    ✏️
-                  </button>
+                  {/* The task names its rooms — "get BOTH rooms warm" — so the
+                      names have to still mean that at the end of the session. */}
+                  {!scenario && (
+                    <button
+                      className="x"
+                      title="Rename this room (goals like 'keep the bedroom cool' match by name)"
+                      onClick={() => setEditingRoomId(editingRoomId === room.id ? null : room.id)}
+                    >
+                      ✏️
+                    </button>
+                  )}
                 </div>
                 <ul className="list">
                   {items.map((it) => (
@@ -504,16 +537,23 @@ export function Panel() {
                     >
                       <span className="swatch" style={{ background: itemColor(it.type) }} />
                       <span className="name">{pretty(it.type)}</span>
-                      <button
-                        className="x"
-                        title="Remove"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeItem(it.id);
-                        }}
-                      >
-                        ✕
-                      </button>
+                      {/* Same rule as the selected-item panel above: you may
+                          only delete what the task would let you put back.
+                          Otherwise it is a one-way trap, and the two things most
+                          likely to go are the heater and the fan the task is
+                          about. */}
+                      {(!scenarioId || tools.addable.includes(it.type)) && (
+                        <button
+                          className="x"
+                          title="Remove"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeItem(it.id);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -523,11 +563,39 @@ export function Panel() {
         </div>
       </section>
 
-      <section className="actions">
-        <button className="primary" onClick={exportBC}>
-          💾 Save airflow setup
-        </button>
-      </section>
+      {/* Exporting the solver scene is a developer's button. In a task it sits
+          one row above "Submit — I'm done" and looks like the way to hand the
+          session in, which it is not. */}
+      {!scenario && (
+        <section className="actions">
+          <button className="primary" onClick={exportBC}>
+            💾 Save airflow setup
+          </button>
+        </section>
+      )}
     </aside>
+  );
+}
+
+/** One labelled part of the brief. The label carries the meaning, so it is the
+ *  bold thing; the text is ordinary prose at reading size, not muted grey —
+ *  "you cannot change the walls" is a rule, not a footnote. */
+function BriefPart({ label, text, accent }: { label: string; text: string; accent?: boolean }) {
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: 0.6,
+          textTransform: "uppercase",
+          color: accent ? "var(--accent-ink-soft, #156d63)" : "var(--muted)",
+          marginBottom: 1,
+        }}
+      >
+        {label}
+      </div>
+      <p style={{ fontSize: 12.5, lineHeight: 1.5, margin: 0 }}>{text}</p>
+    </div>
   );
 }

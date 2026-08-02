@@ -137,10 +137,11 @@ export function SubmitTask() {
     return (
       <section className="selected-box" style={{ borderLeft: "3px solid #2a9d8f" }}>
         <h2 style={{ marginBottom: 4 }}>Submitted — thank you</h2>
+        {/* NO SCORE. The goals are in the file; they are not read back to the
+            participant. A "1 of 2 goals met" here is a verdict delivered at the
+            exact moment they have decided they were finished, and the next thing
+            they do is answer a questionnaire about how useful the tool was. */}
         <p className="muted-line" style={{ margin: 0 }}>
-          {submitted.goals.length > 0
-            ? `${submitted.goals.filter((g) => g.met).length} of ${submitted.goals.length} goals met · `
-            : ""}
           {Math.round(submitted.durationSec / 6) / 10} min
           {ENDPOINT ? (sent === "ok" ? " · sent" : sent === "failed" ? " · not sent" : "") : ""}
         </p>

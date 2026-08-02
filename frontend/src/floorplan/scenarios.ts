@@ -125,12 +125,36 @@ export interface Scenario {
   outdoorTemp: number;
   /** Running-cost ceiling, or null if this task has no budget. */
   costBudget?: number;
-  /** Read to the participant verbatim — comfort goal only, no physics. */
+  /** Read to the participant verbatim — comfort goal only, no physics.
+   *
+   *  Legacy single-paragraph form. Tasks that have been split into the four
+   *  labelled parts below (`situation` / `goal` / can / cannot) leave this as
+   *  the fallback for anything still reading a one-paragraph brief. */
   brief: string;
+  /** WHAT IS HAPPENING — the room, the weather, the problem. No instruction in
+   *  it, and no physics: it is the situation a person would describe to a
+   *  friend. */
+  situation?: string;
+  /** WHAT DONE LOOKS LIKE, in the participant's own terms. Deliberately not a
+   *  threshold and not a checkable line — see the note on `goals`. */
+  goal?: string;
   /** What the participant may change, in plain words, shown in the panel. */
   youCanChange: string;
+  /** What is fixed, said explicitly. Left implicit, participants spend the task
+   *  hunting for controls that were never there — and "I couldn't find how to
+   *  move the window" is a finding about our UI, not about their reasoning. */
+  youCannotChange?: string;
   tools: ScenarioTools;
-  /** The task, as tick-boxes the participant can watch. Omitted = no checklist. */
+  /** The task's success conditions — SCORED, NEVER SHOWN.
+   *
+   *  These used to drive a live tick-list. Prof. Igarashi's objection (2026-08-03)
+   *  is that a visible tick-box turns the task into collecting the tick: the
+   *  participant optimises toward the box instead of toward a home they would
+   *  actually want to live in, and stops the moment it goes green rather than
+   *  when they are satisfied. So the boxes are gone from the screen; the goals
+   *  stay, evaluated silently, logged with a timestamp each time the verdict
+   *  changes, and scored once more against the plan as submitted. The
+   *  participant decides when they are done. Omitted = nothing to score. */
   goals?: ScenarioGoal[];
   /** Which of the four simulation views this task offers, in order. Omitted =
    *  all of them. A task about moisture has no business showing a noise tab:
@@ -587,9 +611,25 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "heater and the fan were delivered and left by the kitchen, inside the " +
       "front door. Glass is where a home leaks its heat, and right now the cold " +
       "is pouring off the windows. Get both rooms warm enough to live in.",
+    situation:
+      "It's very cold outside and you've just moved into this newly built home. The " +
+      "heater and the fan were delivered and left by the kitchen, inside the front " +
+      "door. Glass is where a home leaks its heat, and right now the cold is pouring " +
+      "off the windows.",
+    // No number, no tick-box, and an explicit "you decide when you're done" —
+    // without that last sentence the absence of a checklist reads as a missing
+    // feature rather than as permission to stop when the home feels right.
+    goal:
+      "Make both rooms — the bedroom and the living + kitchen — warm enough to live in. " +
+      "Keep changing things until you are happy with the result, then press Submit. " +
+      "There is no score to collect and no right number to hit: you decide when it is good enough.",
     youCanChange:
-      "Move the heater and the fan anywhere, aim the fan, and open or close the doors and windows. " +
-      "Both run on medium. The walls, doors and windows are already built.",
+      "Move the heater and the fan anywhere in the home, aim the fan, and open or close " +
+      "the doors and windows. Run the simulation as many times as you like.",
+    youCannotChange:
+      "The walls, doors and windows are already built — you cannot move them, add new " +
+      "ones or take any away. The heater and the fan both run on medium and cannot be " +
+      "turned up. The weather outside is fixed.",
     tools: { movable: ["heater", "fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
     // Bands, not floors. Living rooms sit in the ASHRAE 55 winter comfort zone
     // (~20–24 °C); a bedroom is conventionally kept cooler, so it takes the WHO
@@ -626,6 +666,10 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
         windowAtLeast: 19,
       },
     ],
+    // Two views, because two is what the task needs: where the air goes, and how
+    // warm it is. A smell tab and a noise tab on a task about a cold bedroom are
+    // two more things to open, rule out and forget about.
+    views: ["airflow", "temperature"],
     viz: { maxSeeds: 8 },
     // Measured on this layout at 2 °C outdoors (living / bedroom), with cold
     // glazing modelled. THREE levers, and medium power needs at least two of them.
