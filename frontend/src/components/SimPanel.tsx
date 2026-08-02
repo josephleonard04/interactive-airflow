@@ -5,6 +5,7 @@ import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
+import { smellGradientCss } from "../viz/smell";
 import { SketchCanvas } from "./SketchCanvas";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -556,15 +557,15 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>
           {contaminant === "Humidity" ? "Moisture in the air" : "Contaminant concentration"}
         </div>
-        <div style={{ height: 11, borderRadius: 6, background: "linear-gradient(90deg,#efe7fb,#c9a0f0,#8a3fd0,#5a1d96)" }} />
+        <div style={{ height: 11, borderRadius: 6, background: smellGradientCss() }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>{contaminant === "Humidity" ? "Dry" : "Low"}</span>
-          <span>{contaminant === "Humidity" ? "Damp" : "High"}</span>
+          <span>{contaminant === "Humidity" ? "Dry" : "Fresh air"}</span>
+          <span>{contaminant === "Humidity" ? "Damp" : "Strongest smell"}</span>
         </div>
         <p className="muted-line" style={{ marginTop: 6 }}>
           {contaminant === "Humidity"
             ? "Carried by the airflow, and it only leaves where the air does — dries out near an open window or an extract, and sits where the air is still."
-            : "Carried by the airflow; reaches rooms with an open door, blocked by walls. Lower near open windows & vents."}
+            : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns mint wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same colour always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
         </p>
       </div>
     );

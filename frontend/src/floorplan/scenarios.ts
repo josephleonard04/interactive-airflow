@@ -453,8 +453,19 @@ function buildStudio(): FloorPlan {
         against(gen, studio, c(studio), "east", 0.75, "ac", [0.85, 0.32, 0.22], {
           category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25, on: false,
         }),
-        // NO FAN. The participant adds one from the palette and decides where it
-        // goes — "where would you even put it" is the question being asked.
+        // The fan, standing beside the closet in the corner behind the bed —
+        // where a floor fan actually lives when it is not in use, and about as
+        // far from both the bin and the windows as this room allows.
+        //
+        // It used to be absent, added from the palette. That made the first move
+        // of the task "find the right thing in a menu", which is a test of our
+        // UI and not of their reasoning, and it let a participant start the task
+        // with no fan at all and never realise one was available. Standing it in
+        // the room states the levers plainly: here is a fan, here are two
+        // windows, the vent runs itself.
+        spot(gen, studio, "fan", [0.45, 1.3, 0.45], 4.95, 4.42, 0, {
+          category: "hvac", mount: "floor", flow: 0, on: true,
+        }),
       ];
     },
     { windows: false },
@@ -712,11 +723,28 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "The bed and the kitchen share one room, and you have to sleep in there " +
       "tonight. The air conditioner is broken and the landlord can't come until " +
       "next week. Keep the smell away from the bed.",
+    situation:
+      "It's a hot night, and the food waste in the kitchen bin has started to smell. " +
+      "The bed and the kitchen share one room, and you have to sleep in there tonight. " +
+      "The air conditioner is broken and the landlord can't come until next week. " +
+      "There is a fan standing by the closet, and two windows you can open.",
+    goal:
+      "Keep the smell away from the bed while you sleep. Keep changing things until you are " +
+      "happy with the result, then press Submit. There is no score to collect and no right " +
+      "number to hit: you decide when it is good enough.",
     youCanChange:
-      "Add a fan, then move it and aim it anywhere. Open or close either window. " +
-      "The kitchen's extract vent runs all night and can't be switched off, and " +
-      "the air conditioner doesn't work.",
-    tools: { movable: ["fan"], aimable: ["fan"], addable: ["fan"], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
+      "Move the fan anywhere in the room and aim it whichever way you like, and open or close " +
+      "either window. Run the simulation as many times as you like.",
+    youCannotChange:
+      "You are renting, so nothing about the flat itself moves: the windows, the door and the " +
+      "kitchen stay where they are. The kitchen's extract vent runs all night and cannot be " +
+      "switched off, the air conditioner is broken, the fan runs on medium and cannot be turned " +
+      "up, and the bin has to stay where it is. The weather outside is fixed.",
+    // The fan now stands in the room, so the palette is empty — see buildStudio.
+    tools: { movable: ["fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
+    // Two views, and only two: where the air goes, and where the smell is. A
+    // temperature tab on a task whose AC is broken is a lever that isn't there.
+    views: ["airflow", "contamination"],
     // TWO GOALS THAT PULL APART. A hot night wants air moving over the bed, and
     // the obvious way to get it — stand the fan in the middle and sweep — walks
     // the bin's smell across the pillow on the way. The pair can only be

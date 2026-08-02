@@ -4,6 +4,7 @@ import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
 import { flowColor, tempColor } from "../viz/temperature";
+import { SMELL_FULL_SCALE, smellColor } from "../viz/smell";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
@@ -310,10 +311,13 @@ export function FlowField3D() {
           if (a < 0.5) { const u = a / 0.5; r = 0.13 + 0.85 * u; g = 0.77 + 0.03 * u; b = 0.37 - 0.29 * u; }
           else { const u = (a - 0.5) / 0.5; r = 0.98 - 0.12 * u; g = 0.80 - 0.65 * u; b = 0.08 + 0.06 * u; }
         } else {
-          let a = colSum[q] / colN[q] / mx;
-          if (a < 0.02) continue;
-          a = Math.sqrt(a);
-          r = 0.80 - 0.50 * a; g = 0.52 - 0.45 * a; b = 0.96 - 0.06 * a; // light lavender → deep violet
+          // Contaminant. EVERY interior column is drawn, including the clean
+          // ones: air that has been swept clear is the result the task is
+          // after, and leaving it uncoloured meant half of what the participant
+          // achieved never appeared on screen. Fresh reads mint, the source
+          // reads magenta — see viz/smell.
+          const c = smellColor(colSum[q] / colN[q] / SMELL_FULL_SCALE);
+          r = c.r; g = c.g; b = c.b;
         }
         const [wx, , wz] = cellCenter(i, 0, k);
         hazePos[n * 3] = wx; hazePos[n * 3 + 1] = Y0; hazePos[n * 3 + 2] = wz;
