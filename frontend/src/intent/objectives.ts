@@ -1,4 +1,5 @@
 import type { FloorPlan, Rect, RoomType } from "../floorplan/types";
+import { normalizeText, type Vocabulary } from "./normalize";
 
 // Intent → physics: translate a non-expert's everyday comfort goal ("keep my
 // bedroom cool", "no kitchen smell in the bedroom") into a small, fixed set of
@@ -39,18 +40,91 @@ function sketchRoom(plan: FloorPlan, sketch: Rect) {
 
 // word → (scalar, direction). First match wins.
 const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> = [
-  { words: ["cool", "cold", "chilly", "cooler", "chill"], scalar: "temperature", direction: "low" },
-  { words: ["warm", "hot", "cozy", "cosy", "toasty", "warmer", "heat"], scalar: "temperature", direction: "high" },
-  { words: ["smell", "odor", "odour", "stink", "stench", "fume", "fumes", "smoke", "stinky"], scalar: "contaminant", direction: "low" },
+  {
+    words: [
+      "cool", "cold", "chilly", "cooler", "chill", "colder", "freezing", "frigid",
+      "icy", "aircon", "airconditioning", "airconditioner", "refreshing",
+      "sweltering", "boiling", "roasting", "sweaty", "muggy", "overheating",
+      "overheated", "baking", "sticky",
+    ],
+    scalar: "temperature",
+    direction: "low",
+  },
+  {
+    words: [
+      "warm", "hot", "cozy", "cosy", "toasty", "warmer", "heat", "heater",
+      "heating", "warmth", "radiator", "snug",
+    ],
+    scalar: "temperature",
+    direction: "high",
+  },
+  {
+    words: [
+      "smell", "smells", "smelly", "odor", "odour", "stink", "stinks", "stench",
+      "fume", "fumes", "smoke", "stinky", "reek", "reeks", "whiff",
+      "rubbish", "garbage", "trash", "waste",
+    ],
+    scalar: "contaminant",
+    direction: "low",
+  },
   // "I want FRESH AIR near the bed", "it's STUFFY in here". Same objective as a
   // smell goal — get the air in this spot exchanged — said from the other end:
   // one names what is wrong, the other names what is wanted. The lexicon knew
   // only the complaint, so the most natural way to ask for ventilation matched
   // nothing at all and the search quietly refused to run.
-  { words: ["fresh", "stuffy", "stale", "airless", "musty", "stifling", "ventilate", "ventilation", "airy"], scalar: "contaminant", direction: "low" },
+  {
+    words: [
+      "fresh", "freshen", "stuffy", "stale", "airless", "musty", "stifling",
+      "ventilate", "ventilation", "ventilated", "airy", "breathe", "breathable",
+      "circulate", "circulation", "suffocating", "clammy", "mould", "mold",
+      "condensation",
+    ],
+    scalar: "contaminant",
+    direction: "low",
+  },
   // draft / air movement on a spot — "no air blowing on my face", "too drafty"
-  { words: ["draft", "drafty", "draught", "breeze", "blowing", "blow", "wind"], scalar: "draft", direction: "low" },
+  {
+    words: [
+      "draft", "drafty", "draught", "draughty", "breeze", "breezy", "blowing",
+      "blow", "blows", "wind", "windy", "gust", "gusty",
+    ],
+    scalar: "draft",
+    direction: "low",
+  },
 ];
+
+/** Words that say a place should be BETTER without saying which way.
+ *
+ *  "I want the bed area to be nice to sleep" names no physical quantity at all,
+ *  and a dictionary keyed on quantities can only shrug at it — which is exactly
+ *  what it did. But the sentence is not ambiguous to a person: nice-to-sleep in
+ *  a heatwave means cooler, and in February it means warmer. The weather is the
+ *  missing half of the sentence, and the task already knows it.
+ *
+ *  With no weather to hand it falls back to ventilation, the one reading that is
+ *  never actively wrong: "make it nicer in here" always at least means fresher. */
+const COMFORT_WORDS = [
+  "nice", "nicer", "comfortable", "comfy", "comfort", "pleasant", "bearable",
+  "liveable", "livable", "decent", "sleep", "sleeping", "rest", "relax",
+  "relaxing", "nap", "napping",
+];
+/** At or above this outdoors, "make it comfortable" means cool it down. */
+const COMFORT_HOT_C = 26;
+/** At or below this, it means warm it up. */
+const COMFORT_COLD_C = 16;
+
+/** Every single word the dictionary knows, for spelling and compound repair. */
+const VOCABULARY: Vocabulary = {
+  words: new Set<string>([
+    ...LEXICON.flatMap((l) => l.words),
+    ...COMFORT_WORDS,
+    "bedroom", "bed", "kitchen", "living", "lounge", "bathroom", "bath",
+    "toilet", "washroom", "studio", "apartment", "flat", "house", "home",
+    "couch", "sofa", "desk", "table", "closet", "window", "windows", "door",
+    "doors", "vent", "extract", "area", "spot", "zone", "corner", "region",
+    "place", "night", "morning", "here", "inside",
+  ]),
+};
 
 // Objects a draft goal can point at ("no air blowing on the bed"): the item's
 // footprint becomes the evaluation region. Matched before room words.
@@ -102,14 +176,37 @@ function findRooms(text: string, plan: FloorPlan): Array<{ id: string; name: str
     }
     if (best >= 0) hits.push({ id: room.id, name: room.name, type: room.type, at: best });
   }
+  // A ONE-ROOM HOME NEEDS NO NAMING. In the studio and the one-room flat there
+  // is exactly one room, so "it's stuffy in here" is unambiguous — and requiring
+  // the name meant those two tasks, the ones where people are most likely to say
+  // "in here", were the ones that grounded nowhere.
+  if (hits.length === 0 && plan.rooms.length === 1) {
+    const r = plan.rooms[0];
+    hits.push({ id: r.id, name: r.name, type: r.type, at: 0 });
+  }
   return hits.sort((a, b) => a.at - b.at);
 }
 
 /** Parse one free-text comfort goal into objectives over the fixed vocabulary.
  *  `sketch` is an optionally user-drawn area: deictic goals ("keep this area
  *  cool") ground to it, and it is the fallback region when no room is named. */
-export function parseGoal(text: string, plan: FloorPlan, sketch?: Rect | null): Objective[] {
-  const t = ` ${text.toLowerCase().trim()} `;
+export function parseGoal(
+  text: string,
+  plan: FloorPlan,
+  sketch?: Rect | null,
+  opts: { outdoorTemp?: number } = {},
+): Objective[] {
+  // Fold spellings, contractions and glued compounds onto the dictionary's own
+  // words first, so everything below matches what the person MEANT to type. The
+  // plan's own room names join the vocabulary, so "Studio" and "Living +
+  // kitchen" can be repaired the same way the fixed words are.
+  const vocab: Vocabulary = {
+    words: new Set([
+      ...VOCABULARY.words,
+      ...plan.rooms.flatMap((r) => r.name.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2)),
+    ]),
+  };
+  const t = normalizeText(text, vocab);
   const rooms = findRooms(t, plan);
   const out: Objective[] = [];
 
@@ -189,6 +286,37 @@ export function parseGoal(text: string, plan: FloorPlan, sketch?: Rect | null): 
         regionRect: useSketch ? sketch : null,
       });
     }
+  }
+
+  // Nothing named a quantity — but the sentence may still have asked for one.
+  // "Make the bed area nice to sleep" is a real wish with a real answer; it just
+  // leaves the direction to the weather, which the task knows and the sentence
+  // does not have to repeat.
+  if (out.length === 0 && COMFORT_WORDS.some((w) => t.includes(` ${w} `))) {
+    const obj = objectRegion(t, plan);
+    const named = rooms[0] ?? null;
+    const useSketch = !obj && sketchTarget && (deictic || !named);
+    const region = obj
+      ? { id: obj.roomId, name: obj.name, rect: obj.rect }
+      : useSketch
+        ? { id: sketchTarget!.id, name: sketchTarget!.name, rect: sketch! }
+        : named
+          ? { id: named.id, name: named.name, rect: null }
+          : plan.rooms.length === 1
+            ? { id: plan.rooms[0].id, name: plan.rooms[0].name, rect: null }
+            : null;
+    const outdoor = opts.outdoorTemp;
+    const scalar: Scalar =
+      outdoor == null ? "contaminant" : outdoor >= COMFORT_HOT_C || outdoor <= COMFORT_COLD_C ? "temperature" : "contaminant";
+    const direction: Direction = scalar === "temperature" && outdoor != null && outdoor <= COMFORT_COLD_C ? "high" : "low";
+    out.push({
+      raw: text,
+      scalar,
+      direction,
+      regionId: region?.id ?? null,
+      regionName: region?.name ?? null,
+      regionRect: region?.rect ?? null,
+    });
   }
   return out;
 }

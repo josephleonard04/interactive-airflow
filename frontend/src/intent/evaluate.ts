@@ -190,8 +190,9 @@ export async function resolveObjectives(
   text: string,
   plan: FloorPlan,
   sketch?: Rect | null,
+  opts: { outdoorTemp?: number } = {},
 ): Promise<{ objectives: Objective[]; usedLLM: boolean; reason: LlmReason }> {
-  const keyword = parseGoal(text, plan, sketch ?? null);
+  const keyword = parseGoal(text, plan, sketch ?? null, opts);
   if (keyword.length) return { objectives: keyword, usedLLM: false, reason: "ok" };
   const { parseGoalWithLLM } = await import("./llmGoal");
   const r = await parseGoalWithLLM(text, plan, sketch ?? null);
