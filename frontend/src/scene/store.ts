@@ -21,7 +21,7 @@ import {
 import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
-import { sketchToGoal, type SketchMark, type SketchTool } from "../intent/sketch";
+import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
 import { parseGoal, type Objective } from "../intent/objectives";
 import type {
   FloorPlan,
@@ -155,6 +155,8 @@ export interface SceneState {
     goalText: string,
     calm: boolean,
     regionName: string | null,
+    /** Where a drawn arrow starts and ends, so a fan lands at its TAIL. */
+    flow?: FlowHint,
   ) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
   solutionOptions: Solution[];
@@ -364,7 +366,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const s = get();
     const sk = sketchToGoal(s.sketchMarks, s.plan);
     if (!sk) return false;
-    return s.runSearch(sk.goal, sk.targetIds, sk.text, sk.calm, sk.calm ? "the area you drew" : null);
+    return s.runSearch(sk.goal, sk.targetIds, sk.text, sk.calm, sk.calm ? "the area you drew" : null, sk.flow);
   },
 
   sessionLog: [],
@@ -526,7 +528,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   // The one search path, shared by the typed and the drawn input. Both arrive
   // here as (goal, rooms, a sentence to show) — downstream nothing knows or
   // cares which one the user reached for.
-  runSearch: (goal, targetIds, goalText, calm, regionName) => {
+  runSearch: (goal, targetIds, goalText, calm, regionName, flow) => {
     if (get().optimizing) return false;
     set({ optimizing: true });
     window.setTimeout(() => {
@@ -563,6 +565,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           want: 3,
           lockPower: s.tools.lockPower === true,
           allowedDevices,
+          flow,
         });
         // Never hand back a finished task — see withholdComplete.
         const taskGoals = s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : [];
