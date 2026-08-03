@@ -66,6 +66,10 @@ export interface ScenarioTools {
   editOpeningSet?: boolean;
   /** Change the home's footprint. */
   resize: boolean;
+  /** May the placement search MOVE a window, not just open and shut it? Only
+   *  worth setting where the glazing's position is part of the question the
+   *  task asks — see FindOptions.moveOpenings. */
+  movableOpenings?: boolean;
   /** Hide the on/off + low/medium/high control. Use when the task is about
    *  WHERE a device goes: an exposed dial invites "turn it up" as a substitute
    *  for placement, and turning it up is usually the wrong lesson. */
@@ -582,6 +586,10 @@ function buildBathroom(): FloorPlan {
   // from the window, the short-circuit term still swamps this and its corner
   // stays damp — which is the lesson.
   plan.ventSpread = 0.2;
+  // …and with everything shut it still clears its own patch rather than the
+  // room reading uniformly wet, which looks like a fan that is off. The room as
+  // a whole still never dries — see sealedHalo.
+  plan.sealedHalo = true;
   return plan;
 }
 
@@ -940,7 +948,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // lockPower: the extract has one speed and runs all night. An on/off switch
     // and a Low/Med/High row invite "turn it up" as a substitute for thinking
     // about where it goes, which is the only thing this task is about.
-    tools: { movable: ["return"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
+    tools: { movable: ["return"], aimable: [], addable: [], walls: false, openings: true, editOpeningSet: false, movableOpenings: true, resize: false, lockPower: true },
     // Only the two views this task is about. Temperature and noise are real
     // things the solver knows, and neither is being asked about here — four tabs
     // where two would do is four things to rule out before you can start.
@@ -993,9 +1001,20 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       // whole floor, over the steam, to get from one to the other. 66 sits mid-
       // gap -- 53% clear of the answer, 14% clear of the nearest miss.
       //
-      // Shut, all ten positions read 180 minutes: an extract with no make-up
-      // air depressurises the room and moves nothing (sim3d). Opening the
-      // window is necessary and nowhere near sufficient.
+      // Shut, the room never dries: an extract with no make-up air cannot turn
+      // it over. It is not inert, though — it still clears the patch of air
+      // directly in front of the grille (0.25 against 0.86 in the far corner),
+      // because a fan drawn as doing nothing looks switched off. See sealedHalo.
+      //
+      // THE SEARCH MOVES THE WINDOW TOO. It is half the question here — the
+      // grille and the glazing short-circuit when they are close — so a search
+      // that could only toggle it was answering something else. Joint sweep, 8
+      // vent spots x 13 legal window spots, window open:
+      //     vent as delivered, window anywhere      113-141 min   nothing works
+      //     vent top-left, window bottom-right       24 min       the best pair
+      //     57 of 104 combinations under 66 min
+      // The vent still dominates: every arrangement that leaves it on the
+      // window's own wall is 113 min or worse, whatever the glazing does.
       { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 66 },
     ],
     success:

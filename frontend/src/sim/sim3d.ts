@@ -97,6 +97,7 @@ export interface Sim3D {
    *  only the built sim — can honour the task's own tuning. */
   windowReach: number;
   ventSpread: number;
+  sealedHalo: boolean;
   /** Is any exterior window or door actually open?
    *
    *  NOT the same as "are there ambient cells", which is what this used to be
@@ -556,7 +557,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, ventSpread: plan.ventSpread ?? 1, hasOpenExterior };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, ventSpread: plan.ventSpread ?? 1, sealedHalo: plan.sealedHalo === true, hasOpenExterior };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -881,7 +882,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    * clean the air around it — that is what an extract is for — and it is not
    * short-circuiting itself.
    */
-  const SC_MULT = 20;      // extra cost per metre for an opening ON the grille
+    const SC_MULT = 20;      // extra cost per metre for an opening ON the grille
   const SC_LAMBDA = 2.0;  // metres over which that penalty decays
   const dVent = ventSeeds.length ? bfs(ventSeeds) : null;
   // …and the mirror image: how far the extract's own make-up air had to travel
@@ -983,13 +984,44 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   // bathroom still dried out around the grille — and one vent position with the
   // window SHUT scored better than several with it open, which inverts the
   // lesson the task is built on. Sealed, the extract now barely reaches.
+  /** How far a sealed extract's influence carries, in metres.
+   *
+   *  With nothing open there is no make-up air and the fan cannot turn the room
+   *  over — that is the lesson, and the room-wide drying time has to keep
+   *  saying so. But it is not doing nothing either: it is pulling on the air
+   *  immediately in front of it, drawn from whatever leaks in around the door,
+   *  and painting that patch as wet as the far corner reads as a fan that is
+   *  switched off. So the grille clears its own metre and stops. */
+  /** Restored: with the bounded halo OFF (every task but the bathroom) a sealed
+   *  extract behaves exactly as it always has — a reach so long it clears
+   *  nothing. The studio depends on it: its grille sits directly over the bin,
+   *  and a halo there scrubbed the smelliest spot in the room clean. */
   const SEALED_REACH = 25;
+  const SEALED_RADIUS = 2.4;
+  /** …and how hard it pulls WITHIN that radius. Below 1 so the patch it does
+   *  clear is unmistakably clear: at the room's own rate the difference between
+   *  the grille's corner and the far one stayed inside the top of the colour
+   *  ramp, where everything clamps to the same navy and a real 2x difference in
+   *  concentration is invisible. */
+  const SEALED_PULL = 0.35;
+
+  /** In a sealed room, everything further than SEALED_RADIUS from a grille is
+   *  simply not being ventilated — no fresh air reaches it by any route. */
+  const sealedBeyondReach = (c: number): boolean =>
+    s.sealedHalo && !s.hasOpenExterior && (!dVent || dVent[c] > SEALED_RADIUS);
 
   const openingReach = (c: number): number => {
     if (ventDilute[c]) {
-      if (!s.hasOpenExterior) return SEALED_REACH;
+      // SEALED, BUT NOT INERT — see SEALED_RADIUS. The grille clears the air
+      // right in front of it at its normal rate; what a sealed room takes away
+      // is how FAR that reaches, and that is imposed as a hard radius below
+      // rather than as a slower spread. Scaling the spread could not express
+      // it: it is one multiplier on the whole field, so every setting that made
+      // the grille visibly dry also dried the room (at a reach that gave a
+      // readable patch, the 90th percentile fell from 180 minutes to 43).
+      if (!s.hasOpenExterior) return s.sealedHalo ? SEALED_PULL : SEALED_REACH;
       const dm = dOpening ? dOpening[c] : Infinity;
-      if (dm === Infinity) return SEALED_REACH;
+      if (dm === Infinity) return REACH_MAX;
       // `ventSpread` below 1 widens the grille's reach; it is 1 everywhere
       // unless a task asks otherwise, so this line is the behaviour every other
       // scenario has always had.
@@ -1012,6 +1044,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, undefined, openingReach) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c]) continue;
+      if (sealedBeyondReach(c)) continue;
       const dK = Math.min(dFwd0 ? dFwd0[c] : Infinity, dOut0 ? dOut0[c] : Infinity);
       if (dK === Infinity) continue;
       dry[c] = DRY_UNVENTILATED * (1 - Math.exp(-dK / DRY_TAU));
@@ -1031,7 +1064,9 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);
-      const dK = Math.min(dFwd ? dFwd[c] : Infinity, dOut ? dOut[c] : Infinity);
+      const dK = sealedBeyondReach(c)
+        ? Infinity
+        : Math.min(dFwd ? dFwd[c] : Infinity, dOut ? dOut[c] : Infinity);
       if (dK !== Infinity) v *= 1 - Math.exp(-dK / FRESH_TAU);
       smell[c] = v;
     }
