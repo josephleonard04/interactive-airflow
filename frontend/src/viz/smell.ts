@@ -42,13 +42,22 @@ import { rgbCss } from "./temperature";
 export const SMELL_FULL_SCALE = 0.55;
 
 /** Normalized concentration (0 = clean, 1 = full strength at the source). */
+// THE FRESH END HAS TO BE A COLOUR, NOT AN ABSENCE. The first version put a soft
+// mint at 0 and a near-white neutral a quarter of the way up, so clean air was
+// almost the colour of the floor and there was no telling by eye whether a spot
+// was fresh or merely unremarkable. Fresh air is now a vivid teal, and it holds
+// its green well past the middle of the low half — the band from "swept clean"
+// to "neither" is where a participant reads whether their window is working, so
+// it gets real colour instead of a fade to grey.
 const STOPS: Array<{ u: number; rgb: RGB }> = [
-  { u: 0.0, rgb: { r: 0.42, g: 0.82, b: 0.74 } }, // mint — fresh air
-  { u: 0.12, rgb: { r: 0.72, g: 0.9, b: 0.85 } }, // pale mint
-  { u: 0.26, rgb: { r: 0.92, g: 0.92, b: 0.93 } }, // neutral — neither
-  { u: 0.45, rgb: { r: 0.82, g: 0.68, b: 0.94 } }, // light violet
-  { u: 0.65, rgb: { r: 0.62, g: 0.35, b: 0.88 } }, // violet
-  { u: 0.83, rgb: { r: 0.55, g: 0.11, b: 0.72 } }, // deep violet
+  { u: 0.0, rgb: { r: 0.0, g: 0.72, b: 0.56 } }, // vivid teal — swept clean
+  { u: 0.14, rgb: { r: 0.24, g: 0.82, b: 0.66 } }, // green, unmistakably fresh
+  { u: 0.3, rgb: { r: 0.58, g: 0.9, b: 0.8 } }, // mint
+  { u: 0.42, rgb: { r: 0.85, g: 0.93, b: 0.92 } }, // pale — the turn
+  { u: 0.5, rgb: { r: 0.93, g: 0.91, b: 0.94 } }, // neutral — neither
+  { u: 0.62, rgb: { r: 0.8, g: 0.64, b: 0.94 } }, // light violet
+  { u: 0.78, rgb: { r: 0.6, g: 0.31, b: 0.88 } }, // violet
+  { u: 0.9, rgb: { r: 0.55, g: 0.11, b: 0.72 } }, // deep violet
   { u: 1.0, rgb: { r: 0.72, g: 0.03, b: 0.5 } }, // magenta — at the source
 ];
 

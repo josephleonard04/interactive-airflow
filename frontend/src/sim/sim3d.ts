@@ -646,7 +646,30 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  Not lower than this, and the limit is the bathroom, which reads its drying
    *  time off the same field. Best achievable design: 25 min at 0.45, 31 min at
    *  0.30, ~36 min extrapolated at 0.20 — against a 35-minute goal. At 0.20 the
-   *  bathroom task stops being solvable at all. */
+   *  bathroom task stops being solvable at all.
+   *
+   *  WHAT THIS MODEL WILL NOT SAY, measured, so nobody re-derives it. Opening
+   *  BOTH studio windows ought to be worse than opening the bed-side one alone —
+   *  the right-hand window is supposed to rob it of the inflow that was crossing
+   *  the room. It does not come out that way, and two attempts to force it
+   *  failed for reasons worth keeping:
+   *
+   *  · Pushing freshness harder along the flow (KADV 1.6 → 4 → 7 for the
+   *    freshness passes only) makes the SHORT CIRCUIT better, not worse — the
+   *    trap window went 0.323 → 0.239 → 0.182 — and at 7 the bathroom starts
+   *    almost dry (25 min against a 35-minute goal), so the task is over before
+   *    it begins.
+   *  · Seeding each opening behind by how little air it moves — physically the
+   *    right idea, since an opening delivers fresh air in proportion to its flux
+   *    — never engages here: measured at the openings, the bed-side window runs
+   *    at 0.43 m/s alone and 0.51 m/s with the other one also open. It speeds
+   *    UP. With the extract pulling a fixed flux and free outlets everywhere,
+   *    this solver treats a second opening as another path, not as competition.
+   *
+   *  So "both windows" measures the same as the bed-side window alone (0.219 vs
+   *  0.219) and fails the task either way, which is the part that matters: the
+   *  right-hand window adds nothing. It is not made WORSE, and saying otherwise
+   *  would mean overriding the flow solution rather than reading it. */
   const V0_FRESH = 0.30;
   const costFromSources = (seeds: number[], kUp = 0, reverse = false, v0 = V0): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`

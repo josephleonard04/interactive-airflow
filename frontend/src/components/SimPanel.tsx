@@ -565,7 +565,7 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         <p className="muted-line" style={{ marginTop: 6 }}>
           {contaminant === "Humidity"
             ? "Carried by the airflow, and it only leaves where the air does — dries out near an open window or an extract, and sits where the air is still."
-            : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns mint wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same colour always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
+            : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns green wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same colour always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
         </p>
       </div>
     );
