@@ -113,6 +113,20 @@ export interface HomeSize {
 export type StartMode = "example" | "blank";
 
 export interface FloorPlan {
+  /** How far the air from an open window carries, as a multiplier on the
+   *  default (1 = unchanged, below 1 = it runs out of push sooner).
+   *
+   *  Per-task, because the tasks are not asking the same question. In the
+   *  bathroom the point is to place an EXTRACT, and a window that airs the
+   *  whole room out by itself answers the question before it is asked — merely
+   *  opening it swamped the difference between a good vent position and a bad
+   *  one. Lowering it there restores the extract as the thing that decides the
+   *  outcome. It does not touch the studio, where the window IS the answer.
+   *
+   *  It lives on the plan rather than in the sim options because the plan is
+   *  what every caller of buildSim3D already holds — otherwise a dozen call
+   *  sites would each have to learn which task they were solving. */
+  windowReach?: number;
   name: string;
   size: HomeSize;
   bounds: Rect;

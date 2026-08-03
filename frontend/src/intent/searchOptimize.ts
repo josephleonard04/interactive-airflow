@@ -2,6 +2,7 @@ import { buildSim3D, advectDiffuseFill } from "../sim/sim3d";
 import { findFreeSpot, type SearchAxis } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { DEVICE_LABEL, GOAL_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
+import { ventMountY } from "../floorplan/catalog";
 
 // Layout-adaptive optimization: instead of fixed spots, we SEARCH. For each
 // goal-relevant device we generate candidate placements from the user's actual
@@ -100,6 +101,34 @@ export function candidateSpots(
         mk(clamp(mid, x + 0.4, x + w - 0.4), 0.25, south ? z + 0.2 : z + d - 0.2, south ? 0 : Math.PI, "x");
       }
     }
+  } else if (type === "return") {
+    // AN EXTRACT GOES ON A WALL, JUST UNDER THE CEILING — nowhere else.
+    //
+    // There was no branch for it at all, so it fell through to the fan's and
+    // the search proposed standing a wall-mounted grille in the middle of the
+    // floor. On the bathroom task, where the extract is the only thing the
+    // participant may move, that made "find solutions" produce a suggestion
+    // that could not be carried out and did not help: the option card said
+    // "Move the vent", the vent went to the centre of the room, and the drying
+    // time barely shifted.
+    //
+    // Eight spots: the four wall midpoints and the four corners, which is the
+    // set a person dragging it would actually consider — and, crucially, the
+    // corner diagonally opposite the window, which is this task's answer and
+    // was not previously reachable.
+    const y = ventMountY(wallHeight);
+    const m = 0.09;
+    const cornerIn = 0.55;
+    // midpoints
+    mk(cx, y, z + m, 0, "x");
+    mk(cx, y, z + d - m, Math.PI, "x");
+    mk(x + m, y, cz, Math.PI / 2, "z");
+    mk(x + w - m, y, cz, -Math.PI / 2, "z");
+    // corners, sitting on the long wall a little in from each end
+    mk(x + cornerIn, y, z + m, 0, "x");
+    mk(x + w - cornerIn, y, z + m, 0, "x");
+    mk(x + cornerIn, y, z + d - m, Math.PI, "x");
+    mk(x + w - cornerIn, y, z + d - m, Math.PI, "x");
   } else if (type === "supply") {
     mk(cx, wallHeight - 0.1, cz, 0, "area");
     mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0, "area");

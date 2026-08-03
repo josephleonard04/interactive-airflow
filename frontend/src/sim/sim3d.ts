@@ -93,6 +93,16 @@ export interface Sim3D {
   roomIds: string[];
   /** Points just in front of vents/AC/fans — where to seed airflow particles. */
   seeds: Array<[number, number, number]>;
+  /** Carried through from the build options so geodesicFields — which is handed
+   *  only the built sim — can honour the task's own tuning. */
+  windowReach: number;
+  /** Is any exterior window or door actually open?
+   *
+   *  NOT the same as "are there ambient cells", which is what this used to be
+   *  inferred from: an extract vent registers as an outlet, so its own cells are
+   *  ambient too and the test came back true for a sealed room with a fan in it.
+   *  Read from the plan's openings, where the question is actually answerable. */
+  hasOpenExterior: boolean;
   /** Points just in front of EXHAUST vents (returns) — where air leaves. Kept
    *  separate from `seeds` because particles must not SPAWN at an extract (that
    *  would read as the exhaust blowing); streamlines seed here and trace
@@ -254,6 +264,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         roomIndex[c] = ri;
       }
 
+  const hasOpenExterior = [...plan.doors, ...plan.windows].some((o) => o.open && o.rooms.includes("outside"));
   const ambient = new Uint8Array(nx * ny * nz);
   const ventDilute = new Uint8Array(nx * ny * nz);
   for (const p of scene.outlets)
@@ -526,7 +537,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, hasOpenExterior };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -851,9 +862,18 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    * clean the air around it — that is what an extract is for — and it is not
    * short-circuiting itself.
    */
-  const SC_MULT = 5;      // extra cost per metre for an opening ON the grille
+  const SC_MULT = 20;      // extra cost per metre for an opening ON the grille
   const SC_LAMBDA = 2.0;  // metres over which that penalty decays
   const dVent = ventSeeds.length ? bfs(ventSeeds) : null;
+  // …and the mirror image: how far the extract's own make-up air had to travel
+  // to reach it. An extract cleans the air that flows THROUGH the room into it,
+  // so a grille fed by a window a metre away sweeps that metre and nothing
+  // more. Without this the vent kept a broad clean halo whatever was open, and
+  // the short-circuited studio read "pale" — i.e. working — right where the
+  // lesson is that it is not.
+  const openingSeeds: number[] = [];
+  for (let c = 0; c < n3; c++) if (ambient[c] && !ventDilute[c] && !sim.solid[c]) openingSeeds.push(c);
+  const dOpening = openingSeeds.length ? bfs(openingSeeds) : null;
 
   /**
    * SPLIT MAKE-UP AIR. An extract pulls a fixed volume out of the home, and
@@ -893,7 +913,11 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     const stack: number[] = [];
     let total = 0;
     for (let c0 = 0; c0 < n3; c0++) {
-      if (!ambient[c0] || group[c0] !== -1 || sim.solid[c0]) continue;
+      // ventDilute cells are ambient too — an extract registers as an outlet —
+      // but a grille is not a source of make-up air and must not take a share
+      // of it. Left in, every window's share was diluted by the very fan the
+      // window exists to feed.
+      if (!ambient[c0] || ventDilute[c0] || group[c0] !== -1 || sim.solid[c0]) continue;
       const gid = sizes.length;
       let count = 0;
       stack.push(c0);
@@ -906,7 +930,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
           const a = i + di, b = j + dj, d = k + dk;
           if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
           const cc = idx(a, b, d);
-          if (sim.solid[cc] || !ambient[cc] || group[cc] !== -1) continue;
+          if (sim.solid[cc] || !ambient[cc] || ventDilute[cc] || group[cc] !== -1) continue;
           group[cc] = gid;
           stack.push(cc);
         }
@@ -933,12 +957,31 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  the mechanism the task is about instead of showing it.
    *
    *  Split: an opening supplying half the make-up air pushes it half as far. */
+  // AN EXTRACT IN A SEALED ROOM MOVES NOTHING. With every window and door shut
+  // there is no make-up air, so the fan just depressurises the room slightly and
+  // the air stays where it is. The freshness pass did not know that: the vent is
+  // a sink whether or not anything can replace what it removes, so a shut-up
+  // bathroom still dried out around the grille — and one vent position with the
+  // window SHUT scored better than several with it open, which inverts the
+  // lesson the task is built on. Sealed, the extract now barely reaches.
+  const SEALED_REACH = 25;
+
   const openingReach = (c: number): number => {
-    if (ventDilute[c] || !ambient[c]) return 1;
+    if (ventDilute[c]) {
+      if (!s.hasOpenExterior) return SEALED_REACH;
+      const dm = dOpening ? dOpening[c] : Infinity;
+      if (dm === Infinity) return SEALED_REACH;
+      return Math.min(REACH_MAX, 1 + SC_MULT * Math.exp(-dm / SC_LAMBDA));
+    }
+    if (!ambient[c]) return 1;
     const d = dVent ? dVent[c] : Infinity;
     const sc = !dVent || d === Infinity ? 1 : 1 + SC_MULT * Math.exp(-d / SC_LAMBDA);
     const split = 1 / Math.max(1e-3, openingShare[c]);
-    return Math.min(REACH_MAX, sc * split);
+    // The task's own dial: below 1 makes an open window carry less far, which
+    // is the difference between a room the window airs out on its own and one
+    // where the extract's position still decides the answer. See windowReach.
+    const task = 1 / Math.max(0.1, s.windowReach);
+    return Math.min(REACH_MAX, sc * split * task);
   };
   const smell = new Float32Array(n3);
   const dry = new Float32Array(n3).fill(DRY_NEVER);

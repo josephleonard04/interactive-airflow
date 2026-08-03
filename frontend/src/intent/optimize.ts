@@ -17,8 +17,14 @@ export type OptimizeGoal = "cool" | "warm" | "ventilate" | "circulate" | "balanc
 export const GOAL_DEVICES: Record<OptimizeGoal, string[]> = {
   cool: ["ac", "fan"],
   warm: ["heater", "fan"],
-  ventilate: ["supply", "fan"],
-  circulate: ["fan", "supply"],
+  // AN EXTRACT IS A VENTILATION DEVICE. `return` was missing here, so on the
+  // bathroom task — where the extract is the ONLY thing the participant may
+  // move — the intersection of "devices this goal touches" and "devices this
+  // task allows" was empty. The search dutifully ran, moved nothing, and
+  // reported "Move the vent" on every card. That is the whole of why asking for
+  // solutions did nothing there.
+  ventilate: ["return", "supply", "fan"],
+  circulate: ["fan", "supply", "return"],
   balanced: ["ac", "fan", "supply"],
 };
 

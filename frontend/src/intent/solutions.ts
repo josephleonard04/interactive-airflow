@@ -1,6 +1,6 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Vec3 } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { candidateSpots } from "./searchOptimize";
@@ -51,19 +51,44 @@ import { DEVICE_LABEL, GOAL_DEVICES, ROOM_BOUND_DEVICES, largestRoom, type Optim
 
 /** Coarse screening pass — cheap, used only to RANK many candidates. */
 const SCREEN = { targetCells: 1200, iterations: 4, steps: 8 };
+/** Screening a DRYING task needs a finer grid. Drying time is read off the 90th
+ *  percentile of a per-cell field in one small room, so at 1200 cells the
+ *  ranking is mostly quantisation noise — the search moved the extract, scored
+ *  itself a win, and landed 70 minutes off the best spot it had already tried.
+ *  Roughly 4x the cost per evaluation, on the one task that needs it. */
+const SCREEN_DRY = { targetCells: 3600, iterations: 6, steps: 14 };
 /** Finalists are re-scored at the shared reporting fidelity, so the temperature
  *  printed on a solution card is the same number the goal verdict will give
  *  after the user applies it. */
 const FINAL = REPORT_FIDELITY;
 
-/** The device each goal really turns on — searched first when budget is tight. */
-const PRIMARY_OF: Record<OptimizeGoal, string> = {
-  cool: "ac",
-  warm: "heater",
-  ventilate: "supply",
-  circulate: "fan",
-  balanced: "ac",
+/** The device each goal really turns on, best first — searched first when the
+ *  budget is tight, and the one a half-step option keeps.
+ *
+ *  A LIST, not a single type, because the same goal is served by different
+ *  hardware in different homes: "air this room out" means the extract in a
+ *  bathroom that has only an extract, and the supply vent in a home that has
+ *  one. Pinned to a single type, the primary could be a device the plan does
+ *  not contain, and everything keyed off it — search order, the "X only" card —
+ *  silently referred to nothing. */
+const PRIMARY_PREF: Record<OptimizeGoal, string[]> = {
+  cool: ["ac", "fan"],
+  warm: ["heater", "fan"],
+  ventilate: ["return", "supply", "fan"],
+  circulate: ["fan", "supply", "return"],
+  balanced: ["ac", "fan", "supply"],
 };
+
+/** The first preferred device this plan actually has and this task allows. */
+function primaryFor(goal: OptimizeGoal, plan: FloorPlan, allowed?: string[]): string {
+  const pref = PRIMARY_PREF[goal];
+  const here = new Set(plan.items.filter((it) => it.on !== false).map((it) => it.type));
+  return (
+    pref.find((t) => here.has(t) && (!allowed || allowed.includes(t))) ??
+    pref.find((t) => here.has(t)) ??
+    pref[0]
+  );
+}
 
 /** One place the goal's primary device was tried, with its screening score. */
 interface PrimaryAlt {
@@ -75,6 +100,15 @@ interface PrimaryAlt {
 }
 /** Two suggested spots closer than this are the same suggestion (m). */
 const ALT_MIN_APART = 1.0;
+
+/** Which side of the home a window is on, so an option can say WHICH one it
+ *  wants open rather than just "a window". */
+function sideOfWindow(plan: FloorPlan, w: Opening): string {
+  const b = plan.bounds;
+  const vertical = Math.abs(w.a[0] - w.b[0]) < 1e-3;
+  if (vertical) return Math.abs(w.a[0] - b.x) < Math.abs(w.a[0] - (b.x + b.w)) ? "left-hand" : "right-hand";
+  return Math.abs(w.a[1] - b.z) < Math.abs(w.a[1] - (b.z + b.d)) ? "far" : "near";
+}
 
 /** Where in the room a spot is, in the words someone would use pointing at it.
  *  "Heater somewhere else" twice over is not two options, it is one option and
@@ -114,6 +148,13 @@ export interface SolutionMetrics {
    *  asking about a smell wants to know and "0.31 contaminant" is not. Free to
    *  compute: geodesicFields already returns it alongside the temperature. */
   roomFresh: Map<string, number>;
+  /** How long the slowest part of each room stays wet, in minutes.
+   *
+   *  A steamy bathroom pins `roomFresh` to zero — the source is strong enough
+   *  that the room mean clamps — so every option card read "0% fresh" and no
+   *  option could be told from another. Minutes is also the unit this task is
+   *  actually scored in, so the card and the goal finally agree. */
+  roomDryMin: Map<string, number>;
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
   meanTargetC: number;
@@ -136,7 +177,7 @@ export interface Solution {
    *  kitchen smell showed "Studio 31.0 °C" on every card — the outdoor
    *  temperature, identical across all of them, and no help whatever in
    *  choosing between two ways of dealing with a bin. */
-  readout: "temperature" | "freshness";
+  readout: "temperature" | "freshness" | "drying";
   /** Short plain-language name for the approach. */
   label: string;
   /** What it actually does, for the option card. */
@@ -152,7 +193,12 @@ interface Strategy {
   /** Device settings by type. */
   devices: Record<string, { on: boolean; power?: number; oscillate?: boolean }>;
   interiorDoors: boolean;
-  windows: boolean;
+  /** Which exterior windows to open, by id. A LIST, not a flag: the studio task
+   *  turns entirely on opening ONE of its two windows and leaving the other
+   *  shut, and an all-or-nothing switch cannot say that — every option the
+   *  search produced there threw both open, which is the trap the task is built
+   *  to teach against. */
+  openWindowIds: string[];
   note: string;
 }
 
@@ -161,8 +207,9 @@ interface Strategy {
 /** Apply opening states. The same Opening object is referenced from plan.doors /
  *  plan.windows AND from wall.openings, so all three must get the SAME new
  *  object or the solver and the renderer disagree about what is open. */
-function withOpenings(plan: FloorPlan, interiorDoors: boolean, windows: boolean): FloorPlan {
+function withOpenings(plan: FloorPlan, interiorDoors: boolean, openWindowIds: string[]): FloorPlan {
   const next = new Map<string, Opening>();
+  const wanted = new Set(openWindowIds);
   const decide = (o: Opening): Opening => {
     // A LOCKED OPENING IS NOT THE SEARCH'S TO TOUCH. The participant's own
     // toggle is disabled for these, so proposing one is proposing something
@@ -175,7 +222,7 @@ function withOpenings(plan: FloorPlan, interiorDoors: boolean, windows: boolean)
     // The entrance is never auto-opened — people don't leave the front door wide
     // open, and letting the search use it would produce advice nobody follows.
     if (o.kind === "door" && exterior) return o;
-    const open = exterior ? windows : interiorDoors;
+    const open = exterior ? wanted.has(o.id) : interiorDoors;
     return open === o.open ? o : { ...o, open };
   };
   for (const o of [...plan.doors, ...plan.windows]) next.set(o.id, decide(o));
@@ -211,9 +258,11 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   for (let s = 0; s < fid.steps; s++) built.sim.step(0.05);
   const { sim, nx, ny, nz, ambient, inside, roomIndex, roomIds } = built;
 
-  const { temp, smell } = geodesicFields(built);
+  const { temp, smell, dry: dryF } = geodesicFields(built);
   const roomTempC = new Map<string, number>();
   for (const [id, d] of roomMeans(built, temp)) roomTempC.set(id, outdoorTemp + d);
+  const roomDryMin = new Map<string, number>();
+  for (const r of plan.rooms) roomDryMin.set(r.id, slowestDry(built, dryF, r.rect));
   const roomFresh = new Map<string, number>();
   // Against SMELL_FULL_SCALE, the same fixed reference the contamination view
   // normalises against — so a card saying "62% fresh" and the floor the user is
@@ -273,6 +322,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   return {
     roomTempC,
     roomFresh,
+    roomDryMin,
     worstTargetC: tTemps.length ? Math.max(...tTemps) : NaN, // see scoreOf: sign depends on the goal
     meanTargetC: tTemps.length ? tTemps.reduce((a, b) => a + b, 0) / tTemps.length : NaN,
     houseMeanSpeed,
@@ -286,8 +336,25 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
 /** Collapse the metric vector to one ranked number. The temperature goals use a
  *  max–min form so every requested room has to be handled, plus a draught
  *  penalty ("coolest layout that doesn't blast the room"). */
-function scoreOf(goal: OptimizeGoal, m: SolutionMetrics, targetTemps: number[]): number {
+function scoreOf(
+  goal: OptimizeGoal,
+  m: SolutionMetrics,
+  targetTemps: number[],
+  targetIds: string[] = [],
+  drying = false,
+): number {
   const draft = Math.max(0, m.targetSpeed - DRAFT_CAP) * DRAFT_PENALTY;
+  // A DRYING TASK IS SCORED ON MINUTES, not on how fast the air is moving.
+  // Ranking by air speed picked the layout that stirred the bathroom hardest,
+  // which is not the same as the one that clears the damp corner — the search
+  // moved the extract 1.5 m, reported a triumph, and left the room at 177
+  // minutes against a 95-minute goal. Optimise the number the task is graded
+  // on and the two finally point the same way.
+  if (drying) {
+    const ids = targetIds.length ? targetIds : [...m.roomDryMin.keys()];
+    const mins = ids.map((id) => m.roomDryMin.get(id)).filter((v): v is number => v !== undefined);
+    if (mins.length) return -Math.max(...mins);
+  }
   if (goal === "cool") {
     const worst = targetTemps.length ? Math.max(...targetTemps) : 0; // hottest room
     return -(worst + 0.25 * m.meanTargetC) - draft;
@@ -302,7 +369,21 @@ function scoreOf(goal: OptimizeGoal, m: SolutionMetrics, targetTemps: number[]):
     const glass = m.heaterWindowC === null ? 0 : 0.35 * Math.min(m.heaterWindowC, 24);
     return worst + 0.25 * m.meanTargetC + glass - draft;
   }
-  if (goal === "ventilate") return m.outflow * 0.02 + m.houseMeanSpeed + m.worstRoomSpeed;
+  if (goal === "ventilate") {
+    // FRESHNESS WHERE IT WAS ASKED FOR, not air speed everywhere. Scored on
+    // movement, this goal's answer was always "open every window and turn
+    // everything up" — more openings, more outflow, higher score — which is
+    // precisely the trap the studio task is built around: its second window
+    // feeds an extract two metres away and robs the first of the inflow that
+    // was crossing the room. The search cheerfully proposed it every time.
+    // Air movement stays in as a tiebreak between layouts that are equally
+    // fresh, because a stagnant room that happens to measure clean is not what
+    // anyone means by "air this place out".
+    const ids = targetIds.length ? targetIds : [...m.roomFresh.keys()];
+    const fresh = ids.map((id) => m.roomFresh.get(id)).filter((v): v is number => v !== undefined);
+    const worstFresh = fresh.length ? Math.min(...fresh) : 0;
+    return 10 * worstFresh + 0.02 * m.outflow + 0.2 * m.houseMeanSpeed;
+  }
   return m.houseMeanSpeed + 2 * m.worstRoomSpeed;
 }
 
@@ -312,10 +393,11 @@ function evaluate(
   targetIds: string[],
   outdoorTemp: number,
   fid: typeof SCREEN,
+  drying = false,
 ): { metrics: SolutionMetrics; score: number } {
   const metrics = measure(plan, targetIds, outdoorTemp, fid);
   const targetTemps = targetIds.map((id) => metrics.roomTempC.get(id)).filter((v): v is number => v !== undefined);
-  return { metrics, score: scoreOf(goal, metrics, targetTemps) };
+  return { metrics, score: scoreOf(goal, metrics, targetTemps, targetIds, drying) };
 }
 
 // ---- strategies: the discrete variables that were never searched ----
@@ -335,7 +417,7 @@ function evaluate(
  *  room's only supply and the shut-doors strategy is not offered at all. */
 function doorsMustStayOpen(goal: OptimizeGoal, plan: FloorPlan, targetIds: string[]): boolean {
   if (plan.rooms.length < 2) return false;
-  const primary = PRIMARY_OF[goal];
+  const primary = primaryFor(goal, plan);
   const served = new Set(plan.items.filter((it) => it.type === primary && it.on !== false).map((it) => it.roomId));
   const targets = targetIds.length ? targetIds : plan.rooms.map((r) => r.id);
   return targets.some((id) => !served.has(id));
@@ -397,7 +479,7 @@ function strategiesFor(
             : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
           devices,
           interiorDoors: doorsOpen,
-          windows: false,
+          openWindowIds: [],
           note: [
             doorsOpen ? "interior doors open so the air reaches every room" : "interior doors shut to concentrate it",
             "windows shut to keep the outdoor air out",
@@ -408,17 +490,48 @@ function strategiesFor(
     return out;
   }
 
-  // ventilate / circulate / balanced: the openings matter more than the power
+  // ventilate / circulate / balanced: the openings matter more than the power.
+  //
+  // SHUTTING THE WINDOWS IS NOT AN OPTION WHEN THEY ARE THE ONLY WAY IN. An
+  // extract with nothing open has no make-up air: it depressurises the room and
+  // moves nothing (see sim3d). The bathroom is the case — its door is locked
+  // shut by the task — and "windows shut, recirculating indoors" was being
+  // offered there as one of three ways to dry the room out, when it is the one
+  // arrangement guaranteed not to.
+  const canSeal = !ctx || ctx.plan.doors.some((d) => d.rooms.includes("outside") && !d.locked);
+  const windows = (ctx?.plan.windows ?? []).filter((w) => w.rooms.includes("outside") && !w.locked);
+  // WHICH windows, not whether. With two or three of them the subsets are cheap
+  // to enumerate and one of them is usually the answer; beyond that the count
+  // explodes and would starve the placement search, so fall back to the old
+  // all-or-nothing pair.
+  let sets: string[][];
+  if (windows.length === 0) sets = [[]];
+  else if (windows.length <= 3) {
+    sets = [];
+    for (let mask = (1 << windows.length) - 1; mask >= 0; mask--) {
+      const ids = windows.filter((_, i) => mask & (1 << i)).map((w) => w.id);
+      if (!ids.length && !canSeal) continue;
+      sets.push(ids);
+    }
+  } else sets = canSeal ? [windows.map((w) => w.id), []] : [windows.map((w) => w.id)];
+
+  const nameOf = (ids: string[]): string => {
+    if (ids.length === 0) return "windows shut, recirculating indoors";
+    if (ids.length === windows.length) return "every window open to purge stale air";
+    const only1 = windows.find((w) => w.id === ids[0]);
+    return `only the ${only1 ? sideOfWindow(ctx!.plan, only1) : "one"} window open`;
+  };
+
   for (const power of lockPower ? [2] : [2, 3]) {
-    for (const win of [true, false]) {
+    for (const ids of sets) {
       const devices = only({ fan: { on: true, power, oscillate: true }, supply: { on: true, power }, return: { on: true, power } });
       add({
-        id: `air${power}-${win ? "win" : "nowin"}`,
+        id: `air${power}-w${ids.join("_") || "none"}`,
         label: lockPower ? `Move ${movedNames(devices)}` : `Air movers on ${power === 3 ? "high" : "medium"}`,
         devices,
         interiorDoors: true,
-        windows: win,
-        note: win ? "windows open to purge stale air" : "windows shut, recirculating indoors",
+        openWindowIds: ids,
+        note: nameOf(ids),
       });
     }
   }
@@ -436,6 +549,7 @@ function placeDevices(
   outdoorTemp: number,
   budget: { left: number },
   allowed?: string[],
+  drying = false,
 ): { plan: FloorPlan; changes: string[]; primaryAlts: PrimaryAlt[] } {
   const wanted = allowed
     ? GOAL_DEVICES[goal].filter((t) => allowed.includes(t))
@@ -463,7 +577,7 @@ function placeDevices(
   // with a small per-strategy budget the order decides who actually gets
   // searched, and spending it on the fan while the AC sits in the wrong room
   // is the worst possible allocation.
-  const primary = PRIMARY_OF[goal];
+  const primary = primaryFor(goal, working, allowed);
   const movable = working.items
     .filter((it) => wanted.includes(it.type) && it.on !== false)
     .sort((a, b) => (b.type === primary ? 1 : 0) - (a.type === primary ? 1 : 0));
@@ -517,7 +631,7 @@ function placeDevices(
             ),
           };
           budget.left--;
-          const { score } = evaluate(trial, goal, targetIds, outdoorTemp, SCREEN);
+          const { score } = evaluate(trial, goal, targetIds, outdoorTemp, drying ? SCREEN_DRY : SCREEN, drying);
           if (it.type === primary && sweep === 1) {
             primaryAlts.push({ pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, score });
           }
@@ -595,6 +709,9 @@ export function findSolutions(
   opts: FindOptions,
 ): Solution[] {
   const want = opts.want ?? 3;
+  // A room with a moisture source is asking "how long until it is dry", not
+  // "how fresh is the air" — see roomDryMin.
+  const dryingTask = plan.items.some((it) => it.type === "damp");
   const budget = { left: opts.screenBudget ?? 48 };
   const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds });
 
@@ -606,10 +723,10 @@ export function findSolutions(
   const screened: Array<{ strategy: Strategy; plan: FloorPlan; score: number; changes: string[] }> = [];
   const altsByStrategy = new Map<string, { base: FloorPlan; alts: PrimaryAlt[] }>();
   for (const st of strategies) {
-    const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.windows);
+    const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
-    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices);
-    const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, SCREEN);
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask);
+    const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN, dryingTask);
     screened.push({ strategy: st, plan: placed, score, changes });
     altsByStrategy.set(st.id, { base: placed, alts: primaryAlts });
   }
@@ -623,7 +740,7 @@ export function findSolutions(
   if (screened.length < want) {
     const top = screened[0];
     const bank = top ? altsByStrategy.get(top.strategy.id) : undefined;
-    const primaryType = PRIMARY_OF[goal];
+    const primaryType = primaryFor(goal, plan, opts.allowedDevices);
     for (const alt of bank?.alts.slice(1) ?? []) {
       if (screened.length >= Math.max(want, 3)) break;
       const variant: FloorPlan = {
@@ -660,11 +777,11 @@ export function findSolutions(
   // screen's top 4, which this covers for want<=3.)
   const finalists = screened.slice(0, Math.max(want, 3));
   const solutions: Solution[] = finalists.map((f) => {
-    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL);
+    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask);
     const detail = [f.strategy.note, ...f.changes];
     return {
       id: f.strategy.id,
-      readout: goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
+      readout: dryingTask ? "drying" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
       label: f.strategy.label,
       detail,
       plan: f.plan,
@@ -678,10 +795,13 @@ export function findSolutions(
   // near-identical choices is worse than one answer.
   const kept: Solution[] = [];
   for (const s of solutions) {
-    const dup = kept.some(
-      (k) =>
-        Math.abs(k.metrics.meanTargetC - s.metrics.meanTargetC) < 0.25 &&
-        Math.abs(k.metrics.houseMeanSpeed - s.metrics.houseMeanSpeed) < 0.02,
+    const dup = kept.some((k) =>
+      dryingTask
+        ? Math.abs(
+            Math.max(...[...k.metrics.roomDryMin.values()]) - Math.max(...[...s.metrics.roomDryMin.values()]),
+          ) < 4
+        : Math.abs(k.metrics.meanTargetC - s.metrics.meanTargetC) < 0.25 &&
+          Math.abs(k.metrics.houseMeanSpeed - s.metrics.houseMeanSpeed) < 0.02,
     );
     if (!dup) kept.push(s);
     if (kept.length >= want) break;
@@ -726,7 +846,7 @@ export function withholdComplete(
 ): Solution[] {
   if (options.length === 0) return options;
 
-  const primary = PRIMARY_OF[goal];
+  const primary = primaryFor(goal, current);
   /** The same solution with only the primary device moved. Re-scored, not
    *  copied: the card prints the temperature the option will actually produce,
    *  and half the moves produce a different temperature from all of them. */
@@ -737,7 +857,7 @@ export function withholdComplete(
         it.type === primary ? it : current.items.find((o) => o.id === it.id) ?? it,
       ),
     };
-    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL);
+    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "drying");
     return {
       ...s,
       id: `${s.id}-partial`,

@@ -505,37 +505,47 @@ function buildBathroom(): FloorPlan {
     "Bathroom",
     rooms,
     (walls, gen, doors) => {
-      // Door on the SOUTH wall (screen-top), toward the left.
-      entranceOnTop(walls, gen, "bathroom", rooms[0].rect, doors, 0.28);
+      // Door on the NORTH wall (screen-bottom), toward the left. It used to be
+      // on the top wall, which is now the whole wet run — shower, steam, bath —
+      // so the doorway would have opened straight into the shower tray.
+      entranceOnBottom(walls, gen, "bathroom", rooms[0].rect, doors, 0.2);
     },
-    (gen, rs, openings) => {
-      const c = (r: RoomDef) => doorsForRoom(r, openings);
+    (gen, rs) => {
       const [bath] = rs;
+      // THE WET RUN IS THE TOP WALL, END TO END: shower in the top-left corner,
+      // bath across the top-right, steam rising between them. One wet wall and
+      // one dry wall reads at a glance and puts the moisture as far from the
+      // door as the room allows, so where the air has to travel to reach it is
+      // a real question rather than a formality.
+      //
+      // Placed by hand rather than with the wall helpers: the bath is turned a
+      // quarter-turn so it runs DOWN the right-hand wall instead of across the
+      // top, and `against`/`inCorner` derive the yaw from the wall they attach
+      // to, so neither can express that.
+      const W = bath.rect.w;
+      const D = bath.rect.d;
       return [
-        // The WET half is the top-right: a full-size bath across the far corner
-        // with the shower cubicle directly below it on the same wall. Putting
-        // the two together is what makes the steam one problem in one place
-        // rather than two small ones.
-        inCorner(gen, bath, "south", "end", "bathtub", [1.8, 0.6, 0.85]),
-        against(gen, bath, c(bath), "east", 0.5, "shower", [0.9, 2.0, 0.9]),
-        // The DRY half is the near wall: toilet in the corner, basin beside it.
-        inCorner(gen, bath, "north", "end", "toilet", [0.55, 0.75, 0.7]),
-        against(gen, bath, c(bath), "north", 0.67, "sink", [0.7, 0.9, 0.55]),
-        // The steam, between the bath and the shower — where it actually comes
-        // from. It used to sit in a far corner as an abstract "damp patch",
-        // which invites the question "why is that corner wet?" instead of the
-        // one the task is asking. Hot water is the source; the corner going
-        // black is the consequence.
-        // Sized to the gap the bath and the shower leave between them (z 0.91 to
-        // 1.65): any bigger and the overlap pass shoulders it out into the middle
-        // of the floor, away from the two things it is supposed to be steaming
-        // off.
-        spot(gen, bath, "damp", [0.72, 0.72, 0.72], 2.95, 1.28, 0, { category: "hvac" }),
+        // Bath: 1.8 long, rotated so its length runs along z, tucked into the
+        // top-right corner.
+        spot(gen, bath, "bathtub", [1.8, 0.6, 0.85], W - 0.5, 1.05, Math.PI / 2),
+        // Shower cubicle in the top-left corner.
+        spot(gen, bath, "shower", [0.9, 2.0, 0.9], 0.55, 0.55, 0),
+        // The DRY run is the bottom wall: toilet in the bottom-right corner,
+        // basin immediately beside it.
+        spot(gen, bath, "toilet", [0.55, 0.75, 0.7], W - 0.35, D - 0.4, Math.PI),
+        spot(gen, bath, "sink", [0.7, 0.9, 0.55], W - 1.05, D - 0.33, Math.PI),
+        // The steam, between the shower and the bath and hard against the top
+        // wall — where hot water actually puts it. It used to sit in a corner as
+        // an abstract "damp patch", which invites the question "why is that
+        // corner wet?" instead of the one the task is asking.
+        spot(gen, bath, "damp", [0.72, 0.72, 0.72], 1.75, 0.5, 0, { category: "hvac" }),
         // ONE extract vent — an EXTRACT: it pulls air out of the room, and the
         // outdoor air to replace it has to get in somewhere, which is the whole
         // reason where the window goes matters. Already fitted, always running,
         // one speed. The participant moves it; there is nothing to switch.
-        against(gen, bath, c(bath), "south", 0.28, "return", VENT_SIZE, {
+        // Starts on the top wall beside the steam, which is the bad arrangement:
+        // it and the window are then a metre apart and short-circuit.
+        spot(gen, bath, "return", VENT_SIZE, 0.55, 0.09, 0, {
           category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.05, on: true,
         }),
       ];
@@ -556,6 +566,13 @@ function buildBathroom(): FloorPlan {
     d.fixed = true;
     d.locked = true;
   }
+  // THE WINDOW MUST NOT AIR THE ROOM OUT ON ITS OWN. This task is about where
+  // the EXTRACT goes; at full strength, simply opening the window swamped that
+  // — the difference between a good vent position and a bad one shrank to a few
+  // minutes, and the participant could pass without ever thinking about the
+  // grille. Turned down, the window still supplies the make-up air that makes
+  // the extract work at all, but it no longer answers the question by itself.
+  plan.windowReach = 0.85;
   return plan;
 }
 
@@ -820,33 +837,38 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       // answer from its near misses far more cleanly than the old model did.
       //
       // Swept 432 fan placements and aims (9 x 7 spots x 8 headings), best per
-      // window choice:
-      //     everything shut, best fan           0.297
-      //     RIGHT window only, best fan         0.285   ← the trap
-      //     BOTH windows, no fan                0.326
-      //     BOTH windows, best fan              0.203   ← two is worse than one
-      //     bed-side window only, no fan        0.250
-      //     bed-side window only, best fan      0.122   ← the answer
+      // window choice. Re-measured after the short circuit was tightened so it
+      // LOOKS like a short circuit (see sim3d): an extract only cleans air that
+      // flowed through the room to reach it, so a grille fed by a window two
+      // metres away sweeps those two metres and nothing else.
+      //     everything shut, best fan           0.303
+      //     RIGHT window only, best fan         0.289   <- the trap
+      //     BOTH windows, no fan                0.340
+      //     BOTH windows, best fan              0.229   <- two is worse than one
+      //     bed-side window only, no fan        0.258
+      //     bed-side window only, best fan      0.132   <- the answer
       //
       // Opening the second window costs you twice over: it halves the make-up
       // air the bed-side window draws in, and what it draws in itself is eaten
-      // by an extract two metres away. Both windows open is still better than
-      // no fan at all (0.203 against 0.250) — the second window is a waste, not
-      // a catastrophe — but it is 66% worse than the same fan with that window
-      // shut, and it lands the wrong side of the bar while that lands well
-      // clear. Shutting it is worth more than any fan move.
+      // by an extract two metres away. Both windows open is barely better than
+      // no fan at all (0.229 against 0.258) and 73% worse than the same fan
+      // with that window shut. Shutting it is worth more than any fan move.
       //
-      // WHERE THE FAN GOES IS THE WHOLE ANSWER, and the room says so plainly:
-      // every one of the ten placements under 0.17 stands the fan at or beside
-      // the bed-side window (x 2.6-4.6, z 4.0-4.5), and every heading from that
-      // spot clears the bar — 0.122 pointed along the near wall, 0.143 aimed
-      // diagonally at the kitchen extract, 0.176 pointed straight at the
-      // kitchen. Aim it however you like; stand it in the window's inflow.
+      // WHAT THE PICTURE SHOWS, which is the point of the change: with both
+      // windows open the extract's corner and the right-hand window both stay
+      // deep violet (0.708 and 0.432 over a 0.9 m strip) while the bed-side
+      // window greens (0.220). The air coming in beside the grille goes
+      // straight back out of it; only the far window's air crosses the room.
+      // Before, that corner read pale - i.e. working - right where the lesson
+      // is that it is not.
       //
-      // 0.17 sits in the 0.143 → 0.203 gap. It clears the aimed-at-the-extract
-      // answer by 19% and rejects the best both-windows arrangement by 18% —
-      // where 0.20 rejected it by 1.5%, which is not a margin, it is a
-      // coincidence. Widest this task has had at both ends.
+      // WHERE THE FAN GOES IS THE WHOLE ANSWER: all 8 placements under 0.17
+      // stand it at or beside the bed-side window (x 2.6-3.2, z 4.5), and every
+      // heading from that spot clears the bar - 0.132 along the near wall,
+      // 0.153 aimed diagonally at the kitchen extract.
+      //
+      // 0.17 sits in the 0.161 -> 0.229 gap: 29% clear of the answer and 26%
+      // clear of the nearest non-solution. Widest this task has had.
       { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.17 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
@@ -858,14 +880,14 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     success:
       "Smell over the bed ≤ 0.17: the BOTTOM (bed-side) window open, the " +
       "right-hand one SHUT, and the fan standing in that window's inflow — any " +
-      "heading, including straight at the kitchen extract. Best measured 0.122; " +
-      "aimed at the extract, 0.143. Both levers are needed: the window alone " +
-      "reaches 0.250 and the fan alone 0.297. The right-hand window is the trap " +
+      "heading, including straight at the kitchen extract. Best measured 0.132; " +
+      "aimed at the extract, 0.153. Both levers are needed: the window alone " +
+      "reaches 0.258 and the fan alone 0.303. The right-hand window is the trap " +
       "— two metres from the extract, the air it lets in is pulled back out " +
-      "before it crosses the room, so it airs out its own corner and nothing " +
-      "else (0.285 with the best fan). Opening BOTH is the near miss at 0.203: " +
-      "better than no fan, still a fail, and the fix is to shut the second " +
-      "window rather than to move the fan again.",
+      "before it crosses the room, so its corner and the grille's both stay " +
+      "violet on screen (0.289 with the best fan). Opening BOTH is the near " +
+      "miss at 0.229: barely better than no fan, and the fix is to shut the " +
+      "second window rather than to move the fan again.",
     build: buildStudio,
   },
   humidity: {
@@ -934,39 +956,50 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // left diagonally opposite the vent where it used to be, merely opening it
     // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      // 39 → 54 min. THE OLD NUMBER HAD BECOME UNREACHABLE — worth stating
-      // plainly, because a task nobody can pass is worse than one that is easy:
-      // the participant works, submits, and is silently scored a failure no
-      // arrangement would have avoided. Re-measured over 9 extract positions
-      // with the window open:
-      //     as delivered (beside the window)   78 min   ← the problem posed
-      //     south mid                          73 min
-      //     SW corner                          73 min
-      //     west mid                           72 min
-      //     SE corner                          68 min
-      //     NW corner                          65 min
-      //     east mid                           57 min
-      //     north mid                          50 min
-      //     NE corner                          50 min   ← across from the damp
-      // Shut, the room takes 75 minutes however the extract is placed: opening
-      // the window where it was built buys 3 minutes, because the two sit a
-      // metre apart and the air crosses that metre and leaves.
+      // 64 -> 95 min. The room now discriminates properly, which it did not
+      // before: re-measured on the reworked layout (wet run along the top wall,
+      // dry run along the bottom) after three model fixes this task is the
+      // reason for --
       //
-      // 54 sits in the 50 → 57 gap, admitting the two placements that put the
-      // extract across the room from the wet corner and rejecting the seven
-      // nearer ones. That is 8% either side — thinner than the studio's 18%,
-      // and the reason is the room: 3.6 x 4.2 with a bath down one side does
-      // not leave many genuinely different places to put a vent. Widen the room
-      // before leaning on this number for anything load-bearing.
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 54 },
+      //   - A SEALED ROOM NO LONGER DRIES. An extract with every window and
+      //     door shut has no make-up air, so it depressurises the room slightly
+      //     and moves nothing. The freshness pass did not know that, so a
+      //     shut-up bathroom dried out around the grille and one placement with
+      //     the window SHUT beat several with it open -- which inverts the whole
+      //     lesson. Shut, every position now reads 180 minutes.
+      //   - An extract only cleans air that FLOWED THROUGH the room to reach
+      //     it, so a grille fed by a window a metre away sweeps that metre.
+      //   - The extract stopped taking a share of the make-up air it is fed by.
+      //
+      // Window open, extract swept over 9 positions:
+      //     as delivered (top-left, beside the window)  168 min  <- the problem
+      //     left mid                                    176 min
+      //     left lower                                  161 min
+      //     top mid                                     145 min
+      //     bottom-left                                 138 min
+      //     top-right                                   120 min
+      //     right mid                                   113 min
+      //     bottom mid                                  106 min
+      //     bottom-right                                 85 min  <- the answer
+      //
+      // The window sits on the top-left of the west wall, so the reading falls
+      // off with distance from it -- the air has to cross the whole floor, over
+      // the damp corner between the shower and the bath, to get from one to the
+      // other. 95 sits in the 85 -> 106 gap: 12% clear of the answer, 10% clear
+      // of the nearest miss, and the widest margin this task has had. It admits
+      // ONE placement, which is honest -- the far corner is the answer and the
+      // others genuinely are not.
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 95 },
     ],
     success:
-      "Everywhere in the bathroom dry within 54 minutes, measured on the slow " +
-      "90% of the room. Reached by opening the window AND putting the extract " +
-      "across the room from it — north wall or NE corner, 50 min — so the air " +
-      "has to cross the floor to get from one to the other. Shut, the room takes " +
-      "75 minutes; open but left beside the extract, 78 — the air crosses the " +
-      "metre between them, leaves, and the damp corner never clears.",
+      "Everywhere in the bathroom dry within 95 minutes, measured on the slow " +
+      "90% of the room. Two things have to happen and neither is enough alone. " +
+      "The window must be OPEN — shut, the extract has no make-up air, moves " +
+      "nothing, and every vent position reads 180 minutes. And the extract must " +
+      "go to the far corner from it, diagonally opposite: 85 min in the " +
+      "bottom-right against 168 min where it was built, a metre from the " +
+      "window. There the two short-circuit — the air crosses that metre, " +
+      "leaves, and the damp corner between the shower and the bath never clears.",
     build: buildBathroom,
   },
   smell: {
