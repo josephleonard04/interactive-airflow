@@ -16,8 +16,22 @@ import type { Objective } from "./objectives";
 // down, a refusal — resolves to an empty list, so a live study session degrades
 // to exactly today's behaviour instead of erroring in front of a participant.
 
-const BACKEND_URL =
-  ((globalThis as { OPENFOAM_BACKEND?: string }).OPENFOAM_BACKEND ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+// WHERE THE PARSER LIVES, in order of preference.
+//
+// VITE_GOAL_PARSER_URL is the deployed Cloudflare Worker (see worker/). It is
+// baked into the build, so the published page reaches a parser that is actually
+// on the internet — the local backend below is on the researcher's laptop and
+// no participant's browser can reach it.
+//
+// Falling through to 127.0.0.1 keeps development unchanged: with no Worker URL
+// set, `npm run dev` still talks to the local FastAPI backend, and with neither
+// running the whole path degrades to the offline keyword parser exactly as
+// before.
+const BACKEND_URL = (
+  (import.meta.env.VITE_GOAL_PARSER_URL as string | undefined) ??
+  (globalThis as { OPENFOAM_BACKEND?: string }).OPENFOAM_BACKEND ??
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 
 /** Why the fallback produced nothing — so the UI can tell "the parser is not
  *  running" apart from "the parser read it and there was no goal in it". Those

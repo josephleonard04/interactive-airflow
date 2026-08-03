@@ -1,0 +1,21 @@
+# The public goal parser. See worker/README.md for the three commands that
+# deploy it.
+#
+# The API key is NOT in this file and must never be — it is a Cloudflare secret,
+# set once with `wrangler secret put ANTHROPIC_API_KEY`. This file is committed;
+# secrets are not.
+
+name = "airflow-goal-parser"
+main = "src/index.ts"
+compatibility_date = "2026-08-03"
+# The Anthropic SDK is built for Node; this flag gives the Worker the Node APIs
+# it expects. Without it the deploy fails on `node:` imports at bundle time.
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Origins allowed to call this Worker, comma-separated. Leave empty to allow
+# any origin — fine while testing, worth setting before the study so the
+# endpoint is not a general-purpose way to spend your tokens.
+#
+#   ALLOWED_ORIGINS = "https://josephleonard04.github.io,http://localhost:5173"
+ALLOWED_ORIGINS = ""
