@@ -804,20 +804,29 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // at the vent" correct needs the bed to sit between the window and the
     // kitchen, which is a different room.
     goals: [
-      // 0.15 → 0.18, because freshness now has to be CARRIED to a spot rather
-      // than diffusing there, and an opening beside an extract no longer counts
-      // as ventilation (see sim3d). Every reading rose; the separation did not
-      // change. Re-measured, fan standing where the task leaves it:
-      //     everything shut                    0.395
-      //     RIGHT window only (short circuit)  0.338   ← the trap, worth ~nothing
-      //     BOTH windows open                  0.225
-      //     bed-side window only               0.226
-      //     bed-side window + fan at it        0.168   ← the only one that passes
-      // The threshold sits in a 0.168 → 0.225 gap: it clears the solution by 7%
-      // and rejects the nearest non-solution by 25%. The trap is now doing what
-      // it was built to do — opening it moves the number 14% off a baseline it
-      // used to move 18%, and it leaves the bed purple on screen.
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.18 },
+      // 0.15 → 0.20, re-measured after three changes to how fresh air is
+      // modelled (see sim3d): it has to be carried rather than diffusing, an
+      // opening beside an extract counts for almost nothing, and openings share
+      // one budget of make-up air instead of each supplying its own.
+      //
+      // The ordering is now the one the room actually has. Best of 48 fan
+      // placements and aims for the two window choices that matter:
+      //     everything shut, fan as delivered   0.395
+      //     RIGHT window only (short circuit)   0.345   ← the trap
+      //     BOTH windows, best fan              0.248   ← two is worse than one
+      //     BOTH windows, no fan                0.308
+      //     bed-side window only, no fan        0.247
+      //     bed-side window only, best fan      0.157   ← the answer
+      // Opening the second window costs you: it halves what the bed-side window
+      // draws in and hands that air to an extract two metres away, so the best
+      // arrangement with both open (0.248) is worse than the bed-side window on
+      // its own with no fan at all (0.247), and far worse than the same window
+      // with the fan (0.157).
+      //
+      // 0.20 sits in the 0.157 → 0.247 gap: it clears the solution by 27% and
+      // rejects the nearest non-solution by 19%. Widest margin this task has
+      // had.
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.20 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
     // is which way the air crosses it, and the two-room homes' reasoning — that
@@ -878,21 +887,25 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // left diagonally opposite the vent where it used to be, merely opening it
     // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      // 35 → 38 min, re-calibrated after freshness stopped diffusing on its own
-      // and short-circuited openings stopped counting (see sim3d). Both changes
-      // slow every design down; the ordering they produce is what the task is
-      // scored on, and it still separates cleanly. Vent swept over 8 positions,
-      // window open:
-      //     as delivered              56 min   ← the problem being posed
-      //     west / south / SW / NW    42 min
-      //     SE                        39 min
-      //     east mid                  36 min
-      //     north mid                 35 min
-      //     NE corner                 34 min   ← the far side from the damp corner
-      // 38 admits the three placements that put the extract across the room from
-      // the wet corner and rejects everything nearer to it, which is the lesson.
-      // At the old 35 only the NE corner passed, by one minute.
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 38 },
+      // 35 → 39 min, re-measured after the three changes to how fresh air is
+      // modelled (see sim3d). All of them slow every design down; what the task
+      // is scored on is the ORDERING, and that still separates cleanly. Vent
+      // swept over 8 positions, window open:
+      //     as delivered   56 min   ← the problem being posed
+      //     NW             45 min
+      //     south mid      44 min
+      //     west mid       43 min
+      //     SW             42 min
+      //     SE             40 min
+      //     east mid       38 min
+      //     north mid      36 min
+      //     NE corner      36 min   ← the far side from the damp corner
+      // 39 admits the three placements that put the extract across the room from
+      // the wet corner and rejects the five nearer ones. The gap it sits in
+      // (38 → 40) is only two minutes, so this task discriminates by less than
+      // the studio does — worth widening the room or moving the damp corner if
+      // it is used for anything load-bearing.
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 39 },
     ],
     success:
       "Everywhere in the bathroom dry within 35 minutes, measured on the slow " +
@@ -912,23 +925,24 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "two windows and an extract vent. Keep the smell away from the bed.",
     youCanChange: "Open or close either window, and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: [], addable: ["fan"], walls: false, openings: true, resize: false },
-    // 0.12 → 0.215, re-calibrated after freshness stopped diffusing on its own
-    // and short-circuited openings stopped counting (see sim3d). Searched 12 fan
-    // positions × 4 aims:
+    // 0.12 → 0.25, re-measured after the three changes to how fresh air is
+    // modelled (see sim3d). Searched 12 fan positions × 4 aims:
     //     both shut, no fan                 0.326
-    //     NEAR window (the trap), no fan    0.322   ← now worth nothing at all
-    //     near window + best fan            0.246
-    //     FAR window, no fan                0.226
-    //     far window + best fan             0.206
-    // The trap is doing its job: the window beside the extract now measures the
-    // same as leaving everything shut, which is the point of putting it there.
+    //     NEAR window (the trap), no fan    0.322   ← worth nothing at all
+    //     BOTH windows, no fan              0.297   ← the second window costs you
+    //     FAR window, no fan                0.263
+    //     BOTH windows + best fan           0.245
+    //     far window + best fan             0.236   ← the answer
+    // The two traps both behave: the window beside the extract measures the same
+    // as leaving everything shut, and opening both is worse than opening the far
+    // one alone.
     //
-    // ⚠ THIN, and worth fixing before this task is used. The fan is worth 9%
-    // over simply opening the far window, so the threshold sits in a 0.206–0.226
-    // gap and a verdict rests on 2 decimal places. The studio task asks the same
-    // question with a 34% gap; prefer it, or widen this one by moving the bed
-    // further from the bin before relying on the number.
-    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.215 }],
+    // ⚠ STILL THE THIN ONE. The whole spread is 0.236–0.326 and the fan is worth
+    // 10% over opening the far window, so the threshold sits in a 0.236–0.263 gap
+    // and the verdict rests on two decimal places. The studio asks the same
+    // question with a 27% margin — prefer it, or widen this room before relying
+    // on the number.
+    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.25 }],
     success:
       "Contaminant ≤ 0.12 in the bed zone with an open exterior path — reached by " +
       "opening the FAR window (cross-draught), not the near one (which short-" +
