@@ -232,8 +232,17 @@ function Fan([w, h, d]: V) {
   );
 }
 
-function Vent([w, h, d]: V) {
+/** A grille with a RUNNING LIGHT.
+ *
+ *  A vent gives nothing away by looking at it: the slats look identical whether
+ *  air is pouring through them or nothing is happening at all. In the studio
+ *  task the extract is the one part of the room the participant cannot switch,
+ *  and the brief has to say so in words — "runs all night and cannot be switched
+ *  off" — because the object itself was mute. A small indicator lamp is how
+ *  every real extract fan says it: green while it runs, red when it does not. */
+function Vent([w, h, d]: V, on = true) {
   const slats = 4;
+  const led = Math.max(0.012, Math.min(w, d) * 0.075);
   return (
     <group>
       <Box size={[w, h * 0.5, d]} position={[0, 0, 0]} color="#c7d0d8" metalness={0.3} />
@@ -241,6 +250,18 @@ function Vent([w, h, d]: V) {
         const z = -d / 2 + (d / (slats + 1)) * (i + 1);
         return <Box key={i} size={[w * 0.86, 0.012, 0.03]} position={[0, h * 0.2, z]} color="#8b95a1" />;
       })}
+      {/* On the face, off to one side of the slats. Emissive so it reads as a
+          lamp rather than a painted dot, and bright enough to see from the
+          camera distances these rooms are viewed at. */}
+      <mesh position={[w * 0.36, h * 0.22, d * 0.32]}>
+        <sphereGeometry args={[led, 12, 12]} />
+        <meshStandardMaterial
+          color={on ? "#16a34a" : "#dc2626"}
+          emissive={on ? "#22c55e" : "#ef4444"}
+          emissiveIntensity={1.6}
+          roughness={0.35}
+        />
+      </mesh>
     </group>
   );
 }
@@ -381,7 +402,7 @@ function Bin(size: V): JSX.Element {
   );
 }
 
-export function Model({ type, size }: { type: string; size: V }) {
+export function Model({ type, size, on = true }: { type: string; size: V; on?: boolean }) {
   switch (type) {
     case "bed":
       return Bed(size);
@@ -412,9 +433,9 @@ export function Model({ type, size }: { type: string; size: V }) {
     case "fan":
       return Fan(size);
     case "supply":
-      return Vent(size);
+      return Vent(size, on);
     case "return":
-      return Vent(size);
+      return Vent(size, on);
     case "shower":
       return Shower(size);
     case "damp":

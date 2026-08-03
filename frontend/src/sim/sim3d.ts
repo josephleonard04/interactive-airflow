@@ -633,8 +633,21 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  delivered to this spot per unit time, and still air delivers almost none.
    *  Giving freshness the same generous base spread meant an open window
    *  cleaned the far side of the room by itself, whether or not any air was
-   *  moving — which made the fan optional in a task about moving air. */
-  const V0_FRESH = 0.45;
+   *  moving — which made the fan optional in a task about moving air.
+   *
+   *  0.45 → 0.30 because it was still too generous to show a SHORT CIRCUIT. In
+   *  the studio the right-hand window sits ~2 m from the extract: air coming in
+   *  there is pulled straight back out and never crosses the room, so opening it
+   *  should leave the place much as it was. At 0.45 the freshness diffused far
+   *  enough on its own to clear most of the floor anyway — the picture showed a
+   *  room being aired out by a window whose air never reaches it, which is the
+   *  opposite of the lesson. Freshness now has to be carried.
+   *
+   *  Not lower than this, and the limit is the bathroom, which reads its drying
+   *  time off the same field. Best achievable design: 25 min at 0.45, 31 min at
+   *  0.30, ~36 min extrapolated at 0.20 — against a 35-minute goal. At 0.20 the
+   *  bathroom task stops being solvable at all. */
+  const V0_FRESH = 0.30;
   const costFromSources = (seeds: number[], kUp = 0, reverse = false, v0 = V0): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:

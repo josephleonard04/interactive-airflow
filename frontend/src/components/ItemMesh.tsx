@@ -70,7 +70,10 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
       </mesh>
 
       <group ref={sweepRef}>
-        <Model type={item.type} size={item.size} />
+        {/* `on` is undefined on anything that has no switch (furniture), which
+            reads as running — right for a vent, and ignored by every other
+            model. */}
+        <Model type={item.type} size={item.size} on={item.on !== false} />
       </group>
     </group>
   );

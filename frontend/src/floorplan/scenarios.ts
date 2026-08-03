@@ -730,13 +730,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "There is a fan standing by the closet, and two windows you can open.",
     goal:
       "Keep the smell away from the bed while you sleep. Keep changing things until you are " +
-      "happy with the result, then press Submit. There is no score to collect and no right " +
-      "number to hit: you decide when it is good enough.",
+      "happy with the result, then press Submit.",
     youCanChange:
       "Move the fan anywhere in the room and aim it whichever way you like, and open or close " +
       "either window. Run the simulation as many times as you like.",
     youCannotChange:
-      "You are renting, so nothing about the flat itself moves: the windows, the door and the " +
+      "You are renting, so nothing about the studio itself moves: the windows, the door and the " +
       "kitchen stay where they are. The kitchen's extract vent runs all night and cannot be " +
       "switched off, the air conditioner is broken, the fan runs on medium and cannot be turned " +
       "up, and the bin has to stay where it is. The weather outside is fixed.",
@@ -805,7 +804,19 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // at the vent" correct needs the bed to sit between the window and the
     // kitchen, which is a different room.
     goals: [
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.15 },
+      // 0.15 → 0.18, because freshness now has to be CARRIED to a spot rather
+      // than diffusing there (V0_FRESH 0.45 → 0.30 — see sim3d). Every reading
+      // rose with it; the separation the threshold has to make did not change.
+      // Re-measured on this layout, fan standing where the task leaves it:
+      //     everything shut                    0.395
+      //     RIGHT window only (short circuit)  0.323   ← the trap, still fails
+      //     right window + fan at it           0.356   ← worse than doing nothing
+      //     BOTH windows open                  0.217
+      //     bed-side window only               0.219
+      //     bed-side window + fan at it        0.159   ← passes
+      // The gap the threshold sits in is 0.159 → 0.217, so 0.18 clears the
+      // solution by 12% and rejects the nearest non-solution by 21%.
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.18 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
     // is which way the air crosses it, and the two-room homes' reasoning — that
@@ -886,7 +897,17 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "two windows and an extract vent. Keep the smell away from the bed.",
     youCanChange: "Open or close either window, and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: [], addable: ["fan"], walls: false, openings: true, resize: false },
-    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.12 }],
+    // 0.12 → 0.19, re-calibrated after freshness stopped diffusing on its own
+    // (V0_FRESH 0.45 → 0.30 — see sim3d). Searched 12 fan positions × 4 aims:
+    //     both shut, no fan                 0.326
+    //     near window (the trap) + best fan 0.215
+    //     FAR window, no fan                0.206
+    //     far window + best fan             0.179
+    // ⚠ THIN. The fan is now worth only 13% over opening the far window alone,
+    // where it used to be the difference between pass and fail, and the search
+    // was coarse. If this task is used in the study, re-run a finer sweep first
+    // — the margin between 0.179 and 0.206 is not much to hang a verdict on.
+    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.19 }],
     success:
       "Contaminant ≤ 0.12 in the bed zone with an open exterior path — reached by " +
       "opening the FAR window (cross-draught), not the near one (which short-" +
