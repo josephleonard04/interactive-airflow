@@ -577,6 +577,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
               before,
               targetIds,
               s.outdoorTemp,
+              3,
+              allowedDevices,
             )
           : found;
         get().logEvent("goal", {

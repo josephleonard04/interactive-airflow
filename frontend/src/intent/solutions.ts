@@ -79,13 +79,28 @@ const PRIMARY_PREF: Record<OptimizeGoal, string[]> = {
   balanced: ["ac", "fan", "supply"],
 };
 
-/** The first preferred device this plan actually has and this task allows. */
+/** The first preferred device this plan actually has and this task allows.
+ *
+ *  `allowed` IS A HARD LIMIT, NOT A PREFERENCE. It used to be one clause of a
+ *  fallback chain, so when the preferred device was disallowed the next line
+ *  quietly picked it anyway. On the one-room flat — where the participant may
+ *  move the fan and nothing else — that returned the extract, and the gallery
+ *  offered "return only — a first step": a card proposing to relocate a grille
+ *  bolted to the wall, which on inspection also moved nothing at all, because
+ *  the half-step keeps the primary device's move and reverts the rest, and the
+ *  extract had never been moved in the first place.
+ *
+ *  `on: false` no longer hides a device either. The fan in that flat starts
+ *  switched off, so it was not "present"; the strategy layer switches it on a
+ *  moment later, which is exactly the move being proposed. */
 function primaryFor(goal: OptimizeGoal, plan: FloorPlan, allowed?: string[]): string {
   const pref = PRIMARY_PREF[goal];
-  const here = new Set(plan.items.filter((it) => it.on !== false).map((it) => it.type));
+  const permitted = (t: string) => !allowed || allowed.includes(t);
+  const here = new Set(plan.items.map((it) => it.type));
   return (
-    pref.find((t) => here.has(t) && (!allowed || allowed.includes(t))) ??
-    pref.find((t) => here.has(t)) ??
+    pref.find((t) => here.has(t) && permitted(t)) ??
+    pref.find((t) => permitted(t)) ??
+    allowed?.[0] ??
     pref[0]
   );
 }
@@ -517,9 +532,28 @@ function strategiesFor(
 
   const nameOf = (ids: string[]): string => {
     if (ids.length === 0) return "windows shut, recirculating indoors";
-    if (ids.length === windows.length) return "every window open to purge stale air";
-    const only1 = windows.find((w) => w.id === ids[0]);
-    return `only the ${only1 ? sideOfWindow(ctx!.plan, only1) : "one"} window open`;
+    if (ids.length === windows.length)
+      return windows.length === 1 ? "the window open to purge stale air" : "every window open to purge stale air";
+    const named = ids
+      .map((id) => windows.find((w) => w.id === id))
+      .filter((w): w is Opening => !!w)
+      .map((w) => `${sideOfWindow(ctx!.plan, w)} window`);
+    return `only the ${named.join(" and ")} open`;
+  };
+  /** WHICH WINDOWS IS THE DECISION, so it belongs in the title. With the power
+   *  dial locked every option's label collapsed to "Move the fan" — three cards
+   *  with the same heading, differing only in a line of small print, which is
+   *  the "why did it suggest the same thing twice" complaint in another form. */
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  const titleFor = (base: string, ids: string[]): string => {
+    if (sets.length <= 1) return base;
+    if (ids.length === 0) return `Windows shut — ${base.toLowerCase()}`;
+    if (ids.length === windows.length && windows.length > 1) return `Both windows open — ${base.toLowerCase()}`;
+    const named = ids
+      .map((id) => windows.find((w) => w.id === id))
+      .filter((w): w is Opening => !!w)
+      .map((w) => sideOfWindow(ctx!.plan, w));
+    return cap(`${named.join(" + ")} window open — ${base.toLowerCase()}`);
   };
 
   for (const power of lockPower ? [2] : [2, 3]) {
@@ -527,7 +561,10 @@ function strategiesFor(
       const devices = only({ fan: { on: true, power, oscillate: true }, supply: { on: true, power }, return: { on: true, power } });
       add({
         id: `air${power}-w${ids.join("_") || "none"}`,
-        label: lockPower ? `Move ${movedNames(devices)}` : `Air movers on ${power === 3 ? "high" : "medium"}`,
+        label: titleFor(
+          lockPower ? `Move ${movedNames(devices)}` : `Air movers on ${power === 3 ? "high" : "medium"}`,
+          ids,
+        ),
         devices,
         interiorDoors: true,
         openWindowIds: ids,
@@ -843,10 +880,14 @@ export function withholdComplete(
   targetIds: string[],
   outdoorTemp: number,
   want = 3,
+  /** The same hard limit findSolutions was given. Without it the half-step
+   *  option resolved its own primary device from scratch and could name one the
+   *  task forbids — see primaryFor. */
+  allowedDevices?: string[],
 ): Solution[] {
   if (options.length === 0) return options;
 
-  const primary = primaryFor(goal, current);
+  const primary = primaryFor(goal, current, allowedDevices);
   /** The same solution with only the primary device moved. Re-scored, not
    *  copied: the card prints the temperature the option will actually produce,
    *  and half the moves produce a different temperature from all of them. */
