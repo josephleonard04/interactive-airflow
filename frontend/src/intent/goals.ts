@@ -1,4 +1,5 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
+import { dampColor } from "../viz/smell";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean, zoneSpeed } from "../sim/sim3d";
 
@@ -116,9 +117,13 @@ export function windowZone(plan: FloorPlan, roomId: string): Rect | null {
 /** Swatch colour for a drying time: dry sand through to a wet blue-grey. Same
  *  ramp the bathroom mini-map uses, so the picture and the map agree. */
 export function drySwatch(minutes: number): string {
+  // Same two ends as the 3D humidity view (viz/smell DAMP_STOPS): amber for dry,
+  // navy for streaming. It used to fade from near-white to a blue-grey, which on
+  // a pale panel made "dry" and "nothing here" the same colour — and put the
+  // mini-map on a different scale from the floor it is a map of.
   const t = Math.min(1, Math.max(0, (minutes - 10) / 110)); // 10 min dry → 120 min soaked
-  const lerp = (a: number, b: number) => Math.round(a + (b - a) * t);
-  return `rgb(${lerp(246, 74)},${lerp(238, 127)},${lerp(222, 158)})`;
+  const c = dampColor(t);
+  return `rgb(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)})`;
 }
 
 /** Swatch colour for a temperature state in the task picture.
