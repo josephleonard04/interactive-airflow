@@ -5,6 +5,7 @@ import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { candidateSpots } from "./searchOptimize";
 import { DEVICE_LABEL, GOAL_DEVICES, ROOM_BOUND_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
+import type { FlowHint } from "./sketch";
 
 // Find SEVERAL good configurations for a goal, not one.
 //
@@ -399,7 +400,11 @@ function scoreOf(
     const worstFresh = fresh.length ? Math.min(...fresh) : 0;
     return 10 * worstFresh + 0.02 * m.outflow + 0.2 * m.houseMeanSpeed;
   }
-  return m.houseMeanSpeed + 2 * m.worstRoomSpeed;
+  // circulate: air moving WHERE IT WAS ASKED FOR. Scored on the house mean and
+  // the worst room, "move air from here to there" was satisfied by stirring any
+  // room at all — so a fan parked in the destination outscored one actually
+  // pushing air through the doorway into it.
+  return 2 * m.targetSpeed + 0.5 * m.houseMeanSpeed;
 }
 
 function evaluate(
@@ -587,6 +592,7 @@ function placeDevices(
   budget: { left: number },
   allowed?: string[],
   drying = false,
+  flow?: FlowHint,
 ): { plan: FloorPlan; changes: string[]; primaryAlts: PrimaryAlt[] } {
   const wanted = allowed
     ? GOAL_DEVICES[goal].filter((t) => allowed.includes(t))
@@ -634,12 +640,42 @@ function placeDevices(
       if (!it) continue;
       // A room-bound device (the heater) is searched only within the room it is
       // already standing in — see ROOM_BOUND_DEVICES.
+      //
+      // A device the user drew an ARROW for is searched in the room the arrow
+      // STARTS in, not the room it points at. That room is still the target and
+      // still what the score measures; it is simply not where you stand a fan
+      // that has to push air into it.
+      const flowRoom = flow?.fromRoomId
+        ? base.rooms.find((r) => r.id === flow.fromRoomId) ?? null
+        : null;
+      // The arrow's tail is a CONSTRAINT, not a preference. Merely searching
+      // that room first changed nothing: every room was still searched and the
+      // score — which rewards air movement wherever it happens — still preferred
+      // standing the fan in the middle of the destination, where it stirs that
+      // room nicely and carries nothing into it. The user drew where the air
+      // should come from; that is not a hint to be outvoted.
       const rooms = ROOM_BOUND_DEVICES.includes(it.type)
         ? roomOrder.filter((r) => r.id === it.roomId)
-        : roomOrder;
+        : flowRoom
+          ? [flowRoom]
+          : roomOrder;
       let best: { pos: Vec3; rot: number; roomId: string; roomName: string; osc?: boolean; score: number } | null = null;
       for (const room of rooms) {
-        for (const cand of candidateSpots(room, it.type, working.wallHeight, openings)) {
+        const spots = candidateSpots(room, it.type, working.wallHeight, openings);
+        // The tail of the arrow itself, aimed along it: the spot the user
+        // literally pointed at, which no generic candidate list contains.
+        if (flow && room.id === flow.fromRoomId && !ROOM_BOUND_DEVICES.includes(it.type)) {
+          const yaw = Math.atan2(flow.to[0] - flow.from[0], flow.to[1] - flow.from[1]);
+          spots.unshift({
+            position: [flow.from[0], it.position[1], flow.from[1]],
+            rotationY: yaw,
+            roomId: room.id,
+            roomName: room.name,
+            axis: "area",
+            oscillate: false,
+          });
+        }
+        for (const cand of spots) {
           if (budget.left <= 0) break;
           const others = working.items.filter((o) => o.id !== it.id);
           const wallBound = cand.axis !== "area";
@@ -732,6 +768,9 @@ export interface FindOptions {
    *  high" when the control is hidden proposes something the participant
    *  cannot do. */
   lockPower?: boolean;
+  /** Where a drawn arrow starts and ends. A fan is placed at the TAIL, aimed
+   *  along it — see FlowHint. */
+  flow?: FlowHint;
 }
 
 /**
@@ -762,7 +801,7 @@ export function findSolutions(
   for (const st of strategies) {
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
-    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask);
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow);
     const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN, dryingTask);
     screened.push({ strategy: st, plan: placed, score, changes });
     altsByStrategy.set(st.id, { base: placed, alts: primaryAlts });
