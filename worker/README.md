@@ -43,6 +43,22 @@ argument, so it never lands in your shell history.
 npx wrangler secret put ANTHROPIC_API_KEY
 ```
 
+Paste the key at the `Enter a secret value:` prompt and press Enter. Nothing is
+echoed as you paste — that is the prompt hiding it, not a failed paste. A `×`
+instead of a success line means it was cancelled or submitted empty; run it
+again. If pasting into the prompt is unreliable in your terminal, pipe it
+instead — this does put the key in your shell history, so clear it afterwards:
+
+```bash
+"sk-ant-YOUR-KEY" | npx wrangler secret put ANTHROPIC_API_KEY
+```
+
+Confirm it landed:
+
+```bash
+npx wrangler secret list
+```
+
 **4. Deploy.**
 
 ```bash
