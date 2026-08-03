@@ -95,7 +95,10 @@ The sim modules are importable headlessly (Node or browser console):
 
 - Solver is a coarse prototype (real-time first); OpenFOAM path is generated but untested against a live install yet.
 - Scalar fields beyond temp/smell/noise (CO₂, humidity, PM2.5) are planned.
-- Intent parsing is a seed lexicon (deterministic, checkable); LLM parsing is future work.
+- Intent parsing is a dictionary — deterministic, offline, and checkable. Every
+  sentence it reads maps to the same small objective vocabulary the solver
+  scores, so a goal is never free-form text. What it cannot read it says so
+  about, and the sentence is logged verbatim as the coverage gap.
 - The optimizer is greedy + budgeted, not globally optimal — every change is user-reviewable by design.
 - `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
 

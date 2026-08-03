@@ -1,5 +1,4 @@
 import type { FloorPlan, Rect } from "../floorplan/types";
-import type { LlmReason } from "./llmGoal";
 import { computeRoomLevels } from "../sim/roomLevels";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
 import { parseGoal, type Objective } from "./objectives";
@@ -183,18 +182,17 @@ export function evaluateObjectives(
   return objs.map((o) => evaluateObjective(o, plan, ctx));
 }
 
-/** Keyword parser first; only if it matches nothing, ask the backend's LLM.
- *  Phrases the seed vocabulary already knows never incur a call, so the common
- *  path stays instant and offline. */
-export async function resolveObjectives(
+/** Turn a typed sentence into objectives. THE dictionary — there is no second
+ *  parser behind it and no network call, so this is the whole language layer:
+ *  what it does not know, the tool does not understand. It is synchronous and
+ *  offline by construction, which is also what lets a session run with no
+ *  backend, no key, and no internet. */
+export function resolveObjectives(
   text: string,
   plan: FloorPlan,
   sketch?: Rect | null,
   opts: { outdoorTemp?: number } = {},
-): Promise<{ objectives: Objective[]; usedLLM: boolean; reason: LlmReason }> {
-  const keyword = parseGoal(text, plan, sketch ?? null, opts);
-  if (keyword.length) return { objectives: keyword, usedLLM: false, reason: "ok" };
-  const { parseGoalWithLLM } = await import("./llmGoal");
-  const r = await parseGoalWithLLM(text, plan, sketch ?? null);
-  return { objectives: r.objectives, usedLLM: true, reason: r.reason };
+): Objective[] {
+  return parseGoal(text, plan, sketch ?? null, opts);
 }
+

@@ -39,59 +39,155 @@ function sketchRoom(plan: FloorPlan, sketch: Rect) {
 }
 
 // word → (scalar, direction). First match wins.
+// THE DICTIONARY IS THE WHOLE LANGUAGE LAYER. There is no model behind it, so a
+// word missing here is a sentence the tool cannot read. The lists below are
+// therefore deliberately over-inclusive: every way this project's four problems
+// get described — heat, cold, smell, stale air, damp, draught — plus the
+// devices, rooms and objects they get described in terms of.
+
+/** Which sensation a temperature word NAMES — not which direction it asks for.
+ *  "hot" and "cool" both name a temperature; whether the person wants more or
+ *  less of it depends on whether they are describing a problem or a wish. */
+type Sensation = "warmth" | "chill";
+
+interface TempWord {
+  words: string[];
+  sensation: Sensation;
+  /** True for words that can only ever be a complaint. Nobody asks a room to be
+   *  sweltering or freezing; naming one always means "fix this". */
+  alwaysComplaint?: boolean;
+}
+
+/**
+ * COMPLAINT OR WISH — the distinction the old dictionary did not make, and the
+ * reason it read every one of these backwards:
+ *
+ *     "my room is much colder than the rest"   → asked for it to be COLDER
+ *     "the bedroom is too cold"                → colder
+ *     "it's freezing in here"                  → colder
+ *     "it gets so hot in the afternoon"        → hotter
+ *
+ * Each names the PROBLEM, and the old lexicon mapped the problem word straight
+ * to a goal — so the optimizer went looking for a layout that made the cold
+ * bedroom colder, confidently and silently. The first of those four is the one
+ * real participant sentence we have.
+ *
+ * A word preceded by a complaint marker ("it is", "gets", "too", "way") is
+ * describing what is wrong, and the goal is its OPPOSITE. A word preceded by a
+ * wish marker ("keep", "make", "I want") is the goal itself. Wish wins when both
+ * appear, because "I want it less cold" is a wish about a complaint.
+ */
+const TEMP_WORDS: TempWord[] = [
+  {
+    sensation: "warmth",
+    words: [
+      "warm", "warmer", "warmth", "warming", "hot", "hotter", "heat", "heated",
+      "heating", "heater", "radiator", "cozy", "cosy", "toasty", "snug",
+    ],
+  },
+  {
+    sensation: "warmth",
+    alwaysComplaint: true,
+    words: [
+      "boiling", "roasting", "baking", "sweltering", "scorching", "stifling",
+      "muggy", "sweaty", "sweating", "overheating", "overheated", "humid",
+      "sauna", "oven", "furnace", "tropical", "burning", "blazing",
+    ],
+  },
+  {
+    sensation: "chill",
+    words: [
+      "cool", "cooler", "cooling", "cold", "colder", "chilly", "chill",
+      "aircon", "airconditioning", "airconditioner", "conditioner", "conditioning",
+      "refreshing",
+    ],
+  },
+  {
+    sensation: "chill",
+    alwaysComplaint: true,
+    words: ["freezing", "frigid", "icy", "nippy", "frosty", "arctic", "shivering", "shiver"],
+  },
+];
+
+/** Everything whose direction does not depend on framing. A smell is never
+ *  wanted and a draught on your face is never asked for, so these map straight
+ *  through however they are phrased. */
 const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> = [
   {
+    // The complaint: something in here smells.
     words: [
-      "cool", "cold", "chilly", "cooler", "chill", "colder", "freezing", "frigid",
-      "icy", "aircon", "airconditioning", "airconditioner", "refreshing",
-      "sweltering", "boiling", "roasting", "sweaty", "muggy", "overheating",
-      "overheated", "baking", "sticky",
-    ],
-    scalar: "temperature",
-    direction: "low",
-  },
-  {
-    words: [
-      "warm", "hot", "cozy", "cosy", "toasty", "warmer", "heat", "heater",
-      "heating", "warmth", "radiator", "snug",
-    ],
-    scalar: "temperature",
-    direction: "high",
-  },
-  {
-    words: [
-      "smell", "smells", "smelly", "odor", "odour", "stink", "stinks", "stench",
-      "fume", "fumes", "smoke", "stinky", "reek", "reeks", "whiff",
-      "rubbish", "garbage", "trash", "waste",
+      "smell", "smells", "smelly", "smelling", "odor", "odour", "odors",
+      "odours", "stink", "stinks", "stinky", "stench", "reek", "reeks",
+      "reeking", "whiff", "pong", "fume", "fumes", "smoke", "smoky", "rotten",
+      "rotting", "rancid", "garbage", "rubbish", "trash", "waste", "sewage",
+      "drains", "cooking",
     ],
     scalar: "contaminant",
     direction: "low",
   },
-  // "I want FRESH AIR near the bed", "it's STUFFY in here". Same objective as a
-  // smell goal — get the air in this spot exchanged — said from the other end:
-  // one names what is wrong, the other names what is wanted. The lexicon knew
-  // only the complaint, so the most natural way to ask for ventilation matched
-  // nothing at all and the search quietly refused to run.
   {
+    // The wish, said from the other end: I want the air in here exchanged.
+    // Same objective — one names what is wrong, the other what is wanted.
     words: [
-      "fresh", "freshen", "stuffy", "stale", "airless", "musty", "stifling",
-      "ventilate", "ventilation", "ventilated", "airy", "breathe", "breathable",
-      "circulate", "circulation", "suffocating", "clammy", "mould", "mold",
-      "condensation",
+      "fresh", "freshen", "freshening", "stuffy", "stale", "airless", "musty",
+      "fusty", "ventilate", "ventilation", "ventilated", "airy", "breathe",
+      "breathing", "breathable", "circulate", "circulation", "circulating",
+      "suffocating", "sticky", "clammy",
     ],
     scalar: "contaminant",
     direction: "low",
   },
-  // draft / air movement on a spot — "no air blowing on my face", "too drafty"
   {
+    // Damp is the same field: moisture the airflow has to carry out.
+    words: [
+      "damp", "dampness", "moisture", "moist", "condensation", "mould", "mold",
+      "mouldy", "moldy", "mildew", "soggy", "drying", "dries", "steamy", "steam",
+    ],
+    scalar: "contaminant",
+    direction: "low",
+  },
+  {
+    // Air you can feel on you. "More breeze" is handled at the call site.
     words: [
       "draft", "drafty", "draught", "draughty", "breeze", "breezy", "blowing",
-      "blow", "blows", "wind", "windy", "gust", "gusty",
+      "blow", "blows", "blown", "wind", "windy", "gust", "gusts", "gusty",
+      "gale", "airflow",
     ],
     scalar: "draft",
     direction: "low",
   },
 ];
+
+/** Said before a temperature word, these mark it as the PROBLEM. */
+const COMPLAINT_MARKERS = [
+  "too", "so", "very", "really", "extremely", "unbearably", "always", "still",
+  "is", "was", "are", "were", "gets", "getting", "feels", "feeling", "seems",
+  "keeps", "much", "way", "far", "bit", "quite", "super", "insanely",
+  "ridiculously", "constantly",
+];
+
+/** Said before a temperature word, these mark it as the GOAL. Checked first —
+ *  "I want it less cold" is a wish, not a complaint. */
+const WISH_MARKERS = [
+  "keep", "make", "makes", "want", "wants", "need", "needs", "get", "turn",
+  "bring", "prefer", "like", "would", "please", "let", "have", "enough", "up",
+  "down", "more", "stay", "staying", "remain", "warmer", "cooler",
+];
+
+/** "Get rid of this" — whatever framing follows, the sensation named is the
+ *  thing to remove. "don't make it cold", "less heat", "without making it cold". */
+const REMOVERS = [
+  // "not" rather than "dont": the normalizer expands every n't contraction, so
+  // "don't want it cold" arrives as "do not want it cold".
+  "not", "dont", "stop", "avoid", "prevent", "without", "less", "reduce",
+  "lower", "no", "rid",
+];
+
+/** Negates the PREDICATE rather than the situation: "never gets warm" is a
+ *  complaint about the ABSENCE of warmth, so it cancels the complaint reading
+ *  and lands back on wanting warmth. Distinct from REMOVERS, which negate the
+ *  situation and do not compound with a complaint. */
+const PREDICATE_NEGATERS = ["never", "isnt", "arent", "wasnt", "wont", "doesnt", "cant", "hardly", "barely"];
 
 /** Words that say a place should be BETTER without saying which way.
  *
@@ -104,9 +200,10 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
  *  With no weather to hand it falls back to ventilation, the one reading that is
  *  never actively wrong: "make it nicer in here" always at least means fresher. */
 const COMFORT_WORDS = [
-  "nice", "nicer", "comfortable", "comfy", "comfort", "pleasant", "bearable",
-  "liveable", "livable", "decent", "sleep", "sleeping", "rest", "relax",
-  "relaxing", "nap", "napping",
+  "nice", "nicer", "comfortable", "comfy", "comfort", "comfortably", "pleasant",
+  "bearable", "liveable", "livable", "decent", "better", "sleep", "sleeping",
+  "asleep", "rest", "resting", "relax", "relaxing", "nap", "napping",
+  "unbearable", "uncomfortable", "horrible", "awful", "miserable",
 ];
 /** At or above this outdoors, "make it comfortable" means cool it down. */
 const COMFORT_HOT_C = 26;
@@ -116,18 +213,75 @@ const COMFORT_COLD_C = 16;
 /** Every single word the dictionary knows, for spelling and compound repair. */
 const VOCABULARY: Vocabulary = {
   words: new Set<string>([
+    ...TEMP_WORDS.flatMap((t) => t.words),
     ...LEXICON.flatMap((l) => l.words),
     ...COMFORT_WORDS,
+    ...COMPLAINT_MARKERS,
+    ...WISH_MARKERS,
+    ...REMOVERS,
+    ...PREDICATE_NEGATERS,
     "bedroom", "bed", "kitchen", "living", "lounge", "bathroom", "bath",
     "toilet", "washroom", "studio", "apartment", "flat", "house", "home",
-    "couch", "sofa", "desk", "table", "closet", "window", "windows", "door",
-    "doors", "vent", "extract", "area", "spot", "zone", "corner", "region",
-    "place", "night", "morning", "here", "inside",
+    "room", "rooms", "couch", "sofa", "desk", "table", "closet", "wardrobe",
+    "pillow", "window", "windows", "door", "doors", "vent", "extract", "fan",
+    "area", "spot", "zone", "corner", "region", "place", "side", "night",
+    "morning", "afternoon", "evening", "summer", "winter", "here", "inside",
+    "shower", "bin", "fridge", "sink", "stove", "wet", "dry", "air",
+    // ORDINARY WORDS, LISTED SO THEY ARE LEFT ALONE. A word the dictionary does
+    // not know gets spelling-repaired toward one it does, and at edit distance 1
+    // that quietly turns ordinary English into a goal: "making" became "baking",
+    // a heat complaint, so "without MAKING the bedroom cold" asked to cool it.
+    // Anything in this set passes through untouched.
+    "make", "makes", "making", "made", "want", "wants", "wanted", "wanting",
+    "keep", "keeps", "keeping", "kept", "get", "gets", "getting", "got",
+    "put", "putting", "take", "takes", "taking", "going", "doing", "being",
+    "been", "have", "has", "had", "having", "will", "would", "could", "should",
+    "please", "this", "that", "these", "those", "with", "from", "into", "onto",
+    "over", "under", "near", "beside", "next", "some", "any", "every", "when",
+    "while", "after", "before", "during", "because", "since", "then", "than",
+    "they", "them", "their", "there", "what", "which", "where", "how", "why",
+    "much", "many", "most", "same", "other", "another", "around", "through",
+    "always", "night", "nights", "really", "little", "whole", "part", "side",
   ]),
 };
 
-// Objects a draft goal can point at ("no air blowing on the bed"): the item's
-// footprint becomes the evaluation region. Matched before room words.
+
+/** Does this sentence want the OPPOSITE of the sensation the word names?
+ *
+ *  Four framings, in the order they are checked:
+ *
+ *    "warm enough"            → wish for more of it   (the `enough` idiom)
+ *    "don't make it cold"     → remove it             (REMOVERS)
+ *    "it gets too cold"       → complaint, so oppose  (COMPLAINT_MARKERS)
+ *    "never gets warm"        → complaint of ABSENCE, so back to wanting it
+ */
+function wantsOpposite(text: string, at: number, word: string, entry: TempWord): boolean {
+  const after = text.slice(at + word.length + 1).trim().split(/\s+/).slice(0, 2);
+  // "warm enough" / "not warm enough" both ask for MORE warmth. The idiom
+  // outranks everything else, including the negation sitting in front of it.
+  if (after.includes("enough")) return false;
+
+  // Eight, not five: "I do not want the room to be hot" puts the negation six
+  // tokens back. Wide enough for a normal clause, short enough that a negation
+  // about something else earlier in the sentence does not reach across.
+  const before = text.slice(0, at).trim().split(/\s+/).slice(-8);
+  if (before.some((w) => REMOVERS.includes(w))) return true;
+
+  let complaint = entry.alwaysComplaint ?? false;
+  if (!complaint) {
+    // Nearest marker wins; a wish marker beats a complaint one at equal distance.
+    for (let i = before.length - 1; i >= 0; i--) {
+      if (WISH_MARKERS.includes(before[i])) break;
+      if (COMPLAINT_MARKERS.includes(before[i])) {
+        complaint = true;
+        break;
+      }
+    }
+  }
+  if (before.some((w) => PREDICATE_NEGATERS.includes(w))) complaint = !complaint;
+  return complaint;
+}
+
 const OBJECT_WORDS: Array<{ words: string[]; type: string }> = [
   { words: ["bed"], type: "bed" },
   { words: ["couch", "sofa"], type: "couch" },
@@ -217,6 +371,53 @@ export function parseGoal(
     ? { id: sk.id, name: `the area you marked (${sk.name})`, rect: sketch! }
     : null;
 
+  /** Emit a temperature objective for a word found at `at`, in `direction`.
+   *  Compound goals ("cool the living room AND the bedroom") become one
+   *  objective per room — emitting only the nearest silently dropped the other,
+   *  and the verdict then reported success while half the home was untouched. */
+  function emitTemperature(at: number, direction: Direction) {
+    const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
+    const useSketch = sketchTarget && (deictic || !named);
+    if (!useSketch && rooms.length > 1 && CONJOINED.test(t)) {
+      for (const r of rooms) {
+        out.push({
+          raw: text,
+          scalar: "temperature",
+          direction,
+          regionId: r.id,
+          regionName: r.name,
+          regionRect: null,
+        });
+      }
+      return;
+    }
+    const region = useSketch ? sketchTarget : named;
+    out.push({
+      raw: text,
+      scalar: "temperature",
+      direction,
+      regionId: region?.id ?? null,
+      regionName: region?.name ?? null,
+      regionRect: useSketch ? sketch : null,
+    });
+  }
+
+  // Temperature first, each word's direction decided from how it is framed.
+  for (const entry of TEMP_WORDS) {
+    const hits = entry.words
+      .map((w) => ({ w, at: t.indexOf(` ${w}`) }))
+      .filter((h) => h.at >= 0)
+      .sort((a, b) => a.at - b.at);
+    if (hits.length === 0) continue;
+    const { w, at } = hits[0];
+    // A complaint asks for the OPPOSITE of the sensation it names: "too hot"
+    // wants cooling, "much colder than the rest" wants warming.
+    const opposite = wantsOpposite(t, at, w, entry);
+    const direction: Direction =
+      entry.sensation === "warmth" ? (opposite ? "low" : "high") : opposite ? "high" : "low";
+    emitTemperature(at, direction);
+  }
+
   for (const lex of LEXICON) {
     const idx = lex.words.map((w) => t.indexOf(` ${w}`)).filter((i) => i >= 0);
     if (idx.length === 0) continue;
@@ -255,35 +456,6 @@ export function parseGoal(
         regionId: obj ? obj.roomId : useSketch ? sketchTarget!.id : named?.id ?? null,
         regionName: obj ? obj.name : useSketch ? sketchTarget!.name : named?.name ?? null,
         regionRect: obj ? obj.rect : useSketch ? sketch : null,
-      });
-    } else {
-      const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
-      const useSketch = sketchTarget && (deictic || !named);
-      if (!useSketch && rooms.length > 1 && CONJOINED.test(t)) {
-        // "cool the living room AND the bedroom" is two goals, not one. Emitting
-        // only the nearest room silently dropped the other one — the optimizer
-        // then cooled a single room and the verdict reported success while the
-        // other room was untouched.
-        for (const r of rooms) {
-          out.push({
-            raw: text,
-            scalar: "temperature",
-            direction: lex.direction,
-            regionId: r.id,
-            regionName: r.name,
-            regionRect: null,
-          });
-        }
-        continue;
-      }
-      const region = useSketch ? sketchTarget : named;
-      out.push({
-        raw: text,
-        scalar: "temperature",
-        direction: lex.direction,
-        regionId: region?.id ?? null,
-        regionName: region?.name ?? null,
-        regionRect: useSketch ? sketch : null,
       });
     }
   }

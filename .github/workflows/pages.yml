@@ -54,16 +54,10 @@ jobs:
       # address on the open web, and address-harvesting bots read JS. Base64 is
       # not a secret — anyone who wants it can decode it — it just means the
       # page is not free food for a regex.
-      # The goal-parser URL is a repository VARIABLE, not a secret — it is a
-      # public endpoint address and ends up in the bundle either way. The
-      # Anthropic key it holds never leaves Cloudflare. Unset = the published
-      # app runs on the offline keyword parser alone, which is a valid way to
-      # ship: the free-text fallback fails silently into it.
       - name: Build
         env:
           RESEARCHER_EMAIL: ${{ secrets.RESEARCHER_EMAIL }}
           VITE_LOG_ENDPOINT: ${{ secrets.LOG_ENDPOINT }}
-          VITE_GOAL_PARSER_URL: ${{ vars.GOAL_PARSER_URL }}
         run: |
           if [ -n "$RESEARCHER_EMAIL" ]; then
             export VITE_RESEARCHER_EMAIL_B64="$(printf '%s' "$RESEARCHER_EMAIL" | base64 -w0)"
