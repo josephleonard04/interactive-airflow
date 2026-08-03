@@ -496,7 +496,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   applyBestSolution: (goalText) => {
     const s = get();
-    return s.applyObjectives(parseGoal(goalText, s.plan, s.sketchRegion), goalText);
+    return s.applyObjectives(parseGoal(goalText, s.plan, s.sketchRegion, { outdoorTemp: s.outdoorTemp }), goalText);
   },
 
   applyObjectives: (objs, goalText) => {

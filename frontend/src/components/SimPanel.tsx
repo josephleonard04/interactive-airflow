@@ -101,7 +101,7 @@ export function SimPanel() {
     const livePlan = useSceneStore.getState().plan;
     // Keyword parser first; the LLM only sees wording it couldn't match, so a
     // recognised phrase is still resolved instantly and offline.
-    const { objectives } = await resolveObjectives(text, livePlan, sketchRegion);
+    const { objectives } = await resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
     const evals = evaluateObjectives(objectives, livePlan, { outdoorTemp });
     useSceneStore.getState().logEvent("check", {
       text,
@@ -130,7 +130,7 @@ export function SimPanel() {
     setResolving(true);
     try {
       const livePlan = useSceneStore.getState().plan;
-      const { objectives, usedLLM, reason } = await resolveObjectives(t, livePlan, sketchRegion);
+      const { objectives, usedLLM, reason } = await resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp });
       if (!objectives.length) {
         useSceneStore.getState().logEvent("unparsed", { text: t, usedLLM, reason });
         setUnparsed({ text: t.slice(0, 60), reason });
