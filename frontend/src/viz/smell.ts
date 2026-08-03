@@ -92,3 +92,61 @@ export function smellColor(normalized: number): RGB {
 export function smellGradientCss(): string {
   return `linear-gradient(90deg,${STOPS.map((s) => `${rgbCss(s.rgb)} ${(s.u * 100).toFixed(0)}%`).join(",")})`;
 }
+
+// ---------------------------------------------------------------- humidity
+
+// THE BATHROOM NEEDS ITS OWN RAMP. It reads the same contaminant field as the
+// kitchen tasks, and drawing it in the same teal-to-magenta made a damp corner
+// look like it smelled — the participant sees violet, reaches for the word
+// "smell", and the task is about mould. Moisture has its own visual language:
+// dry is a warm, sandy neutral (the colour of a wall that has dried out), wet is
+// a deep blue-teal (the colour of one that has not). Same fixed normalisation
+// and the same S-curve, so the two views behave identically and only the hues
+// differ; the drying-time mini-map already uses this sand-to-blue pairing, so
+// the 3D floor and the little plan beside it finally agree.
+const DAMP_STOPS: Array<{ u: number; rgb: RGB }> = [
+  { u: 0.0, rgb: { r: 0.98, g: 0.95, b: 0.87 } }, // dry sand
+  { u: 0.16, rgb: { r: 0.93, g: 0.89, b: 0.76 } }, // still dry
+  { u: 0.34, rgb: { r: 0.78, g: 0.85, b: 0.8 } }, // turning
+  { u: 0.5, rgb: { r: 0.55, g: 0.76, b: 0.8 } }, // damp
+  { u: 0.68, rgb: { r: 0.3, g: 0.6, b: 0.75 } }, // wet
+  { u: 0.85, rgb: { r: 0.14, g: 0.42, b: 0.63 } }, // soaked
+  { u: 1.0, rgb: { r: 0.06, g: 0.25, b: 0.45 } }, // streaming — at the source
+];
+
+function ramp(stops: typeof DAMP_STOPS, normalized: number): RGB {
+  const u = scurve(Math.max(0, Math.min(1, normalized)));
+  if (u <= 0) return stops[0].rgb;
+  const last = stops[stops.length - 1];
+  if (u >= 1) return last.rgb;
+  for (let i = 1; i < stops.length; i++) {
+    const b = stops[i];
+    if (u > b.u) continue;
+    const a = stops[i - 1];
+    const t = (u - a.u) / (b.u - a.u);
+    return {
+      r: a.rgb.r + (b.rgb.r - a.rgb.r) * t,
+      g: a.rgb.g + (b.rgb.g - a.rgb.g) * t,
+      b: a.rgb.b + (b.rgb.b - a.rgb.b) * t,
+    };
+  }
+  return last.rgb;
+}
+
+export function dampColor(normalized: number): RGB {
+  return ramp(DAMP_STOPS, normalized);
+}
+
+export function dampGradientCss(): string {
+  return `linear-gradient(90deg,${DAMP_STOPS.map((s) => `${rgbCss(s.rgb)} ${(s.u * 100).toFixed(0)}%`).join(",")})`;
+}
+
+/** The ramp for whichever contaminant a task is about. One place to ask, so a
+ *  view, its legend and an option card cannot end up on different scales. */
+export function contaminantColor(normalized: number, kind: "smell" | "humidity"): RGB {
+  return kind === "humidity" ? dampColor(normalized) : smellColor(normalized);
+}
+
+export function contaminantGradientCss(kind: "smell" | "humidity"): string {
+  return kind === "humidity" ? dampGradientCss() : smellGradientCss();
+}

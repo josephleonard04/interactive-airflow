@@ -142,9 +142,20 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
   },
   {
     // Damp is the same field: moisture the airflow has to carry out.
+    //
+    // "dry this room" read as nothing at all, because `dry` was listed as an
+    // ordinary word to protect it from spelling repair and never as a goal —
+    // so the one verb people reach for first in a bathroom was the one word
+    // the dictionary would not act on. The mould words are here for the same
+    // reason: nobody says "reduce the contaminant", they say the wall is going
+    // black.
     words: [
-      "damp", "dampness", "moisture", "moist", "condensation", "mould", "mold",
-      "mouldy", "moldy", "mildew", "soggy", "drying", "dries", "steamy", "steam",
+      "damp", "dampness", "moisture", "moist", "condensation", "condensating",
+      "mould", "mold", "mouldy", "moldy", "mildew", "soggy", "sodden",
+      "drying", "dries", "dried", "dry", "drier", "dryer", "steamy", "steam",
+      "steaming", "sweating", "humidity", "wet", "wetness", "wetter", "clammy",
+      "black", "blackening", "blotch", "blotches", "stain", "stains",
+      "stained", "staining", "peeling", "flaking", "spores", "musty",
     ],
     scalar: "contaminant",
     direction: "low",
@@ -192,6 +203,14 @@ const REMOVERS = [
  *  situation and do not compound with a complaint. */
 const PREDICATE_NEGATERS = ["never", "isnt", "arent", "wasnt", "wont", "doesnt", "cant", "hardly", "barely"];
 
+/** "Move air from the kitchen to the bedroom" is a request for MORE air
+ *  movement, and the draught list reads every airflow word as a complaint —
+ *  the one phrasing the sketch tool exists to express was the one the typed
+ *  box could not read at all. These verbs, applied to air, always mean "get
+ *  some of it moving", so they flip the draught goal's direction the way
+ *  "more" and "stronger" already do. */
+const MOVE_AIR = /\b(move|moving|bring|brings|bringing|push|pushing|send|sending|get|getting|carry|carrying|circulate|circulating|blow|blowing)\b[^.]{0,18}\b(air|breeze|draft|draught|airflow|wind)\b/;
+
 /** Words that say a place should be BETTER without saying which way.
  *
  *  "I want the bed area to be nice to sleep" names no physical quantity at all,
@@ -229,7 +248,8 @@ const VOCABULARY: Vocabulary = {
     "pillow", "window", "windows", "door", "doors", "vent", "extract", "fan",
     "area", "spot", "zone", "corner", "region", "place", "side", "night",
     "morning", "afternoon", "evening", "summer", "winter", "here", "inside",
-    "shower", "bin", "fridge", "sink", "stove", "wet", "dry", "air",
+    "shower", "bin", "fridge", "sink", "stove", "air", "tub", "bath", "basin",
+    "tile", "tiles", "ceiling", "wall", "corner", "patch", "mirror",
     // ORDINARY WORDS, LISTED SO THEY ARE LEFT ALONE. A word the dictionary does
     // not know gets spelling-repaired toward one it does, and at edit distance 1
     // that quietly turns ordinary English into a goal: "making" became "baking",
@@ -451,7 +471,9 @@ export function parseGoal(
       const obj = objectRegion(t, plan);
       const named = nearestRoom(rooms, at) ?? rooms[0] ?? null;
       const useSketch = !obj && sketchTarget && (deictic || !named);
-      const more = /\b(more|stronger|breezy|breezier)\b/.test(t) && !NEGATERS.some((n) => t.includes(n));
+      const more =
+        (/\b(more|stronger|breezy|breezier)\b/.test(t) || MOVE_AIR.test(t)) &&
+        !NEGATERS.some((n) => t.includes(n));
       out.push({
         raw: text,
         scalar: "draft",
@@ -461,6 +483,29 @@ export function parseGoal(
         regionRect: obj ? obj.rect : useSketch ? sketch : null,
       });
     }
+  }
+
+  // "MOVE AIR FROM THE KITCHEN TO THE BEDROOM" names no quantity at all — no
+  // temperature, no smell, no draught — so every list above shrugs at it, and
+  // it is one of the most natural things a person says about airflow. It is
+  // also exactly what the sketch tool's arrow means, so the typed box was
+  // refusing a request the drawn one accepts.
+  //
+  // The DESTINATION is the goal. "From the kitchen to the bedroom" wants air
+  // arriving in the bedroom; grounding it to the kitchen would aim the fan at
+  // the wrong end of the sentence, so the room introduced by "to" wins and the
+  // last room named is the fallback.
+  if (!out.some((o) => o.scalar === "draft") && MOVE_AIR.test(t)) {
+    const dest = destinationRoom(t, rooms);
+    const useSketch = sketchTarget && (deictic || !dest);
+    out.push({
+      raw: text,
+      scalar: "draft",
+      direction: "high",
+      regionId: useSketch ? sketchTarget!.id : dest?.id ?? null,
+      regionName: useSketch ? sketchTarget!.name : dest?.name ?? null,
+      regionRect: useSketch ? sketch : null,
+    });
   }
 
   // Nothing named a quantity — but the sentence may still have asked for one.
@@ -494,6 +539,28 @@ export function parseGoal(
     });
   }
   return out;
+}
+
+/** The room a "move air to X" sentence is aiming AT. Prefers the room right
+ *  after "to"/"into"/"toward", then the last room named — a sentence that
+ *  mentions two rooms is almost always naming the source first. */
+function destinationRoom(
+  t: string,
+  rooms: Array<{ id: string; name: string; type: RoomType; at: number }>,
+) {
+  if (rooms.length === 0) return null;
+  for (const cue of [" to ", " into ", " toward ", " towards ", " over to "]) {
+    let from = 0;
+    for (;;) {
+      const i = t.indexOf(cue, from);
+      if (i < 0) break;
+      const after = i + cue.length;
+      const r = rooms.find((rm) => rm.at >= after - 1 && rm.at <= after + 14);
+      if (r) return r;
+      from = i + cue.length;
+    }
+  }
+  return rooms[rooms.length - 1];
 }
 
 function nearestRoom(rooms: Array<{ id: string; name: string; at: number }>, at: number) {

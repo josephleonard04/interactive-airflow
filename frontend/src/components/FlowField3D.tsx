@@ -4,7 +4,7 @@ import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
 import { flowColor, tempColor } from "../viz/temperature";
-import { SMELL_FULL_SCALE, smellColor } from "../viz/smell";
+import { SMELL_FULL_SCALE, contaminantColor } from "../viz/smell";
 import { computeNoiseField } from "../sim/noise";
 import { useSceneStore } from "../scene/store";
 import { applyFieldToSim } from "../engine/accurate";
@@ -56,6 +56,13 @@ export function FlowField3D() {
   const accurate = useSceneStore((s) => s.accurate);
   const airflowStyle = useSceneStore((s) => s.airflowStyle);
   const outdoorTemp = useSceneStore((s) => s.outdoorTemp);
+  // Which contaminant this task is about, so the floor is drawn on the ramp
+  // that matches the word in the tab. The same field carries kitchen odour in
+  // one task and bathroom moisture in another, and painting mould magenta
+  // invites the participant to reason about a smell.
+  const contaminantKind = useSceneStore((s) => (s.scenarioId === "humidity" ? "humidity" : "smell")) as
+    | "humidity"
+    | "smell";
   const setRoomTemps = useSceneStore((s) => s.setRoomTemps);
 
   const built = useMemo(() => buildSim3D(plan), [plan]);
@@ -314,9 +321,9 @@ export function FlowField3D() {
           // Contaminant. EVERY interior column is drawn, including the clean
           // ones: air that has been swept clear is the result the task is
           // after, and leaving it uncoloured meant half of what the participant
-          // achieved never appeared on screen. Fresh reads mint, the source
-          // reads magenta — see viz/smell.
-          const c = smellColor(colSum[q] / colN[q] / SMELL_FULL_SCALE);
+          // achieved never appeared on screen. A smell task reads mint to
+          // magenta, a humidity task sand to deep blue — see viz/smell.
+          const c = contaminantColor(colSum[q] / colN[q] / SMELL_FULL_SCALE, contaminantKind);
           r = c.r; g = c.g; b = c.b;
         }
         const [wx, , wz] = cellCenter(i, 0, k);
@@ -328,7 +335,7 @@ export function FlowField3D() {
     haze.geometry.setDrawRange(0, n);
     (haze.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     (haze.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-  }, [built, mode, hazePos, hazeCol, outdoorTemp]);
+  }, [built, mode, hazePos, hazeCol, outdoorTemp, contaminantKind]);
 
   useEffect(() => { if (ready) computeHaze(); }, [ready, computeHaze]);
 

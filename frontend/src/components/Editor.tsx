@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { ventMountY } from "../floorplan/catalog";
 import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
 import { useSceneStore } from "../scene/store";
 import type { Opening, Rect, Vec2, Vec3, WallSeg } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { FlowField3D } from "./FlowField3D";
 import { ItemMesh } from "./ItemMesh";
+
+/** Wall items whose height is not the participant's to choose — see the drag
+ *  handler. Both are ceiling-level grilles in every real installation. */
+const VENT_TYPES = ["supply", "return"];
 
 type Side = "north" | "south" | "east" | "west";
 interface RoomEdge {
@@ -181,13 +186,25 @@ function DragController({ offset }: { offset: Vec3 }) {
         // and use the cursor's Y (clamped to keep the item on the wall).
         const sh = item.size[1];
         const wallH = plan.wallHeight;
-        const normal = edge.axis === "x" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
-        const lineWorld = edge.axis === "x" ? edge.line + offset[2] : edge.line + offset[0];
-        const wallPlane = new THREE.Plane(normal, -lineWorld);
-        const wp = new THREE.Vector3();
-        let cy = worldY0;
-        if (ray.ray.intersectPlane(wallPlane, wp)) {
-          cy = Math.min(wallH - sh / 2 - 0.02, Math.max(sh / 2 + 0.02, wp.y));
+        let cy: number;
+        if (VENT_TYPES.includes(item.type)) {
+          // A VENT LIVES JUST UNDER THE CEILING AND NOWHERE ELSE. Letting the
+          // cursor's height carry it meant a grille could be dragged to
+          // mid-wall or down by the skirting, which is not where extract vents
+          // are fitted and quietly changes the physics — height decides whether
+          // it pulls the warm, damp air off the top of the room or the cool
+          // layer at the floor. The drag is a question about WHICH WALL, so the
+          // height is pinned and only the wall and the slide along it move.
+          cy = ventMountY(wallH);
+        } else {
+          const normal = edge.axis === "x" ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+          const lineWorld = edge.axis === "x" ? edge.line + offset[2] : edge.line + offset[0];
+          const wallPlane = new THREE.Plane(normal, -lineWorld);
+          const wp = new THREE.Vector3();
+          cy = worldY0;
+          if (ray.ray.intersectPlane(wallPlane, wp)) {
+            cy = Math.min(wallH - sh / 2 - 0.02, Math.max(sh / 2 + 0.02, wp.y));
+          }
         }
         setPosition(draggingId, [cx, cy, cz], edge.rot);
         return;

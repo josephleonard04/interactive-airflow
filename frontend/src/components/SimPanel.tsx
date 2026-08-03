@@ -6,7 +6,8 @@ import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
-import { smellColor, smellGradientCss } from "../viz/smell";
+import { contaminantGradientCss, smellColor } from "../viz/smell";
+import { drySwatch } from "../intent/goals";
 import { SketchCanvas } from "./SketchCanvas";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -466,6 +467,22 @@ function SolutionOptions({
               // Every card on the studio task read "Studio 31.0 °C" — the same
               // outdoor number three times over, telling the participant nothing
               // about the thing they asked about.
+              if (o.readout === "drying") {
+                const m = o.metrics.roomDryMin.get(id);
+                return (
+                  <span
+                    key={id}
+                    style={{
+                      fontSize: 11, padding: "2px 6px", borderRadius: 999,
+                      border: "1px solid var(--line)",
+                      background: m != null ? drySwatch(m) : "transparent",
+                    }}
+                    title={`${nameOf(id)} — predicted time for the slowest part to dry`}
+                  >
+                    {nameOf(id)} {m == null ? "—" : m >= 179 ? "stays wet" : `dry in ~${Math.round(m)} min`}
+                  </span>
+                );
+              }
               if (o.readout === "freshness") {
                 const f = o.metrics.roomFresh.get(id);
                 return (
@@ -657,7 +674,7 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>
           {contaminant === "Humidity" ? "Moisture in the air" : "Contaminant concentration"}
         </div>
-        <div style={{ height: 11, borderRadius: 6, background: smellGradientCss() }} />
+        <div style={{ height: 11, borderRadius: 6, background: contaminantGradientCss(contaminant === "Humidity" ? "humidity" : "smell") }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
           <span>{contaminant === "Humidity" ? "Dry" : "Fresh air"}</span>
           <span>{contaminant === "Humidity" ? "Damp" : "Strongest smell"}</span>
