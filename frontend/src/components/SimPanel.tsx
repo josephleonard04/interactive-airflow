@@ -6,7 +6,7 @@ import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
-import { smellGradientCss } from "../viz/smell";
+import { smellColor, smellGradientCss } from "../viz/smell";
 import { SketchCanvas } from "./SketchCanvas";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -462,6 +462,26 @@ function SolutionOptions({
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{o.detail.join(" · ")}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "6px 0 7px" }}>
             {(targets.length ? targets : rooms.map((r) => r.id)).map((id) => {
+              // A task about a bin gets a freshness reading, not a temperature.
+              // Every card on the studio task read "Studio 31.0 °C" — the same
+              // outdoor number three times over, telling the participant nothing
+              // about the thing they asked about.
+              if (o.readout === "freshness") {
+                const f = o.metrics.roomFresh.get(id);
+                return (
+                  <span
+                    key={id}
+                    style={{
+                      fontSize: 11, padding: "2px 6px", borderRadius: 999,
+                      border: "1px solid var(--line)",
+                      background: f != null ? rgbCss(smellColor(1 - f)) : "transparent",
+                    }}
+                    title={`${nameOf(id)} — predicted freshness (100% = swept clean)`}
+                  >
+                    {nameOf(id)} {f != null ? `${Math.round(f * 100)}% fresh` : "—"}
+                  </span>
+                );
+              }
               const t = o.metrics.roomTempC.get(id);
               return (
                 <span

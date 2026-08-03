@@ -1,6 +1,7 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Vec3 } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, zoneMean } from "../sim/sim3d";
+import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { candidateSpots } from "./searchOptimize";
 import { DEVICE_LABEL, GOAL_DEVICES, ROOM_BOUND_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
@@ -64,6 +65,43 @@ const PRIMARY_OF: Record<OptimizeGoal, string> = {
   balanced: "ac",
 };
 
+/** One place the goal's primary device was tried, with its screening score. */
+interface PrimaryAlt {
+  pos: Vec3;
+  rot: number;
+  roomId: string;
+  roomName: string;
+  score: number;
+}
+/** Two suggested spots closer than this are the same suggestion (m). */
+const ALT_MIN_APART = 1.0;
+
+/** Where in the room a spot is, in the words someone would use pointing at it.
+ *  "Heater somewhere else" twice over is not two options, it is one option and
+ *  a shrug — the card has to say which spot it means or the participant has to
+ *  apply each one to find out. */
+function spotName(plan: FloorPlan, roomId: string, pos: Vec3): string {
+  const room = plan.rooms.find((r) => r.id === roomId);
+  if (!room) return "another spot";
+  const near = (o: Opening) => {
+    const cx = (o.a[0] + o.b[0]) / 2;
+    const cz = (o.a[1] + o.b[1]) / 2;
+    return Math.hypot(cx - pos[0], cz - pos[2]);
+  };
+  const win = plan.windows.filter((o) => o.rooms.includes(roomId)).sort((a, b) => near(a) - near(b))[0];
+  if (win && near(win) < 1.2) return "under the window";
+  const door = plan.doors.filter((o) => o.rooms.includes(roomId)).sort((a, b) => near(a) - near(b))[0];
+  if (door && near(door) < 1.2) return "beside the doorway";
+  const { x, z, w, d } = room.rect;
+  const fx = (pos[0] - x) / w;
+  const fz = (pos[2] - z) / d;
+  const edge = Math.min(fx, 1 - fx, fz, 1 - fz);
+  if (edge > 0.28) return "out in the middle of the room";
+  const vert = Math.min(fz, 1 - fz) < Math.min(fx, 1 - fx);
+  if (vert) return fz < 0.5 ? "against the far wall" : "against the near wall";
+  return fx < 0.5 ? "against the left-hand wall" : "against the right-hand wall";
+}
+
 /** Air speed over a target room above which people notice a draught (m/s). */
 const DRAFT_CAP = 0.35;
 const DRAFT_PENALTY = 8;
@@ -71,6 +109,11 @@ const DRAFT_PENALTY = 8;
 export interface SolutionMetrics {
   /** Absolute °C per room. */
   roomTempC: Map<string, number>;
+  /** How fresh the air is per room, 0..1 (1 = swept clean). The contaminant
+   *  field read the other way round, because "40% fresh" is the thing a person
+   *  asking about a smell wants to know and "0.31 contaminant" is not. Free to
+   *  compute: geodesicFields already returns it alongside the temperature. */
+  roomFresh: Map<string, number>;
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
   meanTargetC: number;
@@ -89,6 +132,11 @@ export interface SolutionMetrics {
 
 export interface Solution {
   id: string;
+  /** Which number the option card should print for each room. A task about a
+   *  kitchen smell showed "Studio 31.0 °C" on every card — the outdoor
+   *  temperature, identical across all of them, and no help whatever in
+   *  choosing between two ways of dealing with a bin. */
+  readout: "temperature" | "freshness";
   /** Short plain-language name for the approach. */
   label: string;
   /** What it actually does, for the option card. */
@@ -116,6 +164,13 @@ interface Strategy {
 function withOpenings(plan: FloorPlan, interiorDoors: boolean, windows: boolean): FloorPlan {
   const next = new Map<string, Opening>();
   const decide = (o: Opening): Opening => {
+    // A LOCKED OPENING IS NOT THE SEARCH'S TO TOUCH. The participant's own
+    // toggle is disabled for these, so proposing one is proposing something
+    // they physically cannot carry out — and in the winter task it proposed
+    // opening two windows onto a 2 °C night, which reads as broken advice
+    // however the numbers land. The UI already honoured `locked`; the search
+    // did not, so the two disagreed about what the task allows.
+    if (o.locked) return o;
     const exterior = o.rooms.includes("outside");
     // The entrance is never auto-opened — people don't leave the front door wide
     // open, and letting the search use it would produce advice nobody follows.
@@ -156,9 +211,16 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   for (let s = 0; s < fid.steps; s++) built.sim.step(0.05);
   const { sim, nx, ny, nz, ambient, inside, roomIndex, roomIds } = built;
 
-  const temp = geodesicFields(built).temp;
+  const { temp, smell } = geodesicFields(built);
   const roomTempC = new Map<string, number>();
   for (const [id, d] of roomMeans(built, temp)) roomTempC.set(id, outdoorTemp + d);
+  const roomFresh = new Map<string, number>();
+  // Against SMELL_FULL_SCALE, the same fixed reference the contamination view
+  // normalises against — so a card saying "62% fresh" and the floor the user is
+  // looking at cannot disagree about how bad it is.
+  for (const [id, v] of roomMeans(built, smell)) {
+    roomFresh.set(id, Math.max(0, Math.min(1, 1 - v / SMELL_FULL_SCALE)));
+  }
 
   let heaterWindowC: number | null = null;
   for (const it of plan.items) {
@@ -210,6 +272,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
 
   return {
     roomTempC,
+    roomFresh,
     worstTargetC: tTemps.length ? Math.max(...tTemps) : NaN, // see scoreOf: sign depends on the goal
     meanTargetC: tTemps.length ? tTemps.reduce((a, b) => a + b, 0) / tTemps.length : NaN,
     houseMeanSpeed,
@@ -257,7 +320,33 @@ function evaluate(
 
 // ---- strategies: the discrete variables that were never searched ----
 
-function strategiesFor(goal: OptimizeGoal, lockPower = false, allowed?: string[]): Strategy[] {
+/** Would shutting the interior doors cut a target room off from the only thing
+ *  that can serve it?
+ *
+ *  The winter task is the case that forced this. The heater is room-bound (it
+ *  lives in the living room and the search may not carry it next door — see
+ *  ROOM_BOUND_DEVICES), the targets are BOTH rooms, and "interior doors shut to
+ *  concentrate it" therefore passes the living room by sealing the bedroom at
+ *  the outdoor 2 °C. The score notices, but only after the fact: the option is
+ *  still built, still shown, and still reads as advice. It is not advice, it is
+ *  a way of failing half the request, and nobody would follow it.
+ *
+ *  So: if a target room has no primary device of its own, the doorway is that
+ *  room's only supply and the shut-doors strategy is not offered at all. */
+function doorsMustStayOpen(goal: OptimizeGoal, plan: FloorPlan, targetIds: string[]): boolean {
+  if (plan.rooms.length < 2) return false;
+  const primary = PRIMARY_OF[goal];
+  const served = new Set(plan.items.filter((it) => it.type === primary && it.on !== false).map((it) => it.roomId));
+  const targets = targetIds.length ? targetIds : plan.rooms.map((r) => r.id);
+  return targets.some((id) => !served.has(id));
+}
+
+function strategiesFor(
+  goal: OptimizeGoal,
+  lockPower = false,
+  allowed?: string[],
+  ctx?: { plan: FloorPlan; targetIds: string[] },
+): Strategy[] {
   /** Strip device settings the task does not let anyone change, so a strategy
    *  never quietly switches something the participant cannot reach. */
   const only = (devices: Strategy["devices"]): Strategy["devices"] => {
@@ -289,8 +378,9 @@ function strategiesFor(goal: OptimizeGoal, lockPower = false, allowed?: string[]
     // it is the opposite of the goal, and suggesting it to someone trying to
     // warm a room in winter reads as broken advice however the numbers land.
     // Interior doors are still searched: those move heat between rooms.
+    const doorStates = ctx && doorsMustStayOpen(goal, ctx.plan, ctx.targetIds) ? [true] : [true, false];
     for (const power of lockPower ? [2] : [2, 3]) {
-      for (const doorsOpen of [true, false]) {
+      for (const doorsOpen of doorStates) {
         const devices = only({
           [dev]: { on: true, power },
           [other]: { on: false },
@@ -346,7 +436,7 @@ function placeDevices(
   outdoorTemp: number,
   budget: { left: number },
   allowed?: string[],
-): { plan: FloorPlan; changes: string[] } {
+): { plan: FloorPlan; changes: string[]; primaryAlts: PrimaryAlt[] } {
   const wanted = allowed
     ? GOAL_DEVICES[goal].filter((t) => allowed.includes(t))
     : GOAL_DEVICES[goal];
@@ -377,6 +467,13 @@ function placeDevices(
   const movable = working.items
     .filter((it) => wanted.includes(it.type) && it.on !== false)
     .sort((a, b) => (b.type === primary ? 1 : 0) - (a.type === primary ? 1 : 0));
+  // Every spot the PRIMARY device was tried in, so the caller can offer the
+  // runner-ups as real alternatives. When a task pins the power, locks the
+  // windows and bolts the heater to one room — the winter task does all three —
+  // placement is the ONLY variable left, so a gallery built from strategies
+  // alone collapses to a single card. The alternatives have to come from where
+  // things go, because that is the entire question being asked.
+  let primaryAlts: PrimaryAlt[] = [];
 
   // Two sweeps: after the second device moves, the first one's best spot may
   // have changed. One pass could never see that (research report §1.3).
@@ -421,6 +518,9 @@ function placeDevices(
           };
           budget.left--;
           const { score } = evaluate(trial, goal, targetIds, outdoorTemp, SCREEN);
+          if (it.type === primary && sweep === 1) {
+            primaryAlts.push({ pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, score });
+          }
           if (!best || score > best.score) {
             best = { pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, osc: cand.oscillate, score };
           }
@@ -443,7 +543,18 @@ function placeDevices(
       if (moved && sweep === 1) changes.push(`${DEVICE_LABEL[it.type] ?? it.type} → ${best.roomName}`);
     }
   }
-  return { plan: working, changes };
+  // Best first, and only spots that are meaningfully APART — two candidates
+  // 20 cm from each other are the same advice twice, which is exactly what the
+  // gallery was accused of showing.
+  primaryAlts.sort((a, b) => b.score - a.score);
+  const spread: PrimaryAlt[] = [];
+  for (const a of primaryAlts) {
+    if (spread.some((k) => Math.hypot(k.pos[0] - a.pos[0], k.pos[2] - a.pos[2]) < ALT_MIN_APART)) continue;
+    spread.push(a);
+    if (spread.length >= 4) break;
+  }
+  primaryAlts = spread;
+  return { plan: working, changes, primaryAlts };
 }
 
 // ---- top level ----
@@ -485,7 +596,7 @@ export function findSolutions(
 ): Solution[] {
   const want = opts.want ?? 3;
   const budget = { left: opts.screenBudget ?? 48 };
-  const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices);
+  const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds });
 
   // Split the screening budget EVENLY across strategies. A single shared
   // counter let the first strategy consume everything and left the rest with no
@@ -493,12 +604,52 @@ export function findSolutions(
   const perStrategy = Math.max(4, Math.floor(budget.left / strategies.length));
 
   const screened: Array<{ strategy: Strategy; plan: FloorPlan; score: number; changes: string[] }> = [];
+  const altsByStrategy = new Map<string, { base: FloorPlan; alts: PrimaryAlt[] }>();
   for (const st of strategies) {
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.windows);
     const slice = { left: perStrategy };
-    const { plan: placed, changes } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices);
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices);
     const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, SCREEN);
     screened.push({ strategy: st, plan: placed, score, changes });
+    altsByStrategy.set(st.id, { base: placed, alts: primaryAlts });
+  }
+
+  // WHEN THERE IS ONLY ONE STRATEGY, THE ALTERNATIVES ARE PLACEMENTS. A task
+  // that pins the power, locks the windows and bolts the primary device to one
+  // room leaves exactly one strategy — and a gallery built from strategies then
+  // has one card in it, on the task where "where should this go?" IS the whole
+  // question. So the runner-up spots for the primary device become options in
+  // their own right, each a complete plan the participant can apply and compare.
+  if (screened.length < want) {
+    const top = screened[0];
+    const bank = top ? altsByStrategy.get(top.strategy.id) : undefined;
+    const primaryType = PRIMARY_OF[goal];
+    for (const alt of bank?.alts.slice(1) ?? []) {
+      if (screened.length >= Math.max(want, 3)) break;
+      const variant: FloorPlan = {
+        ...bank!.base,
+        items: bank!.base.items.map((it) =>
+          it.type === primaryType && it.on !== false
+            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId }
+            : it,
+        ),
+      };
+      const where = spotName(plan, alt.roomId, alt.pos);
+      screened.push({
+        strategy: {
+          ...top!.strategy,
+          id: `${top!.strategy.id}-alt${screened.length}`,
+          label: `${DEVICE_LABEL[primaryType] ?? primaryType} ${where}`,
+          // The strategy note is identical on every one of these — same doors,
+          // same windows — so repeating it three times just pushes the one line
+          // that differs off the bottom of the card.
+          note: `In ${alt.roomName}, ${where}`,
+        },
+        plan: variant,
+        score: alt.score,
+        changes: [],
+      });
+    }
   }
 
   // Re-score the finalists at display fidelity, so the numbers we SHOW are the
@@ -511,7 +662,15 @@ export function findSolutions(
   const solutions: Solution[] = finalists.map((f) => {
     const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL);
     const detail = [f.strategy.note, ...f.changes];
-    return { id: f.strategy.id, label: f.strategy.label, detail, plan: f.plan, metrics, score };
+    return {
+      id: f.strategy.id,
+      readout: goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
+      label: f.strategy.label,
+      detail,
+      plan: f.plan,
+      metrics,
+      score,
+    };
   });
   solutions.sort((a, b) => b.score - a.score);
 
@@ -582,10 +741,14 @@ export function withholdComplete(
     return {
       ...s,
       id: `${s.id}-partial`,
+      // ITS OWN LABEL, or the gallery shows two cards reading "Move the fan"
+      // with no way to tell which is which — the strategy label describes the
+      // strategy, and this option is deliberately only part of one.
+      label: `${DEVICE_LABEL[primary] ?? primary} only — a first step`,
       plan,
       metrics,
       score,
-      detail: [`${DEVICE_LABEL[primary] ?? primary} only — the rest is yours to work out`],
+      detail: [`Just the ${(DEVICE_LABEL[primary] ?? primary).toLowerCase()} moved — the rest is yours to work out`],
     };
   };
 

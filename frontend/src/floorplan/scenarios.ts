@@ -378,8 +378,15 @@ function buildWinter(): FloorPlan {
   // The whole envelope is pinned — doors and every window. This task is about
   // where the heat goes, not about redesigning the building, and leaving the
   // glazing draggable gave the participant a second, unrelated puzzle to solve
-  // at the same time. Openings can still be opened and closed.
+  // at the same time.
   for (const o of [...plan.doors, ...plan.windows]) o.fixed = true;
+  // AND THE WINDOWS STAY SHUT. It is 2 °C outside. Opening a window is not a
+  // heating strategy, it is the opposite of one, and leaving the toggle live
+  // meant both the participant and the placement search could spend the task on
+  // a move nobody would make in February — the search actually proposed opening
+  // both of them. The interior door stays free: that one moves heat between the
+  // two rooms, which is the question this task is asking.
+  for (const w of plan.windows) w.locked = true;
   return plan;
 }
 
@@ -636,11 +643,13 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "There is no score to collect and no right number to hit: you decide when it is good enough.",
     youCanChange:
       "Move the heater and the fan anywhere in the home, aim the fan, and open or close " +
-      "the doors and windows. Run the simulation as many times as you like.",
+      "the door between the two rooms. Run the simulation as many times as you like.",
     youCannotChange:
       "The walls, doors and windows are already built — you cannot move them, add new " +
-      "ones or take any away. The heater and the fan both run on medium and cannot be " +
-      "turned up. The weather outside is fixed.",
+      "ones or take any away. The windows stay shut: it is far too cold out to open one, " +
+      "and this task is about where the heat goes rather than how much of it you throw " +
+      "away. The heater and the fan both run on medium and cannot be turned up. The " +
+      "weather outside is fixed.",
     tools: { movable: ["heater", "fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
     // Bands, not floors. Living rooms sit in the ASHRAE 55 winter comfort zone
     // (~20–24 °C); a bedroom is conventionally kept cooler, so it takes the WHO
