@@ -835,10 +835,67 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
   const SC_LAG = 12;      // seconds of head start lost by an opening ON the grille
   const SC_LAMBDA = 2.0;  // metres over which that penalty decays
   const dVent = ventSeeds.length ? bfs(ventSeeds) : null;
+
+  /**
+   * SPLIT MAKE-UP AIR. An extract pulls a fixed volume out of the home, and
+   * exactly that volume has to come back in through whatever is open. So the
+   * openings are not independent: they share one budget, and each one delivers
+   * only its share of it. Open a second window and the first one is supplying
+   * half as much fresh air as it was.
+   *
+   * Without this the model could not tell the difference between one open window
+   * and two — freshness was reachability, so another opening could only ever
+   * help. It is why opening BOTH studio windows measured the same as opening the
+   * right one alone, when in fact the second window is stealing the first one's
+   * inflow and feeding it to an extract two metres away.
+   *
+   * Share is taken from the opening's own size: the ambient cells are grouped
+   * into connected openings, and each group's share is its cells over all of
+   * them, which is area over total area — how the flux balance splits it too.
+   */
+  const SPLIT_LAG = 4;
+  const openingShare = new Float32Array(n3);
+  {
+    const group = new Int32Array(n3).fill(-1);
+    const sizes: number[] = [];
+    const stack: number[] = [];
+    let total = 0;
+    for (let c0 = 0; c0 < n3; c0++) {
+      if (!ambient[c0] || group[c0] !== -1 || sim.solid[c0]) continue;
+      const gid = sizes.length;
+      let count = 0;
+      stack.push(c0);
+      group[c0] = gid;
+      while (stack.length) {
+        const c = stack.pop()!;
+        count++;
+        const i = c % nx, j = ((c / nx) | 0) % ny, k = (c / (nx * ny)) | 0;
+        for (const [di, dj, dk] of DIRS) {
+          const a = i + di, b = j + dj, d = k + dk;
+          if (a < 0 || b < 0 || d < 0 || a >= nx || b >= ny || d >= nz) continue;
+          const cc = idx(a, b, d);
+          if (sim.solid[cc] || !ambient[cc] || group[cc] !== -1) continue;
+          group[cc] = gid;
+          stack.push(cc);
+        }
+      }
+      sizes.push(count);
+      total += count;
+    }
+    for (let c = 0; c < n3; c++) {
+      const g = group[c];
+      openingShare[c] = g === -1 || total === 0 ? 1 : sizes[g] / total;
+    }
+  }
+
   const shortCircuitLag = (c: number): number => {
-    if (!dVent || ventDilute[c]) return 0;
-    const d = dVent[c];
-    return d === Infinity ? 0 : SC_LAG * Math.exp(-d / SC_LAMBDA);
+    if (ventDilute[c]) return 0;
+    // Short circuit: how much of this opening's air the extract eats immediately.
+    const d = dVent ? dVent[c] : Infinity;
+    const sc = !dVent || d === Infinity ? 0 : SC_LAG * Math.exp(-d / SC_LAMBDA);
+    // Split: how little of the home's make-up air is coming through here.
+    const share = ambient[c] ? Math.max(1e-3, openingShare[c]) : 1;
+    return sc + SPLIT_LAG * Math.log(1 / share);
   };
   const smell = new Float32Array(n3);
   const dry = new Float32Array(n3).fill(DRY_NEVER);
