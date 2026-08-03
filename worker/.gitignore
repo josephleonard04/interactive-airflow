@@ -1,4 +1,0 @@
-# Local dev secrets for `wrangler dev`. NEVER commit — this holds a real key.
-.dev.vars
-node_modules/
-.wrangler/

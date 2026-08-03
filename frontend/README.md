@@ -50,10 +50,10 @@ verified — the bundle is handed to the browser through a Blob URL and browsers
 treat local files as an opaque origin — so open it once yourself before sending
 it that way.
 
-Either way the LLM goal fallback (`intent/llmGoal.ts`) is unavailable, because it
-asks a local Python backend. That is by design: it is only consulted for
-phrasings the keyword parser misses and it fails back to that parser, so
-everything the seed vocabulary covers behaves identically.
+Either way the goal parser works, because there is nothing behind it to be
+missing: `intent/objectives.ts` is a dictionary that runs in the page, with no
+network call and no key. A single-file build understands exactly what the
+deployed app understands.
 
 ## Collecting sessions
 

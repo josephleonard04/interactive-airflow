@@ -42,6 +42,9 @@ export function editDistance(a: string, b: string, max: number): number {
  *  into a request to cool the room. These are the near-misses that occur in
  *  this domain; the length floors below stop most of the rest. */
 const NEVER_CORRECT = new Set([
+  // "making" -> "baking" turned a neutral verb into a heat complaint, which
+  // inverted the goal of any sentence containing it.
+  "making", "taking", "waking", "making", "asking", "walking", "talking",
   "cook", "cooking", "cooked", "look", "book", "took", "good", "food", "wood",
   "door", "doors", "room", "rooms", "roof", "floor", "cost", "most", "best",
   "rest", "west", "east", "want", "wall", "walls", "call", "fall", "tall",

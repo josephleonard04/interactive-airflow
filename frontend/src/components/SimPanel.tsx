@@ -73,9 +73,7 @@ export function SimPanel() {
   const [goal, setGoal] = useState("");
   /** Set when a typed sentence could not be turned into an objective, so the
    *  panel can say so instead of doing nothing. */
-  const [unparsed, setUnparsed] = useState<{ text: string; reason: string } | null>(null);
-  /** True while the parser (and possibly the backend) is reading the sentence. */
-  const [resolving, setResolving] = useState(false);
+  const [unparsed, setUnparsed] = useState<string | null>(null);
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
   // A task with scored goals never shows a prose verdict: the goals are graded
@@ -101,7 +99,7 @@ export function SimPanel() {
     const livePlan = useSceneStore.getState().plan;
     // Keyword parser first; the LLM only sees wording it couldn't match, so a
     // recognised phrase is still resolved instantly and offline.
-    const { objectives } = await resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
+    const objectives = resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
     const evals = evaluateObjectives(objectives, livePlan, { outdoorTemp });
     useSceneStore.getState().logEvent("check", {
       text,
@@ -123,23 +121,20 @@ export function SimPanel() {
   // into the verdict path and nowhere near the button that actually does
   // something. "I want fresh air near the bed" matched no keyword, the search
   // silently refused to run, and starting the backend did not help.
-  const findSolutionsFor = async (text: string) => {
+  const findSolutionsFor = (text: string) => {
     const t = text.trim();
-    if (!t || optimizing || resolving) return;
+    if (!t || optimizing) return;
     setUnparsed(null);
-    setResolving(true);
-    try {
-      const livePlan = useSceneStore.getState().plan;
-      const { objectives, usedLLM, reason } = await resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp });
-      if (!objectives.length) {
-        useSceneStore.getState().logEvent("unparsed", { text: t, usedLLM, reason });
-        setUnparsed({ text: t.slice(0, 60), reason });
-        return;
-      }
-      if (applyObjectives(objectives, t)) recheckGoal.current = t;
-    } finally {
-      setResolving(false);
+    const livePlan = useSceneStore.getState().plan;
+    const objectives = resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp });
+    if (!objectives.length) {
+      // The sentence itself is the finding — it is the coverage gap, verbatim,
+      // and the only record of a wording the dictionary does not hold.
+      useSceneStore.getState().logEvent("unparsed", { text: t });
+      setUnparsed(t.slice(0, 60));
+      return;
     }
+    if (applyObjectives(objectives, t)) recheckGoal.current = t;
   };
 
   if (!active) {
@@ -216,11 +211,11 @@ export function SimPanel() {
               <button
                 className="primary"
                 style={{ marginLeft: "auto" }}
-                disabled={optimizing || resolving}
-                onClick={() => { void findSolutionsFor(goal); }}
+                disabled={optimizing}
+                onClick={() => findSolutionsFor(goal)}
                 title="Search your layout with the simulator and offer the setups that work best"
               >
-                {optimizing ? "⏳ Searching…" : resolving ? "⏳ Reading…" : "✨ Find solutions"}
+                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
               </button>
             </div>
             {/* SAY SOMETHING WHEN IT DID NOT UNDERSTAND. This button used to
@@ -241,39 +236,9 @@ export function SimPanel() {
                   color: "var(--ink)",
                 }}
               >
-                {unparsed.reason === "bad-key" ? (
-                  <>
-                    The free-text reader rejected its API key, so I can only match phrases like
-                    “keep the bedroom cool”, “fresh air near the bed” or “no air blowing on the
-                    bed”. <b>Set a valid ANTHROPIC_API_KEY and restart the backend</b> to have it
-                    read any sentence.
-                  </>
-                ) : unparsed.reason === "unreachable" || unparsed.reason === "no-key" ? (
-                  <>
-                    “{unparsed.text}” is outside the words I know, and the free-text reader{" "}
-                    {unparsed.reason === "no-key" ? "has no API key" : "is not running"} — so I can
-                    only match phrases like “keep the bedroom cool”, “fresh air near the bed” or
-                    “no air blowing on the bed”.{" "}
-                    <b>
-                      {unparsed.reason === "no-key"
-                        ? "Set ANTHROPIC_API_KEY and restart the backend"
-                        : "Start the backend (backend\run.ps1)"}
-                    </b>{" "}
-                    to have it read any sentence.
-                  </>
-                ) : unparsed.reason === "error" ? (
-                  <>
-                    The free-text reader failed on “{unparsed.text}”. Check the backend terminal —
-                    meanwhile phrases like “keep the bedroom cool” or “fresh air near the bed” still
-                    work.
-                  </>
-                ) : (
-                  <>
-                    I read “{unparsed.text}” but couldn't find a comfort goal in it. Say which room
-                    or thing it is about and what you want there — for example “keep the bedroom
-                    cool”, “fresh air near the bed”, or “no air blowing on the bed”.
-                  </>
-                )}
+                I read “{unparsed}” but couldn't find a comfort goal in it. Say which room or
+                thing it is about and what you want there — for example “keep the bedroom cool”,
+                “fresh air near the bed”, or “no air blowing on the bed”.
               </p>
             )}
           </>

@@ -1,6 +1,3 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2
-# Plain-language goal parsing (backend/goal_llm.py). Optional: without a key
-# the app still runs, it just loses the free-text fallback.
-anthropic>=0.69

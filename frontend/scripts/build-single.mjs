@@ -7,12 +7,11 @@
 //
 //   npm run build:single      ->  dist-single/interactive-airflow.html
 //
-// Caveats, both worth knowing before sending it:
-//  - it is one ~1.2 MB file, which is fine as an email attachment but is not a
-//    thing to keep re-sending as you iterate;
-//  - the LLM goal fallback (intent/llmGoal.ts) talks to a local backend that
-//    will not be there. It is designed to fail into the keyword parser, so
-//    everything the seed vocabulary covers still works offline.
+// One caveat worth knowing before sending it: it is one ~1.2 MB file, which is
+// fine as an email attachment but is not a thing to keep re-sending as you
+// iterate. Nothing is lost functionally — the goal parser is a dictionary that
+// runs in the page, so a file opened with no network understands every sentence
+// the deployed app does.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
