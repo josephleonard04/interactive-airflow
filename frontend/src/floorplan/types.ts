@@ -127,6 +127,16 @@ export interface FloorPlan {
    *  what every caller of buildSim3D already holds — otherwise a dozen call
    *  sites would each have to learn which task they were solving. */
   windowReach?: number;
+  /** How far an extract vent's influence carries, as a multiplier on the cost
+   *  of travelling away from it (1 = unchanged, below 1 = it reaches further).
+   *
+   *  Per-task for the same reason windowReach is. In the bathroom the extract
+   *  is the ONE thing the participant moves, so the picture has to show it
+   *  working: the floor near a well-placed grille should read dry, because the
+   *  air there really is on its way out of the room. No other task wants that —
+   *  the studio's whole lesson is that a short-circuited grille cleans nothing —
+   *  so it is opt-in and 1 everywhere else. */
+  ventSpread?: number;
   name: string;
   size: HomeSize;
   bounds: Rect;

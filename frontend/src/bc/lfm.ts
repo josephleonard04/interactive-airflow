@@ -396,10 +396,34 @@ function fansFromItems(plan: FloorPlan): FanSource[] {
     });
 }
 
+/** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the ONLY one.
+ *
+ *  Only the heater used to count, so the humidity task had no temperature field
+ *  at all: the steam was a contaminant with no warmth behind it, the air never
+ *  rose off the shower, and the Airflow view — which colours each streamline by
+ *  the temperature of the air it carries — drew the whole room one flat shade.
+ *  A participant looking at it could not see the one thing that makes a
+ *  bathroom a bathroom, which is that the wet end is warm and the glazing is
+ *  not, so the air turns over between them.
+ *
+ *  The steam plume is the strongest (it is the vapour itself), then the shower
+ *  running, then the bath standing full. None of them are anywhere near a
+ *  radiator, which is the point: this is a gentle convective turnover, not a
+ *  heater blasting one wall. */
+const WET_DELTA_T: Record<string, number> = {
+  damp: 9,
+  shower: 6,
+  bathtub: 4,
+};
+
 function heatSourcesFromItems(plan: FloorPlan): HeatSource[] {
   return plan.items
-    .filter((it) => it.type === "heater")
-    .map((it) => ({ id: it.id, world: worldAABB(it), deltaT: HEATER_DELTA_T }));
+    .filter((it) => it.type === "heater" || (it.type in WET_DELTA_T && it.on !== false))
+    .map((it) => ({
+      id: it.id,
+      world: worldAABB(it),
+      deltaT: it.type === "heater" ? HEATER_DELTA_T : WET_DELTA_T[it.type],
+    }));
 }
 
 // ---- top level ----
