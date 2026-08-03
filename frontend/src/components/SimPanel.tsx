@@ -35,7 +35,7 @@ export function SimPanel() {
   const setSource = useSceneStore((s) => s.setSimSource);
   const addItem = useSceneStore((s) => s.addItem);
   const selectItem = useSceneStore((s) => s.selectItem);
-  const applyBestSolution = useSceneStore((s) => s.applyBestSolution);
+  const applyObjectives = useSceneStore((s) => s.applyObjectives);
   const optimizing = useSceneStore((s) => s.optimizing);
   const pendingChange = useSceneStore((s) => s.pendingChange);
   const recheckGoal = useRef<string | null>(null);
@@ -71,6 +71,11 @@ export function SimPanel() {
   }, [optimizing]);
 
   const [goal, setGoal] = useState("");
+  /** Set when a typed sentence could not be turned into an objective, so the
+   *  panel can say so instead of doing nothing. */
+  const [unparsed, setUnparsed] = useState<string | null>(null);
+  /** True while the parser (and possibly the backend) is reading the sentence. */
+  const [resolving, setResolving] = useState(false);
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
   // A task with scored goals never shows a prose verdict: the goals are graded
@@ -111,6 +116,31 @@ export function SimPanel() {
     }
   };
   const checkGoal = () => checkGoalText(goal);
+
+  // FIND SOLUTIONS, THROUGH THE SAME PARSER THE CHECK USES. The button used to
+  // call the keyword lexicon directly, so the backend's language model — the
+  // whole point of which is to read sentences the lexicon cannot — was wired
+  // into the verdict path and nowhere near the button that actually does
+  // something. "I want fresh air near the bed" matched no keyword, the search
+  // silently refused to run, and starting the backend did not help.
+  const findSolutionsFor = async (text: string) => {
+    const t = text.trim();
+    if (!t || optimizing || resolving) return;
+    setUnparsed(null);
+    setResolving(true);
+    try {
+      const livePlan = useSceneStore.getState().plan;
+      const { objectives, usedLLM } = await resolveObjectives(t, livePlan, sketchRegion);
+      if (!objectives.length) {
+        useSceneStore.getState().logEvent("unparsed", { text: t, usedLLM });
+        setUnparsed(t.slice(0, 60));
+        return;
+      }
+      if (applyObjectives(objectives, t)) recheckGoal.current = t;
+    } finally {
+      setResolving(false);
+    }
+  };
 
   if (!active) {
     return (
@@ -173,7 +203,7 @@ export function SimPanel() {
           <>
             <textarea
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); }}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) checkGoal(); }}
               placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
               rows={3}
@@ -186,15 +216,36 @@ export function SimPanel() {
               <button
                 className="primary"
                 style={{ marginLeft: "auto" }}
-                disabled={optimizing}
-                onClick={() => {
-                  if (goal.trim() && applyBestSolution(goal)) recheckGoal.current = goal;
-                }}
+                disabled={optimizing || resolving}
+                onClick={() => { void findSolutionsFor(goal); }}
                 title="Search your layout with the simulator and offer the setups that work best"
               >
-                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
+                {optimizing ? "⏳ Searching…" : resolving ? "⏳ Reading…" : "✨ Find solutions"}
               </button>
             </div>
+            {/* SAY SOMETHING WHEN IT DID NOT UNDERSTAND. This button used to
+                return false and stop: no search, no message, nothing moved.
+                From the outside that is indistinguishable from a broken button,
+                and in a session it would read as the tool ignoring the
+                participant. */}
+            {unparsed && (
+              <p
+                style={{
+                  marginTop: 8,
+                  padding: "8px 10px",
+                  borderRadius: 9,
+                  border: "1px solid rgba(196,110,84,0.45)",
+                  background: "rgba(196,110,84,0.10)",
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: "var(--ink)",
+                }}
+              >
+                I didn't understand “{unparsed}” well enough to search. Try saying which room or
+                thing it is about and what you want there — for example “keep the bedroom cool”,
+                “fresh air near the bed”, or “no air blowing on the bed”.
+              </p>
+            )}
           </>
         ) : (
           <>

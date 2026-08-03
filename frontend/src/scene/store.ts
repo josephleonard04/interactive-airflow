@@ -22,7 +22,7 @@ import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
 import { sketchToGoal, type SketchMark, type SketchTool } from "../intent/sketch";
-import { parseGoal } from "../intent/objectives";
+import { parseGoal, type Objective } from "../intent/objectives";
 import type {
   FloorPlan,
   HomeSize,
@@ -144,6 +144,10 @@ export interface SceneState {
 
   /** Search a plain-language goal for SEVERAL good configurations to choose from. */
   applyBestSolution: (goalText: string) => boolean;
+  /** The same search, but starting from objectives someone else has already
+   *  resolved — used by the panel so a sentence the keyword lexicon cannot read
+   *  can still be answered by the backend's parser. */
+  applyObjectives: (objs: Objective[], goalText: string) => boolean;
   /** The shared search both inputs funnel into. Not called directly by the UI. */
   runSearch: (
     goal: OptimizeGoal,
@@ -208,7 +212,11 @@ export interface LogEvent {
   t: number; // ms since epoch
   /** ms since the task was opened — the timeline axis. */
   at: number;
-  kind: "goal" | "check" | "preset" | "review" | "sketch" | "edit" | "engine" | "goals" | "submit";
+  // `unparsed` is a first-class event, not a missing one. A sentence the tool
+  // could not read is the most useful thing a language study collects — it is
+  // the coverage gap, verbatim — and it used to leave no trace at all because
+  // the search simply returned false.
+  kind: "goal" | "unparsed" | "check" | "preset" | "review" | "sketch" | "edit" | "engine" | "goals" | "submit";
   data: Record<string, unknown>;
 }
 
@@ -488,7 +496,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   applyBestSolution: (goalText) => {
     const s = get();
-    const objs = parseGoal(goalText, s.plan, s.sketchRegion);
+    return s.applyObjectives(parseGoal(goalText, s.plan, s.sketchRegion), goalText);
+  },
+
+  applyObjectives: (objs, goalText) => {
+    const s = get();
     const obj = objs[0];
     if (!obj) return false;
     // Every room the goal named, not just the first. "Cool the living room and
