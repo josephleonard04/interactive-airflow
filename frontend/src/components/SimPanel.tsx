@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSceneStore, type SimMode } from "../scene/store";
 import { evaluateObjectives, resolveObjectives, type Evaluation } from "../intent/evaluate";
+import type { LlmReason } from "../intent/llmGoal";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
@@ -65,15 +66,21 @@ export function SimPanel() {
     if (!optimizing && recheckGoal.current) {
       const g = recheckGoal.current;
       recheckGoal.current = null;
-      checkGoalText(g);
+      void checkGoalText(g);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optimizing]);
 
   const [goal, setGoal] = useState("");
   /** Set when a typed sentence could not be turned into an objective, so the
-   *  panel can say so instead of doing nothing. */
-  const [unparsed, setUnparsed] = useState<string | null>(null);
+   *  panel can say so instead of doing nothing. `reason` distinguishes "we read
+   *  it and there is no comfort goal in it" from "the parser was not reachable",
+   *  which need completely different words in front of a participant. */
+  const [unparsed, setUnparsed] = useState<{ text: string; reason: LlmReason } | null>(null);
+  /** The model is a network round trip, so the button has to say it is thinking
+   *  — otherwise a two-second pause reads as a dead button and gets clicked
+   *  again, which is a second round trip and a second log entry. */
+  const [reading, setReading] = useState(false);
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
   // A task with scored goals never shows a prose verdict: the goals are graded
@@ -97,12 +104,14 @@ export function SimPanel() {
     // immediately after applying a solution, and the closed-over `plan` is still
     // the pre-apply one — which made the verdict report the old temperatures.
     const livePlan = useSceneStore.getState().plan;
-    // Keyword parser first; the LLM only sees wording it couldn't match, so a
+    // Keyword parser first; the model only sees wording it couldn't match, so a
     // recognised phrase is still resolved instantly and offline.
-    const objectives = resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
+    const { objectives, via, reason } = await resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
     const evals = evaluateObjectives(objectives, livePlan, { outdoorTemp });
     useSceneStore.getState().logEvent("check", {
       text,
+      via,
+      reason,
       results: evals.map((e) => ({ summary: e.summary, satisfied: e.satisfied, value: e.value })),
     });
     setResults(evals);
@@ -121,17 +130,25 @@ export function SimPanel() {
   // into the verdict path and nowhere near the button that actually does
   // something. "I want fresh air near the bed" matched no keyword, the search
   // silently refused to run, and starting the backend did not help.
-  const findSolutionsFor = (text: string) => {
+  const findSolutionsFor = async (text: string) => {
     const t = text.trim();
-    if (!t || optimizing) return;
+    if (!t || optimizing || reading) return;
     setUnparsed(null);
-    const livePlan = useSceneStore.getState().plan;
-    const objectives = resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp });
+    setReading(true);
+    let objectives, via, reason;
+    try {
+      const livePlan = useSceneStore.getState().plan;
+      ({ objectives, via, reason } = await resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp }));
+    } finally {
+      setReading(false);
+    }
     if (!objectives.length) {
       // The sentence itself is the finding — it is the coverage gap, verbatim,
-      // and the only record of a wording the dictionary does not hold.
-      useSceneStore.getState().logEvent("unparsed", { text: t });
-      setUnparsed(t.slice(0, 60));
+      // and the only record of a wording neither the dictionary nor the model
+      // could turn into a goal. `reason` says which of those two it was, which
+      // is the difference between "add this word" and "start the backend".
+      useSceneStore.getState().logEvent("unparsed", { text: t, via, reason });
+      setUnparsed({ text: t.slice(0, 60), reason });
       return;
     }
     if (applyObjectives(objectives, t)) recheckGoal.current = t;
@@ -199,7 +216,7 @@ export function SimPanel() {
             <textarea
               value={goal}
               onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); }}
-              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) checkGoal(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void checkGoal(); }}
               placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
               rows={3}
               style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
@@ -211,11 +228,11 @@ export function SimPanel() {
               <button
                 className="primary"
                 style={{ marginLeft: "auto" }}
-                disabled={optimizing}
-                onClick={() => findSolutionsFor(goal)}
+                disabled={optimizing || reading}
+                onClick={() => { void findSolutionsFor(goal); }}
                 title="Search your layout with the simulator and offer the setups that work best"
               >
-                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
+                {reading ? "⏳ Reading…" : optimizing ? "⏳ Searching…" : "✨ Find solutions"}
               </button>
             </div>
             {/* SAY SOMETHING WHEN IT DID NOT UNDERSTAND. This button used to
@@ -236,9 +253,26 @@ export function SimPanel() {
                   color: "var(--ink)",
                 }}
               >
-                I read “{unparsed}” but couldn't find a comfort goal in it. Say which room or
-                thing it is about and what you want there — for example “keep the bedroom cool”,
-                “fresh air near the bed”, or “no air blowing on the bed”.
+                {unparsed.reason === "no-goal" || unparsed.reason === "ok" ? (
+                  <>
+                    I read “{unparsed.text}” but couldn't find a comfort goal in it. Say which room
+                    or thing it is about and what you want there — for example “keep the bedroom
+                    cool”, “fresh air near the bed”, or “no air blowing on the bed”.
+                  </>
+                ) : (
+                  // Not the participant's fault and not fixable by rephrasing —
+                  // say so, and give them the wording that still works. Telling
+                  // someone to rephrase a perfectly clear sentence, when the
+                  // real problem is an unstarted backend, wastes their session
+                  // and reads as the tool blaming them.
+                  <>
+                    I couldn't reach the part that reads sentences freely, so I only understood
+                    “{unparsed.text}” as far as my built-in words go — and none of them are in it.
+                    Try naming the room or thing and what you want there, like “keep the bedroom
+                    cool”, “fresh air near the bed”, or “no air blowing on the bed”. Drawing it
+                    works too.
+                  </>
+                )}
               </p>
             )}
           </>
@@ -271,7 +305,7 @@ export function SimPanel() {
               // Re-check straight away so the verdict reflects the layout just
               // applied. (The optimizing-flag effect doesn't fire here — picking
               // an already-computed option never sets it.)
-              if (g) checkGoalText(g);
+              if (g) void checkGoalText(g);
             }}
             onDismiss={dismissSolutions}
           />
