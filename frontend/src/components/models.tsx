@@ -242,7 +242,11 @@ function Fan([w, h, d]: V) {
  *  every real extract fan says it: green while it runs, red when it does not. */
 function Vent([w, h, d]: V, on = true) {
   const slats = 4;
-  const led = Math.max(0.012, Math.min(w, d) * 0.075);
+  // Sized off the grille, not off a fraction of it. At 7.5% of the short side
+  // the lamp came out ~1 cm across on a wall vent seen from across the room —
+  // technically present, invisible in practice. It also gets a bezel, so the
+  // colour reads against the grey slats instead of dissolving into them.
+  const led = Math.max(0.035, Math.min(w, d) * 0.2);
   return (
     <group>
       <Box size={[w, h * 0.5, d]} position={[0, 0, 0]} color="#c7d0d8" metalness={0.3} />
@@ -253,15 +257,21 @@ function Vent([w, h, d]: V, on = true) {
       {/* On the face, off to one side of the slats. Emissive so it reads as a
           lamp rather than a painted dot, and bright enough to see from the
           camera distances these rooms are viewed at. */}
-      <mesh position={[w * 0.36, h * 0.22, d * 0.32]}>
-        <sphereGeometry args={[led, 12, 12]} />
-        <meshStandardMaterial
-          color={on ? "#16a34a" : "#dc2626"}
-          emissive={on ? "#22c55e" : "#ef4444"}
-          emissiveIntensity={1.6}
-          roughness={0.35}
-        />
-      </mesh>
+      <group position={[w * 0.34, h * 0.24, d * 0.3]}>
+        <mesh>
+          <sphereGeometry args={[led * 1.45, 12, 12]} />
+          <meshStandardMaterial color="#2b3138" roughness={0.8} />
+        </mesh>
+        <mesh position={[0, led * 0.5, 0]}>
+          <sphereGeometry args={[led, 14, 14]} />
+          <meshStandardMaterial
+            color={on ? "#22c55e" : "#ef4444"}
+            emissive={on ? "#4ade80" : "#f87171"}
+            emissiveIntensity={2.6}
+            roughness={0.25}
+          />
+        </mesh>
+      </group>
     </group>
   );
 }

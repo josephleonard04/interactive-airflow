@@ -805,17 +805,18 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // kitchen, which is a different room.
     goals: [
       // 0.15 → 0.18, because freshness now has to be CARRIED to a spot rather
-      // than diffusing there (V0_FRESH 0.45 → 0.30 — see sim3d). Every reading
-      // rose with it; the separation the threshold has to make did not change.
-      // Re-measured on this layout, fan standing where the task leaves it:
+      // than diffusing there, and an opening beside an extract no longer counts
+      // as ventilation (see sim3d). Every reading rose; the separation did not
+      // change. Re-measured, fan standing where the task leaves it:
       //     everything shut                    0.395
-      //     RIGHT window only (short circuit)  0.323   ← the trap, still fails
-      //     right window + fan at it           0.356   ← worse than doing nothing
-      //     BOTH windows open                  0.217
-      //     bed-side window only               0.219
-      //     bed-side window + fan at it        0.159   ← passes
-      // The gap the threshold sits in is 0.159 → 0.217, so 0.18 clears the
-      // solution by 12% and rejects the nearest non-solution by 21%.
+      //     RIGHT window only (short circuit)  0.338   ← the trap, worth ~nothing
+      //     BOTH windows open                  0.225
+      //     bed-side window only               0.226
+      //     bed-side window + fan at it        0.168   ← the only one that passes
+      // The threshold sits in a 0.168 → 0.225 gap: it clears the solution by 7%
+      // and rejects the nearest non-solution by 25%. The trap is now doing what
+      // it was built to do — opening it moves the number 14% off a baseline it
+      // used to move 18%, and it leaves the bed purple on screen.
       { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.18 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
@@ -877,7 +878,21 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // left diagonally opposite the vent where it used to be, merely opening it
     // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 35 },
+      // 35 → 38 min, re-calibrated after freshness stopped diffusing on its own
+      // and short-circuited openings stopped counting (see sim3d). Both changes
+      // slow every design down; the ordering they produce is what the task is
+      // scored on, and it still separates cleanly. Vent swept over 8 positions,
+      // window open:
+      //     as delivered              56 min   ← the problem being posed
+      //     west / south / SW / NW    42 min
+      //     SE                        39 min
+      //     east mid                  36 min
+      //     north mid                 35 min
+      //     NE corner                 34 min   ← the far side from the damp corner
+      // 38 admits the three placements that put the extract across the room from
+      // the wet corner and rejects everything nearer to it, which is the lesson.
+      // At the old 35 only the NE corner passed, by one minute.
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 38 },
     ],
     success:
       "Everywhere in the bathroom dry within 35 minutes, measured on the slow " +
@@ -897,17 +912,23 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "two windows and an extract vent. Keep the smell away from the bed.",
     youCanChange: "Open or close either window, and add, move and aim a fan.",
     tools: { movable: ["fan"], aimable: [], addable: ["fan"], walls: false, openings: true, resize: false },
-    // 0.12 → 0.19, re-calibrated after freshness stopped diffusing on its own
-    // (V0_FRESH 0.45 → 0.30 — see sim3d). Searched 12 fan positions × 4 aims:
+    // 0.12 → 0.215, re-calibrated after freshness stopped diffusing on its own
+    // and short-circuited openings stopped counting (see sim3d). Searched 12 fan
+    // positions × 4 aims:
     //     both shut, no fan                 0.326
-    //     near window (the trap) + best fan 0.215
-    //     FAR window, no fan                0.206
-    //     far window + best fan             0.179
-    // ⚠ THIN. The fan is now worth only 13% over opening the far window alone,
-    // where it used to be the difference between pass and fail, and the search
-    // was coarse. If this task is used in the study, re-run a finer sweep first
-    // — the margin between 0.179 and 0.206 is not much to hang a verdict on.
-    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.19 }],
+    //     NEAR window (the trap), no fan    0.322   ← now worth nothing at all
+    //     near window + best fan            0.246
+    //     FAR window, no fan                0.226
+    //     far window + best fan             0.206
+    // The trap is doing its job: the window beside the extract now measures the
+    // same as leaving everything shut, which is the point of putting it there.
+    //
+    // ⚠ THIN, and worth fixing before this task is used. The fan is worth 9%
+    // over simply opening the far window, so the threshold sits in a 0.206–0.226
+    // gap and a verdict rests on 2 decimal places. The studio task asks the same
+    // question with a 34% gap; prefer it, or widen this one by moving the bed
+    // further from the bin before relying on the number.
+    goals: [{ label: "The smell is off the bed", metric: "smell", roomId: "apt", atMost: 0.215 }],
     success:
       "Contaminant ≤ 0.12 in the bed zone with an open exterior path — reached by " +
       "opening the FAR window (cross-draught), not the near one (which short-" +
