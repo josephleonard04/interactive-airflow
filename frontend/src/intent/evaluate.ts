@@ -1,4 +1,5 @@
 import type { FloorPlan, Rect } from "../floorplan/types";
+import type { LlmReason } from "./llmGoal";
 import { computeRoomLevels } from "../sim/roomLevels";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
 import { parseGoal, type Objective } from "./objectives";
@@ -189,9 +190,10 @@ export async function resolveObjectives(
   text: string,
   plan: FloorPlan,
   sketch?: Rect | null,
-): Promise<{ objectives: Objective[]; usedLLM: boolean }> {
+): Promise<{ objectives: Objective[]; usedLLM: boolean; reason: LlmReason }> {
   const keyword = parseGoal(text, plan, sketch ?? null);
-  if (keyword.length) return { objectives: keyword, usedLLM: false };
+  if (keyword.length) return { objectives: keyword, usedLLM: false, reason: "ok" };
   const { parseGoalWithLLM } = await import("./llmGoal");
-  return { objectives: await parseGoalWithLLM(text, plan, sketch ?? null), usedLLM: true };
+  const r = await parseGoalWithLLM(text, plan, sketch ?? null);
+  return { objectives: r.objectives, usedLLM: true, reason: r.reason };
 }
