@@ -505,10 +505,12 @@ function buildBathroom(): FloorPlan {
     "Bathroom",
     rooms,
     (walls, gen, doors) => {
-      // Door on the NORTH wall (screen-bottom), toward the left. It used to be
-      // on the top wall, which is now the whole wet run — shower, steam, bath —
-      // so the doorway would have opened straight into the shower tray.
-      entranceOnBottom(walls, gen, "bathroom", rooms[0].rect, doors, 0.2);
+      // Door on the NORTH wall (screen-bottom). It used to be on the top wall,
+      // which is now the whole wet run — shower, steam, bath — so the doorway
+      // would have opened straight into the shower tray. Kept toward the left
+      // end and off the corner, so the toilet and basin have the right-hand
+      // half of that wall to themselves.
+      entranceOnBottom(walls, gen, "bathroom", rooms[0].rect, doors, 0.28);
     },
     (gen, rs) => {
       const [bath] = rs;
@@ -543,9 +545,12 @@ function buildBathroom(): FloorPlan {
         // outdoor air to replace it has to get in somewhere, which is the whole
         // reason where the window goes matters. Already fitted, always running,
         // one speed. The participant moves it; there is nothing to switch.
-        // Starts on the top wall beside the steam, which is the bad arrangement:
-        // it and the window are then a metre apart and short-circuit.
-        spot(gen, bath, "return", VENT_SIZE, 0.55, 0.09, 0, {
+        // Starts high on the RIGHT-HAND wall just above the window, which is
+        // the bad arrangement the task poses: the two are a few centimetres
+        // apart, so the air comes in and goes straight back out without ever
+        // crossing the floor. It used to start on the top wall directly over
+        // the shower tray, which put a grille inside the cubicle.
+        spot(gen, bath, "return", VENT_SIZE, W - 0.09, 2.0, -Math.PI / 2, {
           category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.05, on: true,
         }),
       ];
@@ -554,11 +559,17 @@ function buildBathroom(): FloorPlan {
   );
   // ONE window, and NOT fixed — a window can be dragged to any wall of its own
   // room (moveOpeningToPoint), which is exactly the choice this task is about.
-  // It starts SHUT and around the corner from the extract, close enough that
-  // the two short-circuit: the pair as-built is the bad arrangement, so simply
-  // opening the window is not the answer. Not on the extract's OWN wall, where
-  // a 1.2 m window would be cut straight through the grille.
-  addWindow(plan, "bathroom", "west", 0.2, false);
+  //
+  // On the RIGHT-HAND wall, low down. It was on the left wall behind the
+  // shower, so the glazing was cut through the cubicle: a window you cannot
+  // reach, open, or see out of, drawn straight across the shower screen. This
+  // wall is the only one with room for it — the top wall is the wet run end to
+  // end, the left wall is the shower, and the bottom wall has the door and the
+  // basin.
+  //
+  // It starts SHUT and a few centimetres from the extract, so the pair as-built
+  // short-circuits and merely opening it is not the answer.
+  addWindow(plan, "bathroom", "east", 0.62, false);
   // The door is not a ventilation strategy here. You do not leave the bathroom
   // door open to dry it out, and letting the participant do so replaces the
   // question with a shortcut nobody would actually take.
@@ -956,50 +967,45 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // left diagonally opposite the vent where it used to be, merely opening it
     // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      // 64 -> 95 min. The room now discriminates properly, which it did not
-      // before: re-measured on the reworked layout (wet run along the top wall,
-      // dry run along the bottom) after three model fixes this task is the
-      // reason for --
+      // 95 -> 98 min, re-measured after the window moved off the shower wall.
+      // It had been cut through the cubicle -- glazing drawn straight across the
+      // shower screen, on the one wall the shower occupies end to end -- so it
+      // now sits low on the right-hand wall, a few centimetres below the
+      // extract. That is the bad pair the task poses: air in, air straight back
+      // out, floor never crossed.
       //
-      //   - A SEALED ROOM NO LONGER DRIES. An extract with every window and
-      //     door shut has no make-up air, so it depressurises the room slightly
-      //     and moves nothing. The freshness pass did not know that, so a
-      //     shut-up bathroom dried out around the grille and one placement with
-      //     the window SHUT beat several with it open -- which inverts the whole
-      //     lesson. Shut, every position now reads 180 minutes.
-      //   - An extract only cleans air that FLOWED THROUGH the room to reach
-      //     it, so a grille fed by a window a metre away sweeps that metre.
-      //   - The extract stopped taking a share of the make-up air it is fed by.
+      // Extract swept over 9 positions, window open:
+      //     as delivered (right wall, beside the window)  173 min  <- the problem
+      //     right wall, higher up                         159 min
+      //     top-right corner                              137 min
+      //     bottom mid                                    122 min
+      //     top mid                                       106 min
+      //     left wall, lower                              104 min
+      //     bottom-left corner                             93 min
+      //     left wall, upper                               93 min
+      //     top-left corner                                84 min  <- the answer
       //
-      // Window open, extract swept over 9 positions:
-      //     as delivered (top-left, beside the window)  168 min  <- the problem
-      //     left mid                                    176 min
-      //     left lower                                  161 min
-      //     top mid                                     145 min
-      //     bottom-left                                 138 min
-      //     top-right                                   120 min
-      //     right mid                                   113 min
-      //     bottom mid                                  106 min
-      //     bottom-right                                 85 min  <- the answer
+      // The reading falls off monotonically with distance from the window: the
+      // air has to cross the whole floor, over the damp corner between the
+      // shower and the bath, to get from one to the other. 98 admits the three
+      // placements on the far side of the room and rejects the six nearer ones
+      // -- 17% clear of the answer, 6% clear of the nearest miss.
       //
-      // The window sits on the top-left of the west wall, so the reading falls
-      // off with distance from it -- the air has to cross the whole floor, over
-      // the damp corner between the shower and the bath, to get from one to the
-      // other. 95 sits in the 85 -> 106 gap: 12% clear of the answer, 10% clear
-      // of the nearest miss, and the widest margin this task has had. It admits
-      // ONE placement, which is honest -- the far corner is the answer and the
-      // others genuinely are not.
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 95 },
+      // Shut, every position reads 180 minutes: an extract with no make-up air
+      // depressurises the room and moves nothing (see sim3d). Opening the
+      // window is necessary and nowhere near sufficient.
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 98 },
     ],
     success:
-      "Everywhere in the bathroom dry within 95 minutes, measured on the slow " +
+      "Everywhere in the bathroom dry within 98 minutes, measured on the slow " +
       "90% of the room. Two things have to happen and neither is enough alone. " +
       "The window must be OPEN — shut, the extract has no make-up air, moves " +
       "nothing, and every vent position reads 180 minutes. And the extract must " +
-      "go to the far corner from it, diagonally opposite: 85 min in the " +
-      "bottom-right against 168 min where it was built, a metre from the " +
-      "window. There the two short-circuit — the air crosses that metre, " +
-      "leaves, and the damp corner between the shower and the bath never clears.",
+      "cross to the far side of the room from it: 84 min in the top-left " +
+      "corner, 93 on the left-hand wall, against 173 min where it was built a " +
+      "few centimetres below the window. There the two short-circuit — the air " +
+      "comes in, goes straight back out, and the damp corner between the shower " +
+      "and the bath never clears.",
     build: buildBathroom,
   },
   smell: {

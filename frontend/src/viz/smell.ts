@@ -105,13 +105,21 @@ export function smellGradientCss(): string {
 // differ; the drying-time mini-map already uses this sand-to-blue pairing, so
 // the 3D floor and the little plan beside it finally agree.
 const DAMP_STOPS: Array<{ u: number; rgb: RGB }> = [
-  { u: 0.0, rgb: { r: 0.98, g: 0.95, b: 0.87 } }, // dry sand
-  { u: 0.16, rgb: { r: 0.93, g: 0.89, b: 0.76 } }, // still dry
-  { u: 0.34, rgb: { r: 0.78, g: 0.85, b: 0.8 } }, // turning
-  { u: 0.5, rgb: { r: 0.55, g: 0.76, b: 0.8 } }, // damp
-  { u: 0.68, rgb: { r: 0.3, g: 0.6, b: 0.75 } }, // wet
-  { u: 0.85, rgb: { r: 0.14, g: 0.42, b: 0.63 } }, // soaked
-  { u: 1.0, rgb: { r: 0.06, g: 0.25, b: 0.45 } }, // streaming — at the source
+  // NEITHER END IS WHITE, and the two ends are opposite hues rather than two
+  // lightnesses of one. The first version ran from a near-white sand to a deep
+  // blue: on a pale floor, under a pale ceiling, "dry" was indistinguishable
+  // from "no data", and the bottom third of the range all read as the room
+  // itself. You could not tell whether a corner had dried or was simply not
+  // being drawn. Dry is now a saturated amber that could not be mistaken for
+  // the floor, and the ramp crosses a green-teal midpoint on its way to navy,
+  // so adjacent readings differ in hue as well as darkness.
+  { u: 0.0, rgb: { r: 0.93, g: 0.66, b: 0.13 } }, // amber — bone dry
+  { u: 0.18, rgb: { r: 0.87, g: 0.74, b: 0.24 } }, // warm yellow
+  { u: 0.34, rgb: { r: 0.6, g: 0.75, b: 0.42 } }, // green — drying out
+  { u: 0.5, rgb: { r: 0.27, g: 0.71, b: 0.66 } }, // teal — neither
+  { u: 0.66, rgb: { r: 0.11, g: 0.55, b: 0.76 } }, // blue — damp
+  { u: 0.84, rgb: { r: 0.07, g: 0.31, b: 0.63 } }, // deep blue — wet
+  { u: 1.0, rgb: { r: 0.09, g: 0.11, b: 0.38 } }, // navy — streaming
 ];
 
 function ramp(stops: typeof DAMP_STOPS, normalized: number): RGB {
