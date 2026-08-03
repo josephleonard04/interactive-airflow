@@ -4,9 +4,9 @@ import { normalizeText, type Vocabulary } from "./normalize";
 // Intent → physics: translate a non-expert's everyday comfort goal ("keep my
 // bedroom cool", "no kitchen smell in the bedroom") into a small, fixed set of
 // physical objectives the simulation can evaluate. This is the seed dictionary
-// described in docs/contribution-positioning.md §2 — the LLM layer can later
-// generalize beyond it, but every objective stays in this vocabulary so it is
-// always checkable against the solver.
+// described in docs/contribution-positioning.md §2 — the model in llmGoal.ts
+// generalizes beyond it, but every objective from either route stays in this
+// vocabulary so it is always checkable against the solver.
 
 export type Scalar = "temperature" | "contaminant" | "draft";
 export type Direction = "low" | "high";
@@ -39,11 +39,14 @@ function sketchRoom(plan: FloorPlan, sketch: Rect) {
 }
 
 // word → (scalar, direction). First match wins.
-// THE DICTIONARY IS THE WHOLE LANGUAGE LAYER. There is no model behind it, so a
-// word missing here is a sentence the tool cannot read. The lists below are
-// therefore deliberately over-inclusive: every way this project's four problems
-// get described — heat, cold, smell, stale air, damp, draught — plus the
-// devices, rooms and objects they get described in terms of.
+// THE DICTIONARY IS THE FAST PATH, AND THE ONLY ONE THAT ALWAYS WORKS. A model
+// now sits behind it (llmGoal.ts) for wording this cannot match, but it needs a
+// backend, a credential and a network — none of which a study session on a
+// borrowed laptop is guaranteed to have. So a word missing here still costs a
+// round trip at best and a shrug at worst, and the lists below stay deliberately
+// over-inclusive: every way this project's four problems get described — heat,
+// cold, smell, stale air, damp, draught — plus the devices, rooms and objects
+// they get described in terms of.
 
 /** Which sensation a temperature word NAMES — not which direction it asks for.
  *  "hot" and "cool" both name a temperature; whether the person wants more or

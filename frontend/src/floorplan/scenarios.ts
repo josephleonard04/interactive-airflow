@@ -804,29 +804,41 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // at the vent" correct needs the bed to sit between the window and the
     // kitchen, which is a different room.
     goals: [
-      // 0.15 → 0.20, re-measured after three changes to how fresh air is
-      // modelled (see sim3d): it has to be carried rather than diffusing, an
-      // opening beside an extract counts for almost nothing, and openings share
-      // one budget of make-up air instead of each supplying its own.
+      // 0.20 → 0.17, re-measured after the opening discounts moved from being a
+      // head start at the opening to a cost per metre travelled (see sim3d,
+      // openingReach). That change was made so an open window greens its own
+      // doorstep whatever else is open — and it also separated this task's
+      // answer from its near misses far more cleanly than the old model did.
       //
-      // The ordering is now the one the room actually has. Best of 48 fan
-      // placements and aims for the two window choices that matter:
-      //     everything shut, fan as delivered   0.395
-      //     RIGHT window only (short circuit)   0.345   ← the trap
-      //     BOTH windows, best fan              0.248   ← two is worse than one
-      //     BOTH windows, no fan                0.308
-      //     bed-side window only, no fan        0.247
-      //     bed-side window only, best fan      0.157   ← the answer
-      // Opening the second window costs you: it halves what the bed-side window
-      // draws in and hands that air to an extract two metres away, so the best
-      // arrangement with both open (0.248) is worse than the bed-side window on
-      // its own with no fan at all (0.247), and far worse than the same window
-      // with the fan (0.157).
+      // Swept 432 fan placements and aims (9 x 7 spots x 8 headings), best per
+      // window choice:
+      //     everything shut, best fan           0.297
+      //     RIGHT window only, best fan         0.285   ← the trap
+      //     BOTH windows, no fan                0.326
+      //     BOTH windows, best fan              0.203   ← two is worse than one
+      //     bed-side window only, no fan        0.250
+      //     bed-side window only, best fan      0.122   ← the answer
       //
-      // 0.20 sits in the 0.157 → 0.247 gap: it clears the solution by 27% and
-      // rejects the nearest non-solution by 19%. Widest margin this task has
-      // had.
-      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.20 },
+      // Opening the second window costs you twice over: it halves the make-up
+      // air the bed-side window draws in, and what it draws in itself is eaten
+      // by an extract two metres away. Both windows open is still better than
+      // no fan at all (0.203 against 0.250) — the second window is a waste, not
+      // a catastrophe — but it is 66% worse than the same fan with that window
+      // shut, and it lands the wrong side of the bar while that lands well
+      // clear. Shutting it is worth more than any fan move.
+      //
+      // WHERE THE FAN GOES IS THE WHOLE ANSWER, and the room says so plainly:
+      // every one of the ten placements under 0.17 stands the fan at or beside
+      // the bed-side window (x 2.6-4.6, z 4.0-4.5), and every heading from that
+      // spot clears the bar — 0.122 pointed along the near wall, 0.143 aimed
+      // diagonally at the kitchen extract, 0.176 pointed straight at the
+      // kitchen. Aim it however you like; stand it in the window's inflow.
+      //
+      // 0.17 sits in the 0.143 → 0.203 gap. It clears the aimed-at-the-extract
+      // answer by 19% and rejects the best both-windows arrangement by 18% —
+      // where 0.20 rejected it by 1.5%, which is not a margin, it is a
+      // coincidence. Widest this task has had at both ends.
+      { label: "The smell stays off the bed", metric: "smell", roomId: "studio", nearItem: "bed", atMost: 0.17 },
     ],
     // Denser than the default 14. This is ONE open room where the whole question
     // is which way the air crosses it, and the two-room homes' reasoning — that
@@ -835,15 +847,16 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // like nothing is happening.
     viz: { maxSeeds: 26 },
     success:
-      "Smell over the bed ≤ 0.15: the BOTTOM window open and a fan working with " +
-      "it. Both levers are needed — the window alone reaches 0.162 and the fan " +
-      "alone 0.307. Two families of placement clear it: the fan beside the bed " +
-      "aimed at the kitchen extract (0.140), and the fan standing in the open " +
-      "window sweeping across the bed (0.095), which is stronger. The right-hand " +
-      "window is the trap: two metres from the extract, its air goes straight " +
-      "back out, so it changes nothing alone (0.300) and makes things worse with " +
-      "a fan (0.327). Opening BOTH is no shortcut (0.164) — the second window " +
-      "only robs the first of the inflow that was crossing the room.",
+      "Smell over the bed ≤ 0.17: the BOTTOM (bed-side) window open, the " +
+      "right-hand one SHUT, and the fan standing in that window's inflow — any " +
+      "heading, including straight at the kitchen extract. Best measured 0.122; " +
+      "aimed at the extract, 0.143. Both levers are needed: the window alone " +
+      "reaches 0.250 and the fan alone 0.297. The right-hand window is the trap " +
+      "— two metres from the extract, the air it lets in is pulled back out " +
+      "before it crosses the room, so it airs out its own corner and nothing " +
+      "else (0.285 with the best fan). Opening BOTH is the near miss at 0.203: " +
+      "better than no fan, still a fail, and the fix is to shut the second " +
+      "window rather than to move the fan again.",
     build: buildStudio,
   },
   humidity: {
@@ -856,9 +869,34 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "and the windows drip with condensation on a winter morning. You can still " +
       "decide where the window and the extract vent go, on any of the outside " +
       "walls. Get the damp corner behind the bath drying out.",
+    // Split into the same four labelled parts as the winter and summer tasks:
+    // the situation, what done looks like, and the two lists of what does and
+    // does not move. Same reasoning as those two — a single paragraph buries
+    // the levers, and leaving "what is fixed" implicit sends the participant
+    // hunting for controls that were never there.
+    situation:
+      "You are designing a new home somewhere with damp, humid summers and cold winters — " +
+      "the kind of place where a bathroom corner goes black with mould and the windows " +
+      "run with condensation on a winter morning. The bathroom is laid out: a bath and a " +
+      "shower down one side, the toilet and basin down the other. The extract fan is " +
+      "already fitted and runs all the time, and it and the window are pencilled in beside " +
+      "each other — neither is built yet, so both are still yours to place.",
+    // No number, no tick-box, and the same explicit "you decide when you're
+    // done" the other tasks carry — without it the absence of a checklist reads
+    // as a missing feature rather than as permission to stop.
+    goal:
+      "Get the bathroom drying out properly after a shower, so the damp corner behind the " +
+      "bath does not stay wet. Keep changing things until you are happy with the result, " +
+      "then press Submit. There is no score to collect and no right number to hit: you " +
+      "decide when it is good enough.",
     youCanChange:
-      "Move the extract vent and the window to any outside wall, and open or " +
-      "close the window. The room and its fittings are already laid out.",
+      "Move the extract vent and the window to any outside wall, and open or close the " +
+      "window. Run the simulation as many times as you like.",
+    youCannotChange:
+      "The room and its fittings are already laid out — the bath, the shower, the toilet " +
+      "and the basin stay where they are. The door stays shut: you do not dry a bathroom " +
+      "out by leaving the door open. The extract runs at one speed and cannot be turned up " +
+      "or switched off. The weather outside is fixed.",
     // lockPower: the extract has one speed and runs all night. An on/off switch
     // and a Low/Med/High row invite "turn it up" as a substitute for thinking
     // about where it goes, which is the only thing this task is about.
@@ -887,33 +925,39 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // left diagonally opposite the vent where it used to be, merely opening it
     // dried the room in 32 minutes and the placement question never came up.
     goals: [
-      // 35 → 39 min, re-measured after the three changes to how fresh air is
-      // modelled (see sim3d). All of them slow every design down; what the task
-      // is scored on is the ORDERING, and that still separates cleanly. Vent
-      // swept over 8 positions, window open:
-      //     as delivered   56 min   ← the problem being posed
-      //     NW             45 min
-      //     south mid      44 min
-      //     west mid       43 min
-      //     SW             42 min
-      //     SE             40 min
-      //     east mid       38 min
-      //     north mid      36 min
-      //     NE corner      36 min   ← the far side from the damp corner
-      // 39 admits the three placements that put the extract across the room from
-      // the wet corner and rejects the five nearer ones. The gap it sits in
-      // (38 → 40) is only two minutes, so this task discriminates by less than
-      // the studio does — worth widening the room or moving the damp corner if
-      // it is used for anything load-bearing.
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 39 },
+      // 39 → 54 min. THE OLD NUMBER HAD BECOME UNREACHABLE — worth stating
+      // plainly, because a task nobody can pass is worse than one that is easy:
+      // the participant works, submits, and is silently scored a failure no
+      // arrangement would have avoided. Re-measured over 9 extract positions
+      // with the window open:
+      //     as delivered (beside the window)   78 min   ← the problem posed
+      //     south mid                          73 min
+      //     SW corner                          73 min
+      //     west mid                           72 min
+      //     SE corner                          68 min
+      //     NW corner                          65 min
+      //     east mid                           57 min
+      //     north mid                          50 min
+      //     NE corner                          50 min   ← across from the damp
+      // Shut, the room takes 75 minutes however the extract is placed: opening
+      // the window where it was built buys 3 minutes, because the two sit a
+      // metre apart and the air crosses that metre and leaves.
+      //
+      // 54 sits in the 50 → 57 gap, admitting the two placements that put the
+      // extract across the room from the wet corner and rejecting the seven
+      // nearer ones. That is 8% either side — thinner than the studio's 18%,
+      // and the reason is the room: 3.6 x 4.2 with a bath down one side does
+      // not leave many genuinely different places to put a vent. Widen the room
+      // before leaning on this number for anything load-bearing.
+      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 54 },
     ],
     success:
-      "Everywhere in the bathroom dry within 35 minutes, measured on the slow " +
-      "90% of the room. Reached by opening the window AND moving it away from " +
-      "the extract, so the air has to cross the floor to get from one to the " +
-      "other. Shut, the room takes about an hour; open but left beside the " +
-      "extract, 51 minutes — the air short-circuits along one wall and the damp " +
-      "corner never clears.",
+      "Everywhere in the bathroom dry within 54 minutes, measured on the slow " +
+      "90% of the room. Reached by opening the window AND putting the extract " +
+      "across the room from it — north wall or NE corner, 50 min — so the air " +
+      "has to cross the floor to get from one to the other. Shut, the room takes " +
+      "75 minutes; open but left beside the extract, 78 — the air crosses the " +
+      "metre between them, leaves, and the damp corner never clears.",
     build: buildBathroom,
   },
   smell: {

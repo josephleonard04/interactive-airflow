@@ -75,12 +75,13 @@ plain-language goal ──► intent→physics ──► objective {room, scalar
 | **3D editor & UI** | `components/Editor.tsx` (canvas, drag, walls, camera views), `Panel.tsx` (right panel + inspector), `SimPanel.tsx` (sim controls, presets, intent box, engine toggle), `SetupScreen.tsx`, `models.tsx` (all furniture/device meshes), `ItemMesh.tsx` (selection + fan sweep animation), `FlowField3D.tsx` (runs the sim, renders all field views) | **UI work starts here** — theme lives in `styles.css` (CSS variables at the top) |
 | **Solver** | `sim/euler3d.ts` (incompressible Euler, MAC grid, semi-Lagrangian advection, pressure projection, buoyancy), `sim/sim3d.ts` (voxelizes the home → solids/inlets/outlets/jets; `advectDiffuseFill` carries temp/smell along the converged flow), `sim/noise.ts` (appliance noise: dB falloff + per-wall attenuation) | Coarsened (~18k cells) to stay real-time single-threaded |
 | **Viz** | `viz/streamlines.ts` | RK2 integration, whole-house seeding, Catmull-Rom smoothing, speed colouring; drawn as animated dashed fat lines |
-| **Intent** | `intent/objectives.ts` (lexicon parse + room grounding → objective), `intent/evaluate.ts` (objective vs simulated field → verdict), `intent/optimize.ts` + `intent/searchOptimize.ts` (**derivative-free greedy search**: layout-derived candidates, constraint filter, each candidate scored by a coarse solver run, ~20 evals ≈ 1–2 s) | Not differentiable / no ML — deliberate; see slide notes |
+| **Intent** | `intent/objectives.ts` (lexicon parse + room grounding → objective), `intent/llmGoal.ts` (model fallback for wording the lexicon misses, grounded to the same vocabulary), `intent/evaluate.ts` (objective vs simulated field → verdict), `intent/optimize.ts` + `intent/searchOptimize.ts` (**derivative-free greedy search**: layout-derived candidates, constraint filter, each candidate scored by a coarse solver run, ~20 evals ≈ 1–2 s) | Not differentiable / no ML — deliberate; see slide notes |
 | **Accurate engine** | `engine/accurate.ts`, `bc/lfm.ts` (`compileLfmScene`: scene → domain grid + solids + flux-balanced inlets/outlets) | Talks to `backend/` at `http://127.0.0.1:8000` |
 
 ### Backend API (`backend/`)
 
-- `GET /api/health` → `{ openfoam, version, mode }` — is OpenFOAM available?
+- `GET /api/health` → `{ openfoam, version, mode, goalParser }` — is OpenFOAM available, and does the goal parser have a credential?
+- `POST /api/parse-goal` → `{ text, rooms, items, outdoor_temp }` → `{ objectives }` or `{ error }`. Reads a typed comfort goal the frontend's keyword dictionary could not, and answers **only** in that same objective vocabulary (`goal_parser.py`), so the result stays checkable against the solver. Needs `ANTHROPIC_API_KEY`; without one the app falls back to the dictionary alone and says so.
 - `POST /api/run` → writes the exported case, runs `blockMesh → snappyHexMesh → topoSet → createPatch → buoyantSimpleFoam`, samples U/T at the viewer's grid points, returns `{ status: ok|mock|error, grid, log }`. `mock_engine.py` supplies the approximate preview when OpenFOAM is absent. Configure WSL/Docker via `OPENFOAM_RUN_CMD` (e.g. `wsl -e bash -lc`).
 
 ## Verifying changes
@@ -95,10 +96,14 @@ The sim modules are importable headlessly (Node or browser console):
 
 - Solver is a coarse prototype (real-time first); OpenFOAM path is generated but untested against a live install yet.
 - Scalar fields beyond temp/smell/noise (CO₂, humidity, PM2.5) are planned.
-- Intent parsing is a dictionary — deterministic, offline, and checkable. Every
-  sentence it reads maps to the same small objective vocabulary the solver
-  scores, so a goal is never free-form text. What it cannot read it says so
-  about, and the sentence is logged verbatim as the coverage gap.
+- Intent parsing is a dictionary first and a model second, and both answer in
+  the same small objective vocabulary the solver scores — so a goal is never
+  free-form text, whichever route read it. The dictionary is deterministic,
+  offline and instant; the model (`backend/goal_parser.py`) only ever sees
+  wording the dictionary could not match. With no backend, no key or no network
+  the app behaves exactly as it did with the dictionary alone, and says which
+  kind of nothing it is looking at rather than leaving a dead button. Sentences
+  neither could read are logged verbatim as the coverage gap.
 - The optimizer is greedy + budgeted, not globally optimal — every change is user-reviewable by design.
 - `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
 

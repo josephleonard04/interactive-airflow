@@ -677,8 +677,17 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     reverse = false,
     v0 = V0,
     /** Per-seed head start, in the same cost units (seconds). Used to start a
-     *  short-circuited opening BEHIND — see shortCircuitLag. */
+     *  source BEHIND. Unused now that both opening discounts are charged as
+     *  reach rather than as a head start; kept because the machinery is
+     *  general and the next discount may genuinely belong at the source. */
     seedCost?: (cell: number) => number,
+    /** Per-seed multiplier on every step of the path that leaves that seed, so
+     *  a source can carry LESS FAR without being penalised at the source
+     *  itself. `seedCost` cannot express that: it shifts the whole field by a
+     *  constant, which makes the ground right at an open window read as stale —
+     *  and the one thing an open window is certainly delivering is outdoor air
+     *  to its own doorstep. See openingReach. */
+    seedReach?: (cell: number) => number,
   ): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
@@ -729,10 +738,16 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         [hc[p], hc[m]] = [hc[m], hc[p]]; [hi[p], hi[m]] = [hi[m], hi[p]]; p = m; }
       return [rc, rcell];
     };
+    // Which seed's multiplier a cell's best-known path is carrying. Dijkstra
+    // already tracks the best path; this just rides along with it, so a
+    // half-share window's air costs more per metre for the whole of its
+    // journey rather than being docked a lump sum before it sets off.
+    const reach = seedReach ? new Float64Array(n3).fill(1) : null;
     for (const c of seeds)
       if (!sim.solid[c] && dist[c] === Infinity) {
         const c0 = seedCost ? seedCost(c) : 0;
         dist[c] = c0;
+        if (reach) reach[c] = seedReach!(c);
         push(c0, c);
       }
     while (hn > 0) {
@@ -753,8 +768,12 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         // Downwind is fast; upwind is slow but never free — the floor keeps
         // diffusion alive so a strong jet cannot make a region unreachable.
         const speed = Math.max(0.05, v0 + KADV * Math.max(0, vd) - kUp * Math.max(0, -vd));
-        const nc = cost + dx / speed;
-        if (nc < dist[cc]) { dist[cc] = nc; push(nc, cc); }
+        const nc = cost + (dx / speed) * (reach ? reach[c] : 1);
+        if (nc < dist[cc]) {
+          dist[cc] = nc;
+          if (reach) reach[cc] = reach[c];
+          push(nc, cc);
+        }
       }
     }
     return dist;
@@ -832,7 +851,7 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    * clean the air around it — that is what an extract is for — and it is not
    * short-circuiting itself.
    */
-  const SC_LAG = 12;      // seconds of head start lost by an opening ON the grille
+  const SC_MULT = 5;      // extra cost per metre for an opening ON the grille
   const SC_LAMBDA = 2.0;  // metres over which that penalty decays
   const dVent = ventSeeds.length ? bfs(ventSeeds) : null;
 
@@ -852,8 +871,21 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    * Share is taken from the opening's own size: the ambient cells are grouped
    * into connected openings, and each group's share is its cells over all of
    * them, which is area over total area — how the flux balance splits it too.
+   *
+   * IT COSTS REACH, NOT DOORSTEP. This was a lump added to the opening's
+   * starting cost, which shifts its entire freshness field — including the
+   * cell in the window frame. That reads wrong on screen and is wrong on the
+   * physics: whatever else is open, the air arriving at an open window is
+   * outdoor air, so its own doorstep is fresh. Opening a second window did not
+   * make the first one's threshold stale; it made the air the first one brings
+   * in run out of push sooner. So the share is now a multiplier on every metre
+   * the air travels away from that opening (see seedReach): a half-share window
+   * still greens the ground under it, and carries that green half as far into
+   * the room.
    */
-  const SPLIT_LAG = 4;
+  /** Ceiling on the combined reach penalty, so a sliver of an opening on the
+   *  extract's doorstep is heavily discounted rather than annihilated. */
+  const REACH_MAX = 10;
   const openingShare = new Float32Array(n3);
   {
     const group = new Int32Array(n3).fill(-1);
@@ -888,20 +920,31 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     }
   }
 
-  const shortCircuitLag = (c: number): number => {
-    if (ventDilute[c]) return 0;
-    // Short circuit: how much of this opening's air the extract eats immediately.
+  /** Cost multiplier per metre travelled, combining both discounts. Neither is
+   *  charged at the opening itself — an open window's own threshold is outdoor
+   *  air whatever else is going on, and the picture should say so. What each
+   *  one costs is REACH: how far into the room that air gets before it runs
+   *  out of push.
+   *
+   *  Short circuit: a window on the extract's doorstep greens its own corner
+   *  and nothing else, because that is precisely what happens — the air comes
+   *  in and goes straight back out two metres later. As a starting penalty this
+   *  drew the trap window as though no air came through it at all, which hides
+   *  the mechanism the task is about instead of showing it.
+   *
+   *  Split: an opening supplying half the make-up air pushes it half as far. */
+  const openingReach = (c: number): number => {
+    if (ventDilute[c] || !ambient[c]) return 1;
     const d = dVent ? dVent[c] : Infinity;
-    const sc = !dVent || d === Infinity ? 0 : SC_LAG * Math.exp(-d / SC_LAMBDA);
-    // Split: how little of the home's make-up air is coming through here.
-    const share = ambient[c] ? Math.max(1e-3, openingShare[c]) : 1;
-    return sc + SPLIT_LAG * Math.log(1 / share);
+    const sc = !dVent || d === Infinity ? 1 : 1 + SC_MULT * Math.exp(-d / SC_LAMBDA);
+    const split = 1 / Math.max(1e-3, openingShare[c]);
+    return Math.min(REACH_MAX, sc * split);
   };
   const smell = new Float32Array(n3);
   const dry = new Float32Array(n3).fill(DRY_NEVER);
   {
-    const dFwd0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, shortCircuitLag) : null;
-    const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, shortCircuitLag) : null;
+    const dFwd0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, undefined, openingReach) : null;
+    const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, undefined, openingReach) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c]) continue;
       const dK = Math.min(dFwd0 ? dFwd0[c] : Infinity, dOut0 ? dOut0[c] : Infinity);
@@ -918,8 +961,8 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     // downstream of it existed, and the grille that is busy pulling the whole
     // kitchen's air outside was scoring no better than the middle of the room.
     // Whichever route reaches a cell sooner is the one that cleans it.
-    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, shortCircuitLag) : null;
-    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, shortCircuitLag) : null;
+    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, undefined, openingReach) : null;
+    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, undefined, openingReach) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);

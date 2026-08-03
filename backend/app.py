@@ -1,12 +1,16 @@
-"""Local backend for the accurate (OpenFOAM) engine.
+"""Local backend for the accurate (OpenFOAM) engine and the goal parser.
 
 Endpoints
-  GET  /api/health  -> whether OpenFOAM is reachable + version
-  POST /api/run     -> write the exported case, run OpenFOAM (or mock), and
-                       return the sampled velocity/temperature field.
+  GET  /api/health     -> whether OpenFOAM is reachable + version, and whether
+                          the goal parser has a key
+  POST /api/run        -> write the exported case, run OpenFOAM (or mock), and
+                          return the sampled velocity/temperature field.
+  POST /api/parse-goal -> read a typed comfort goal the frontend's keyword
+                          dictionary could not (see goal_parser.py)
 
 Run it:
   pip install -r requirements.txt
+  export ANTHROPIC_API_KEY=...     # optional; only the goal parser uses it
   uvicorn app:app --host 127.0.0.1 --port 8000
 
 The web app calls http://127.0.0.1:8000 by default (override with
@@ -22,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from goal_parser import parse_goal, parser_configured
 from mock_engine import compute_mock_field
 from openfoam_runner import (
     detect_openfoam,
@@ -47,6 +52,15 @@ class RunRequest(BaseModel):
     points: list[list[float]]
 
 
+class ParseGoalRequest(BaseModel):
+    """One typed sentence plus just enough of the home to ground it in."""
+
+    text: str
+    rooms: list[dict[str, Any]] = []
+    items: list[str] = []
+    outdoor_temp: float | None = None
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     info = detect_openfoam()
@@ -55,7 +69,20 @@ def health() -> dict[str, Any]:
         "version": info["version"],
         "mode": info["mode"],
         "detail": info["detail"],
+        # Whether a key is PRESENT, not whether it works — see goal_parser.
+        "goalParser": parser_configured(),
     }
+
+
+@app.post("/api/parse-goal")
+def parse_goal_route(req: ParseGoalRequest) -> dict[str, Any]:
+    """Read a comfort goal the frontend's keyword dictionary could not.
+
+    Always 200: the caller is a live study session, and every failure mode here
+    has the same remedy (tell the participant, keep going). The body carries
+    either `objectives` or `error`.
+    """
+    return parse_goal(req.text, req.rooms, req.items, req.outdoor_temp)
 
 
 @app.post("/api/run")

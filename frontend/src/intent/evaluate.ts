@@ -1,6 +1,7 @@
 import type { FloorPlan, Rect } from "../floorplan/types";
 import { computeRoomLevels } from "../sim/roomLevels";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans } from "../sim/sim3d";
+import { parseGoalWithLLM, type LlmReason } from "./llmGoal";
 import { parseGoal, type Objective } from "./objectives";
 
 // Evaluate an intent objective against the simulation's steady-state result:
@@ -182,12 +183,43 @@ export function evaluateObjectives(
   return objs.map((o) => evaluateObjective(o, plan, ctx));
 }
 
-/** Turn a typed sentence into objectives. THE dictionary — there is no second
- *  parser behind it and no network call, so this is the whole language layer:
- *  what it does not know, the tool does not understand. It is synchronous and
- *  offline by construction, which is also what lets a session run with no
- *  backend, no key, and no internet. */
-export function resolveObjectives(
+/** What the language layer made of a typed sentence, and how. `via` is for the
+ *  study log and for choosing what to say when it came back empty — "I have
+ *  never heard that word" and "I read it and there was no goal in it" need
+ *  different sentences in front of a participant. */
+export interface Resolution {
+  objectives: Objective[];
+  via: "dictionary" | "model";
+  reason: LlmReason;
+}
+
+/** Turn a typed sentence into objectives, dictionary first and the model second.
+ *
+ *  The dictionary is fast, offline, and covers the phrasings the pilot produced,
+ *  so anything it recognises is resolved instantly with no key, no backend and
+ *  no network — which is also what lets a session run on a laptop with none of
+ *  those. The model only ever sees wording the dictionary could not match, and
+ *  is asked to answer in the same objective vocabulary, so what comes back is
+ *  still checkable against the solver rather than free text the app must trust.
+ *
+ *  When the model is unavailable this returns exactly what the dictionary alone
+ *  would have — plus a reason, so the panel can say which kind of nothing it is
+ *  looking at instead of leaving a button that appears to do nothing. */
+export async function resolveObjectives(
+  text: string,
+  plan: FloorPlan,
+  sketch?: Rect | null,
+  opts: { outdoorTemp?: number; signal?: AbortSignal } = {},
+): Promise<Resolution> {
+  const dict = parseGoal(text, plan, sketch ?? null, opts);
+  if (dict.length) return { objectives: dict, via: "dictionary", reason: "ok" };
+  const llm = await parseGoalWithLLM(text, plan, sketch ?? null, opts);
+  return { objectives: llm.objectives, via: "model", reason: llm.reason };
+}
+
+/** The dictionary on its own, synchronous. For callers that cannot await —
+ *  the sketch path, and anything running inside the optimizer's own loop. */
+export function resolveObjectivesOffline(
   text: string,
   plan: FloorPlan,
   sketch?: Rect | null,

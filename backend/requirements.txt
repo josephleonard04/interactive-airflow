@@ -1,3 +1,6 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2
+# Reads typed comfort goals the keyword dictionary cannot (see goal_parser.py).
+# Optional: with no ANTHROPIC_API_KEY the app falls back to the dictionary alone.
+anthropic>=0.69
