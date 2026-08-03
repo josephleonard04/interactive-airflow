@@ -137,6 +137,19 @@ export interface FloorPlan {
    *  the studio's whole lesson is that a short-circuited grille cleans nothing —
    *  so it is opt-in and 1 everywhere else. */
   ventSpread?: number;
+  /** Does a SEALED room still get a dry patch in front of the extract?
+   *
+   *  With nothing open there is no make-up air and the fan cannot turn the room
+   *  over — every task keeps that. What this adds is that the grille still
+   *  clears the air immediately in front of it, drawn from whatever leaks in
+   *  around the door, instead of the whole room reading uniformly wet as though
+   *  the fan were switched off.
+   *
+   *  Opt-in, because the studio's grille sits directly over the bin: a halo
+   *  there scrubs the smelliest spot in the room clean and deletes that task's
+   *  entire lesson. Only the bathroom, where the extract is the one thing the
+   *  participant moves, wants it. */
+  sealedHalo?: boolean;
   name: string;
   size: HomeSize;
   bounds: Rect;

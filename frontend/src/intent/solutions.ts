@@ -3,6 +3,7 @@ import type { FloorPlan, Opening, PlacedItem, Vec3 } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
+import { windowPlacements, windowSideName, withOpeningMoved } from "../floorplan/openings";
 import { candidateSpots } from "./searchOptimize";
 import { DEVICE_LABEL, GOAL_DEVICES, ROOM_BOUND_DEVICES, largestRoom, type OptimizeGoal } from "./optimize";
 import type { FlowHint } from "./sketch";
@@ -771,6 +772,15 @@ export interface FindOptions {
   /** Where a drawn arrow starts and ends. A fan is placed at the TAIL, aimed
    *  along it — see FlowHint. */
   flow?: FlowHint;
+  /** May the search MOVE a window, not just open and shut it?
+   *
+   *  Off by default, and deliberately opt-in per task. In the bathroom the
+   *  window's position is half the question — the extract and the glazing
+   *  short-circuit when they are close, and the participant is expected to
+   *  separate them — so a search that can only toggle it is answering a
+   *  different question from the one being asked. Everywhere else the glazing
+   *  is part of the building and suggesting it move is not advice. */
+  moveOpenings?: boolean;
 }
 
 /**
@@ -801,10 +811,34 @@ export function findSolutions(
   for (const st of strategies) {
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
+    const fid = dryingTask ? SCREEN_DRY : SCREEN;
     const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow);
-    const { score } = evaluate(placed, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN, dryingTask);
-    screened.push({ strategy: st, plan: placed, score, changes });
-    altsByStrategy.set(st.id, { base: placed, alts: primaryAlts });
+    // …and then, if the task allows it, where the GLAZING goes. Done after the
+    // devices rather than as another strategy dimension: window position times
+    // open/shut times power would multiply the strategy count past the point
+    // where any of them get a placement search worth the name, and in practice
+    // a person settles the extract first and then asks where the window should
+    // be relative to it.
+    let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, dryingTask).score };
+    if (opts.moveOpenings) {
+      for (const win of placed.windows) {
+        if (win.fixed || win.locked) continue;
+        for (const spot of windowPlacements(placed, win)) {
+          if (spot.a[0] === win.a[0] && spot.a[1] === win.a[1]) continue;
+          const trial = withOpeningMoved(best.plan, { ...spot, open: win.open });
+          const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask);
+          if (score > best.score) {
+            best = {
+              plan: trial,
+              changes: [...changes, `Window → ${windowSideName(trial, spot)}`],
+              score,
+            };
+          }
+        }
+      }
+    }
+    screened.push({ strategy: st, plan: best.plan, score: best.score, changes: best.changes });
+    altsByStrategy.set(st.id, { base: best.plan, alts: primaryAlts });
   }
 
   // WHEN THERE IS ONLY ONE STRATEGY, THE ALTERNATIVES ARE PLACEMENTS. A task

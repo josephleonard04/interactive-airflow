@@ -566,6 +566,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           lockPower: s.tools.lockPower === true,
           allowedDevices,
           flow,
+          moveOpenings: s.tools.movableOpenings === true,
         });
         // Never hand back a finished task — see withholdComplete.
         const taskGoals = s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : [];
