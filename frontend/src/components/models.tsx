@@ -245,7 +245,12 @@ function Vent([w, h, d]: V, on = true) {
   // Sized off the grille, not as a fraction of it: at 7.5% of the short side the
   // lamp came out about a centimetre across on a wall vent seen from across the
   // room, which is present but not visible.
-  const led = Math.max(0.05, Math.min(w, d) * 0.3);
+  // A small rectangular indicator, the shape these actually are on an extract
+  // fan. The round bead read as a bulb stuck on the grille; a lozenge reads as
+  // part of it. Sized in the grille's own proportions so it stays a detail —
+  // roughly a fifth of the face across and a sliver deep.
+  const lw = Math.max(0.03, w * 0.2);
+  const ld = Math.max(0.012, d * 0.13);
   const lit = on ? "#00e05a" : "#ff2d2d";
   return (
     <group>
@@ -254,27 +259,20 @@ function Vent([w, h, d]: V, on = true) {
         const z = -d / 2 + (d / (slats + 1)) * (i + 1);
         return <Box key={i} size={[w * 0.86, 0.012, 0.03]} position={[0, h * 0.2, z]} color="#8b95a1" />;
       })}
-      {/* The lamp: a bright emissive bead sitting proud of the face, wrapped in a
-          soft halo of the same colour. The halo is what makes it findable from
-          across the room — an emissive material alone does not actually cast
-          light in this renderer, so without it the bead only reads at close
-          range. No dark surround: the glow separates it from the grey slats on
-          its own, and a black ring just looked like a hole in the vent. */}
-      <group position={[w * 0.3, h * 0.3, 0]}>
+      {/* The lamp, lying flat on the face beside the slats: a lit lozenge with
+          one faint bloom around it. The bloom is what makes it findable from
+          across the room — an emissive material does not actually cast light in
+          this renderer, so the lozenge alone only reads close up. No dark
+          surround; at this size a black ring read as a hole in the vent rather
+          than a lamp mounted on it. */}
+      <group position={[w * 0.28, h * 0.26, 0]}>
         <mesh>
-          <sphereGeometry args={[led, 16, 16]} />
+          <boxGeometry args={[lw, 0.008, ld]} />
           <meshStandardMaterial color={lit} emissive={lit} emissiveIntensity={4} roughness={0.15} toneMapped={false} />
         </mesh>
-        {/* Kept inside the grille's own footprint. At 3.4× the bead the halo came
-            out 34 cm across on a 30 cm vent — wider than the thing it is meant to
-            label, and deep enough to poke out through the wall behind it. */}
-        <mesh>
-          <sphereGeometry args={[led * 1.6, 16, 16]} />
-          <meshBasicMaterial color={lit} transparent opacity={0.26} depthWrite={false} toneMapped={false} />
-        </mesh>
-        <mesh>
-          <sphereGeometry args={[led * 2.3, 16, 16]} />
-          <meshBasicMaterial color={lit} transparent opacity={0.12} depthWrite={false} toneMapped={false} />
+        <mesh position={[0, -0.002, 0]}>
+          <boxGeometry args={[lw * 1.5, 0.006, ld * 2.2]} />
+          <meshBasicMaterial color={lit} transparent opacity={0.2} depthWrite={false} toneMapped={false} />
         </mesh>
       </group>
     </group>
