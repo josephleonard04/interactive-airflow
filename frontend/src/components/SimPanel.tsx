@@ -73,7 +73,7 @@ export function SimPanel() {
   const [goal, setGoal] = useState("");
   /** Set when a typed sentence could not be turned into an objective, so the
    *  panel can say so instead of doing nothing. */
-  const [unparsed, setUnparsed] = useState<string | null>(null);
+  const [unparsed, setUnparsed] = useState<{ text: string; reason: string } | null>(null);
   /** True while the parser (and possibly the backend) is reading the sentence. */
   const [resolving, setResolving] = useState(false);
   const [results, setResults] = useState<Evaluation[]>([]);
@@ -130,10 +130,10 @@ export function SimPanel() {
     setResolving(true);
     try {
       const livePlan = useSceneStore.getState().plan;
-      const { objectives, usedLLM } = await resolveObjectives(t, livePlan, sketchRegion);
+      const { objectives, usedLLM, reason } = await resolveObjectives(t, livePlan, sketchRegion);
       if (!objectives.length) {
-        useSceneStore.getState().logEvent("unparsed", { text: t, usedLLM });
-        setUnparsed(t.slice(0, 60));
+        useSceneStore.getState().logEvent("unparsed", { text: t, usedLLM, reason });
+        setUnparsed({ text: t.slice(0, 60), reason });
         return;
       }
       if (applyObjectives(objectives, t)) recheckGoal.current = t;
@@ -241,9 +241,39 @@ export function SimPanel() {
                   color: "var(--ink)",
                 }}
               >
-                I didn't understand “{unparsed}” well enough to search. Try saying which room or
-                thing it is about and what you want there — for example “keep the bedroom cool”,
-                “fresh air near the bed”, or “no air blowing on the bed”.
+                {unparsed.reason === "bad-key" ? (
+                  <>
+                    The free-text reader rejected its API key, so I can only match phrases like
+                    “keep the bedroom cool”, “fresh air near the bed” or “no air blowing on the
+                    bed”. <b>Set a valid ANTHROPIC_API_KEY and restart the backend</b> to have it
+                    read any sentence.
+                  </>
+                ) : unparsed.reason === "unreachable" || unparsed.reason === "no-key" ? (
+                  <>
+                    “{unparsed.text}” is outside the words I know, and the free-text reader{" "}
+                    {unparsed.reason === "no-key" ? "has no API key" : "is not running"} — so I can
+                    only match phrases like “keep the bedroom cool”, “fresh air near the bed” or
+                    “no air blowing on the bed”.{" "}
+                    <b>
+                      {unparsed.reason === "no-key"
+                        ? "Set ANTHROPIC_API_KEY and restart the backend"
+                        : "Start the backend (backend\run.ps1)"}
+                    </b>{" "}
+                    to have it read any sentence.
+                  </>
+                ) : unparsed.reason === "error" ? (
+                  <>
+                    The free-text reader failed on “{unparsed.text}”. Check the backend terminal —
+                    meanwhile phrases like “keep the bedroom cool” or “fresh air near the bed” still
+                    work.
+                  </>
+                ) : (
+                  <>
+                    I read “{unparsed.text}” but couldn't find a comfort goal in it. Say which room
+                    or thing it is about and what you want there — for example “keep the bedroom
+                    cool”, “fresh air near the bed”, or “no air blowing on the bed”.
+                  </>
+                )}
               </p>
             )}
           </>
