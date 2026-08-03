@@ -671,7 +671,15 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
    *  right-hand window adds nothing. It is not made WORSE, and saying otherwise
    *  would mean overriding the flow solution rather than reading it. */
   const V0_FRESH = 0.30;
-  const costFromSources = (seeds: number[], kUp = 0, reverse = false, v0 = V0): Float64Array => {
+  const costFromSources = (
+    seeds: number[],
+    kUp = 0,
+    reverse = false,
+    v0 = V0,
+    /** Per-seed head start, in the same cost units (seconds). Used to start a
+     *  short-circuited opening BEHIND — see shortCircuitLag. */
+    seedCost?: (cell: number) => number,
+  ): Float64Array => {
     // Float64, NOT Float32. The heap carries full-precision costs while `dist`
     // stored them rounded, and the staleness test compares the two:
     //     dist[cc] = nc          // rounded to float32 on the way in
@@ -721,7 +729,12 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
         [hc[p], hc[m]] = [hc[m], hc[p]]; [hi[p], hi[m]] = [hi[m], hi[p]]; p = m; }
       return [rc, rcell];
     };
-    for (const c of seeds) if (!sim.solid[c] && dist[c] === Infinity) { dist[c] = 0; push(0, c); }
+    for (const c of seeds)
+      if (!sim.solid[c] && dist[c] === Infinity) {
+        const c0 = seedCost ? seedCost(c) : 0;
+        dist[c] = c0;
+        push(c0, c);
+      }
     while (hn > 0) {
       const [cost, c] = pop();
       if (cost > dist[c]) continue;
@@ -794,16 +807,44 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
 
   // air quality: smell carried from the source by the airflow; near a window/vent
   // sink it drops to ~0 (odour leaves, fresh air enters); a shut door blocks it.
-  const smellSeeds: number[] = [], sinkSeeds: number[] = [];
+  const smellSeeds: number[] = [], sinkSeeds: number[] = [], ventSeeds: number[] = [];
   for (let c = 0; c < n3; c++) {
     if (sim.sFixed[c]) smellSeeds.push(c);
     if (ambient[c] || ventDilute[c]) sinkSeeds.push(c);
+    if (ventDilute[c]) ventSeeds.push(c);
   }
+
+  /**
+   * SHORT CIRCUIT. An opening a couple of metres from a running extract does not
+   * air the room out: the air it lets in is pulled straight back out again and
+   * never travels anywhere else. Treating every opening as an equally good
+   * source of fresh air made the studio's trap window look like a fix — open it
+   * and the floor greened out, when what actually happens is that the extract
+   * eats its air and the room stays exactly as stale as it was.
+   *
+   * So an opening starts BEHIND by how close it sits to an extract, measured
+   * along the air's own path rather than through walls. Right next to the
+   * grille it is worth almost nothing; a couple of metres away it is heavily
+   * discounted; across the room the discount has decayed to nothing and it
+   * airs the place out normally.
+   *
+   * The extract's own cells are exempt. A grille pulling stale air outside DOES
+   * clean the air around it — that is what an extract is for — and it is not
+   * short-circuiting itself.
+   */
+  const SC_LAG = 12;      // seconds of head start lost by an opening ON the grille
+  const SC_LAMBDA = 2.0;  // metres over which that penalty decays
+  const dVent = ventSeeds.length ? bfs(ventSeeds) : null;
+  const shortCircuitLag = (c: number): number => {
+    if (!dVent || ventDilute[c]) return 0;
+    const d = dVent[c];
+    return d === Infinity ? 0 : SC_LAG * Math.exp(-d / SC_LAMBDA);
+  };
   const smell = new Float32Array(n3);
   const dry = new Float32Array(n3).fill(DRY_NEVER);
   {
-    const dFwd0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH) : null;
-    const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH) : null;
+    const dFwd0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, shortCircuitLag) : null;
+    const dOut0 = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, shortCircuitLag) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c]) continue;
       const dK = Math.min(dFwd0 ? dFwd0[c] : Infinity, dOut0 ? dOut0[c] : Infinity);
@@ -820,8 +861,8 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     // downstream of it existed, and the grille that is busy pulling the whole
     // kitchen's air outside was scoring no better than the middle of the room.
     // Whichever route reaches a cell sooner is the one that cleans it.
-    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH) : null;
-    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH) : null;
+    const dFwd = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, false, V0_FRESH, shortCircuitLag) : null;
+    const dOut = sinkSeeds.length ? costFromSources(sinkSeeds, UPWIND, true, V0_FRESH, shortCircuitLag) : null;
     for (let c = 0; c < n3; c++) {
       if (sim.solid[c] || dS[c] === Infinity) continue;
       let v = Math.exp(-dS[c] / SMELL_TAU);
