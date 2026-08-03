@@ -96,6 +96,7 @@ export interface Sim3D {
   /** Carried through from the build options so geodesicFields — which is handed
    *  only the built sim — can honour the task's own tuning. */
   windowReach: number;
+  ventSpread: number;
   /** Is any exterior window or door actually open?
    *
    *  NOT the same as "are there ambient cells", which is what this used to be
@@ -158,6 +159,20 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // 2 °C outdoors; the AC is unchanged, since it was already landing correctly.
 const HEATER_T = 19;
 const AC_T = -10;
+/** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the only one.
+ *
+ *  Only the AC and the heater used to warm or cool anything, so the humidity
+ *  task had no temperature field at all: the steam was a contaminant with no
+ *  warmth behind it, air never rose off the shower, and the Airflow view —
+ *  which colours every streamline by the temperature of the air it carries —
+ *  drew the whole room one flat shade. The one thing that makes a bathroom
+ *  behave like a bathroom, that the wet end is warm and the glazing is not so
+ *  the air turns over between them, was invisible.
+ *
+ *  Kelvin above the room, and deliberately modest: this is a gentle convective
+ *  turnover, not a radiator against one wall. The plume is the vapour itself,
+ *  so it is the strongest; then the shower running; then a bath standing full. */
+const WET_T: Record<string, number> = { damp: 9, shower: 6, bathtub: 4 };
 const POWER: Record<number, number> = { 1: 0.5, 2: 1.0, 3: 1.6 };
 /** The heater's OWN power curve, kept separate from POWER because POWER also
  *  scales the AC, the fan thrust and vent flux — raising it globally would have
@@ -390,12 +405,15 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
     const isReturn = it.type === "return";
     const isFan = it.type === "fan";
     const isHeater = it.type === "heater";
-    if (!isAC && !isSupply && !isReturn && !isFan && !isHeater) continue;
+    const wetT = it.on === false ? undefined : WET_T[it.type];
+    // The wet fixtures are furniture, not hardware — they were skipped by this
+    // guard and their warmth never reached the solver at all.
+    if (!isAC && !isSupply && !isReturn && !isFan && !isHeater && wetT === undefined) continue;
     if (it.on === false) continue;
     const mult = POWER[it.power ?? 2] ?? 1;
     const cells = cellsOf(itemAabb(it));
     if (isAC) markers.push({ pos: [...it.position] as [number, number, number], kind: "cold" });
-    if (isHeater) markers.push({ pos: [...it.position] as [number, number, number], kind: "hot" });
+    if (isHeater || wetT !== undefined) markers.push({ pos: [...it.position] as [number, number, number], kind: "hot" });
 
     if (isAC || isSupply || isReturn || isFan) {
       // Direction follows how the unit is mounted (matches inwardNormal in
@@ -475,8 +493,9 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
       }
     }
-    if (isAC || isHeater) {
-      const dT = isAC ? AC_T * mult : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
+    if (isAC || isHeater || wetT !== undefined) {
+      const dT =
+        wetT !== undefined ? wetT : isAC ? AC_T * mult : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
       let placed = 0;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
@@ -537,7 +556,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, hasOpenExterior };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, ventSpread: plan.ventSpread ?? 1, hasOpenExterior };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -971,7 +990,10 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
       if (!s.hasOpenExterior) return SEALED_REACH;
       const dm = dOpening ? dOpening[c] : Infinity;
       if (dm === Infinity) return SEALED_REACH;
-      return Math.min(REACH_MAX, 1 + SC_MULT * Math.exp(-dm / SC_LAMBDA));
+      // `ventSpread` below 1 widens the grille's reach; it is 1 everywhere
+      // unless a task asks otherwise, so this line is the behaviour every other
+      // scenario has always had.
+      return Math.min(REACH_MAX, s.ventSpread * (1 + SC_MULT * Math.exp(-dm / SC_LAMBDA)));
     }
     if (!ambient[c]) return 1;
     const d = dVent ? dVent[c] : Infinity;

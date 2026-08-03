@@ -329,60 +329,72 @@ function Smell(size: V): JSX.Element {
   );
 }
 
-/** Damp: a puddle with steam rising off it. The smell marker is a violet blob
- *  and reads as "something smells here", which is the wrong sentence in a
- *  bathroom — this has to say "this patch is wet" at a glance. */
+/** The moisture source: a column of steam rising and spreading, drawn as a
+ *  stack of widening rings.
+ *
+ *  It used to be a blue puddle on the floor with three small wisps over it,
+ *  which read as spilled water — a thing that has already happened and is
+ *  sitting there — when what it represents is hot vapour being produced NOW and
+ *  going upward. That matters for this task specifically: the whole question is
+ *  where the air carries it, and a puddle does not suggest air at all. Rings
+ *  that widen as they climb say "this is rising and spreading" without a label. */
 function Damp(size: V): JSX.Element {
   const r = Math.min(size[0], size[2]) * 0.5;
+  const h = size[1];
+  const rings = [0, 1, 2, 3, 4];
   return (
     <group>
-      {/* the wet patch itself, lying on the floor */}
-      <mesh position={[0, -size[1] / 2 + 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[r, 24]} />
-        <meshStandardMaterial color="#4a7f9e" roughness={0.15} metalness={0.2} transparent opacity={0.75} />
+      {/* a faint warm base where the steam is coming off */}
+      <mesh position={[0, -h / 2 + 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[r * 0.85, 24]} />
+        <meshStandardMaterial color="#cfe6ef" emissive="#7fb4cc" emissiveIntensity={0.3} toneMapped={false} transparent opacity={0.5} />
       </mesh>
-      {/* three drifting wisps of steam */}
-      {[0, 1, 2].map((i) => (
-        <mesh key={i} position={[(i - 1) * r * 0.5, size[1] * (0.25 + i * 0.22), (i % 2 ? 1 : -1) * r * 0.2]}>
-          <sphereGeometry args={[r * (0.38 - i * 0.06), 12, 12]} />
-          <meshStandardMaterial
-            color="#dbeaf2"
-            emissive="#9fc4d6"
-            emissiveIntensity={0.35}
-            toneMapped={false}
-            transparent
-            opacity={0.42 - i * 0.1}
-          />
-        </mesh>
-      ))}
+      {rings.map((i) => {
+        const t = i / (rings.length - 1);
+        const rad = r * (0.32 + t * 0.72);
+        return (
+          <mesh key={i} position={[0, -h / 2 + 0.1 + t * h * 1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[rad, r * (0.11 - t * 0.05), 8, 22]} />
+            <meshStandardMaterial
+              color="#eef7fb"
+              emissive="#a8d2e4"
+              emissiveIntensity={0.45 - t * 0.2}
+              toneMapped={false}
+              transparent
+              opacity={0.55 - t * 0.34}
+            />
+          </mesh>
+        );
+      })}
     </group>
   );
 }
 
-/** Shower: a tiled tray with two glass panels and a head on the back wall. The
- *  glass is what makes it read as a shower rather than a tub from above, and it
- *  is a real flow obstacle — a screen in the corner is exactly the sort of thing
- *  that keeps air off the wall behind it. */
+/** Shower: a riser and a head on the wall over a shallow tray. NO GLASS.
+ *
+ *  The cubicle used to be two translucent panels, which read as a box from
+ *  above and — worse — was a real flow obstacle a metre and a half tall sitting
+ *  in the corner the steam comes off. An open wet area is both what most of
+ *  these rooms actually have and a far more honest picture of where the air can
+ *  go: the head is the thing to point at, and nothing blocks the corner. */
 function Shower([w, h, d]: V): JSX.Element {
-  const glass = { color: "#cfe3ea", roughness: 0.1, metalness: 0.05 };
   return (
     <group>
-      {/* tray */}
-      <Box size={[w, h * 0.06, d]} position={[0, -h / 2 + h * 0.03, 0]} color="#e9eef0" roughness={0.5} />
-      {/* back and side glass, open toward +x/+z so the corner it sits in stays reachable */}
-      <mesh position={[0, 0, -d / 2 + 0.02]} castShadow>
-        <boxGeometry args={[w, h * 0.94, 0.03]} />
-        <meshStandardMaterial {...glass} transparent opacity={0.35} />
+      {/* shallow tray, just enough to read as the wet patch of floor */}
+      <Box size={[w, 0.04, d]} position={[0, -h / 2 + 0.02, 0]} color="#e4ebee" roughness={0.45} />
+      {/* riser up the back wall */}
+      <Box size={[0.045, h * 0.62, 0.045]} position={[0, h * 0.06, -d / 2 + 0.06]} color="#b9c2c7" metalness={0.6} roughness={0.3} />
+      {/* the gooseneck arm out from the riser */}
+      <Box size={[0.04, 0.04, 0.22]} position={[0, h * 0.37, -d / 2 + 0.17]} color="#b9c2c7" metalness={0.6} roughness={0.3} />
+      {/* the head itself, tilted down into the room */}
+      <mesh position={[0, h * 0.34, -d / 2 + 0.29]} rotation={[Math.PI / 2.3, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.11, 0.11, 0.035, 20]} />
+        <meshStandardMaterial color="#c8d0d4" metalness={0.7} roughness={0.22} />
       </mesh>
-      <mesh position={[-w / 2 + 0.02, 0, 0]} castShadow>
-        <boxGeometry args={[0.03, h * 0.94, d]} />
-        <meshStandardMaterial {...glass} transparent opacity={0.35} />
-      </mesh>
-      {/* riser and head */}
-      <Box size={[0.05, h * 0.55, 0.05]} position={[0, h * 0.1, -d / 2 + 0.08]} color="#b9c2c7" metalness={0.6} roughness={0.3} />
-      <mesh position={[0, h * 0.36, -d / 2 + 0.16]} rotation={[Math.PI / 2.6, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.09, 0.09, 0.03, 16]} />
-        <meshStandardMaterial color="#c8d0d4" metalness={0.7} roughness={0.25} />
+      {/* the mixer valve, so it reads as plumbing rather than a lamp */}
+      <mesh position={[0, -h * 0.06, -d / 2 + 0.07]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.05, 0.05, 0.05, 14]} />
+        <meshStandardMaterial color="#b9c2c7" metalness={0.6} roughness={0.3} />
       </mesh>
     </group>
   );

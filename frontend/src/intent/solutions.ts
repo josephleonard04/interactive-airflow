@@ -952,14 +952,63 @@ export function withholdComplete(
     };
   };
 
+  /** The same solution with the OPENINGS kept and every device put back.
+   *
+   *  The other half-step keeps the primary device's move, which on a task whose
+   *  only movable thing IS the primary device is the whole answer — so it
+   *  completes the task, gets withheld with everything else, and the gallery
+   *  comes back empty. That happened on the bathroom the moment its threshold
+   *  became reachable: the search found a passing layout, every candidate was
+   *  withheld, and "Find solutions" did nothing at all, which is worse than
+   *  offering too much.
+   *
+   *  Opening the window without moving the grille is a real, honest half of
+   *  that task — necessary, nowhere near sufficient — and it is the half-step
+   *  for any task where the openings and the placement both matter. */
+  const openingsOnly = (s: Solution): Solution => {
+    const plan: FloorPlan = { ...s.plan, items: current.items };
+    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "drying");
+    return {
+      ...s,
+      id: `${s.id}-openings`,
+      label: "The openings only — a first step",
+      plan,
+      metrics,
+      score,
+      detail: ["Doors and windows set; where things stand is yours to work out"],
+    };
+  };
+
   const candidates = [...options, ...options.slice(0, 1).map(trim)];
-  const scored = candidates
-    .map((s) => ({ s, ...metCount(s.plan) }))
-    .filter((c) => c.total === 0 || c.met < c.total);
+  const keep = (list: Solution[]) => list.map((s) => ({ s, ...metCount(s.plan) })).filter((c) => c.total === 0 || c.met < c.total);
+  let scored = keep(candidates);
+  // ONLY WHEN THERE IS NOTHING LEFT. The openings-only step is a last resort,
+  // not a standing extra card: adding it unconditionally changed what every
+  // other task offers, and those were already the way they should be. It earns
+  // its place exactly when the normal candidates all finish the job and are
+  // therefore all withheld — which is the case that used to return an empty
+  // gallery and look like a broken button.
+  if (scored.length === 0) scored = keep(options.slice(0, 1).map(openingsOnly));
   if (scored.length === 0) return [];
 
   scored.sort((a, b) => b.met - a.met || b.s.score - a.s.score);
-  return scored.slice(0, want).map((c) => c.s);
+  const seen = new Set<string>();
+  const out: Solution[] = [];
+  for (const c of scored) {
+    // Two options that produce the same home are one option. The half-steps can
+    // collapse onto each other (or onto a full solution) whenever a task has
+    // only one movable device, and three cards that apply the same change are
+    // the "why did it suggest the same thing twice" complaint by another route.
+    const key = JSON.stringify([
+      c.s.plan.items.map((i) => [i.id, i.position[0].toFixed(2), i.position[2].toFixed(2), i.rotationY.toFixed(2), i.on ?? true]),
+      [...c.s.plan.doors, ...c.s.plan.windows].map((o) => [o.id, o.open]),
+    ]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c.s);
+    if (out.length >= want) break;
+  }
+  return out;
 }
 
 export type { PlacedItem };

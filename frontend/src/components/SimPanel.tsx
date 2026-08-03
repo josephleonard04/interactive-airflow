@@ -155,6 +155,13 @@ export function SimPanel() {
     if (applyObjectives(objectives, t)) recheckGoal.current = t;
   };
 
+  // A search that returns nothing is not the same as one that was never run,
+  // and on screen they looked identical: the gallery simply did not appear.
+  // That happens when every layout the search found already satisfies the task
+  // and is therefore withheld — a real state, and one worth a sentence.
+  const searchedButEmpty =
+    !optimizing && !reading && solutionGoal !== null && solutionOptions.length === 0;
+
   if (!active) {
     return (
       <button className="primary" style={btn} onClick={toggleSim}>
@@ -292,6 +299,19 @@ export function SimPanel() {
               </button>
             </div>
           </>
+        )}
+        {searchedButEmpty && (
+          <p
+            style={{
+              marginTop: 8, padding: "8px 10px", borderRadius: 9,
+              border: "1px solid var(--line)", background: "#fff",
+              fontSize: 12, lineHeight: 1.45, color: "var(--muted)",
+            }}
+          >
+            I searched your layout for “{(solutionGoal ?? "").trim().slice(0, 40)}” and did not find a
+            change worth offering — what you have is already doing the job. Try moving things yourself
+            and running the simulation again.
+          </p>
         )}
         {solutionOptions.length > 0 && (
           <SolutionOptions
