@@ -42,6 +42,12 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
   { words: ["cool", "cold", "chilly", "cooler", "chill"], scalar: "temperature", direction: "low" },
   { words: ["warm", "hot", "cozy", "cosy", "toasty", "warmer", "heat"], scalar: "temperature", direction: "high" },
   { words: ["smell", "odor", "odour", "stink", "stench", "fume", "fumes", "smoke", "stinky"], scalar: "contaminant", direction: "low" },
+  // "I want FRESH AIR near the bed", "it's STUFFY in here". Same objective as a
+  // smell goal — get the air in this spot exchanged — said from the other end:
+  // one names what is wrong, the other names what is wanted. The lexicon knew
+  // only the complaint, so the most natural way to ask for ventilation matched
+  // nothing at all and the search quietly refused to run.
+  { words: ["fresh", "stuffy", "stale", "airless", "musty", "stifling", "ventilate", "ventilation", "airy"], scalar: "contaminant", direction: "low" },
   // draft / air movement on a spot — "no air blowing on my face", "too drafty"
   { words: ["draft", "drafty", "draught", "breeze", "blowing", "blow", "wind"], scalar: "draft", direction: "low" },
 ];
