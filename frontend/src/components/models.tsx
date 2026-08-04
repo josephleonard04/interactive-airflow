@@ -329,39 +329,59 @@ function Smell(size: V): JSX.Element {
   );
 }
 
-/** The moisture source: a column of steam rising and spreading, drawn as a
- *  stack of widening rings.
+/** The moisture source: steam rising off the wet floor, drawn as a soft plume
+ *  of overlapping puffs.
  *
- *  It used to be a blue puddle on the floor with three small wisps over it,
- *  which read as spilled water — a thing that has already happened and is
- *  sitting there — when what it represents is hot vapour being produced NOW and
- *  going upward. That matters for this task specifically: the whole question is
- *  where the air carries it, and a puddle does not suggest air at all. Rings
- *  that widen as they climb say "this is rising and spreading" without a label. */
+ *  Two earlier versions and why neither worked. A blue puddle with wisps over
+ *  it read as spilled water — something that has already happened and is lying
+ *  there — when what it represents is vapour being produced now and going up,
+ *  and the whole question this task asks is where the air takes it. A stack of
+ *  widening rings said "rising" from the side but the top view is the one
+ *  people plan in, and seen from directly above a stack of horizontal rings is
+ *  concentric circles: a wifi icon sitting on the floor.
+ *
+ *  Puffs work from both angles because they have no orientation to lose. From
+ *  above they are a soft cluster; from the side, a column that swells and then
+ *  thins. The shape does the explaining: it starts small at the floor, is
+ *  widest at chest height where a plume actually spreads, and fades out rather
+ *  than stopping, because steam does not have a top edge. */
 function Damp(size: V): JSX.Element {
   const r = Math.min(size[0], size[2]) * 0.5;
-  const h = size[1];
-  const rings = [0, 1, 2, 3, 4];
+  const floor = -size[1] / 2;
+  /** How high the plume climbs (m). Short of the ceiling on purpose — it should
+   *  read as rising toward the extract, not as a column propping up the roof. */
+  const RISE = 1.35;
+  const PUFFS = 7;
   return (
     <group>
-      {/* a faint warm base where the steam is coming off */}
-      <mesh position={[0, -h / 2 + 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[r * 0.85, 24]} />
-        <meshStandardMaterial color="#cfe6ef" emissive="#7fb4cc" emissiveIntensity={0.3} toneMapped={false} transparent opacity={0.5} />
+      {/* the wet patch it is coming off — the only part that touches the floor */}
+      <mesh position={[0, floor + 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[r * 0.9, 28]} />
+        <meshStandardMaterial color="#dcecf3" roughness={0.9} transparent opacity={0.45} />
       </mesh>
-      {rings.map((i) => {
-        const t = i / (rings.length - 1);
-        const rad = r * (0.32 + t * 0.72);
+      {Array.from({ length: PUFFS }, (_, i) => {
+        const t = i / (PUFFS - 1);
+        // Widest around the middle and tapering at both ends — a sine through
+        // the plume's height, rather than a straight widening, is what stops it
+        // reading as a cone or a stack.
+        const rad = r * (0.34 + 0.5 * Math.sin(Math.PI * (0.15 + 0.85 * t)));
         return (
-          <mesh key={i} position={[0, -h / 2 + 0.1 + t * h * 1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-            <torusGeometry args={[rad, r * (0.11 - t * 0.05), 8, 22]} />
+          <mesh
+            key={i}
+            position={[0.42 * r * Math.sin(t * 2.4), floor + 0.06 + t * RISE, 0.18 * r * Math.sin(t * 3.1)]}
+          >
+            <sphereGeometry args={[rad, 14, 12]} />
             <meshStandardMaterial
-              color="#eef7fb"
-              emissive="#a8d2e4"
-              emissiveIntensity={0.45 - t * 0.2}
+              color="#f2f9fc"
+              emissive="#bcdcea"
+              emissiveIntensity={0.35 * (1 - t * 0.6)}
               toneMapped={false}
               transparent
-              opacity={0.55 - t * 0.34}
+              opacity={0.06 + 0.42 * (1 - t * 0.75)}
+              // Overlapping translucent spheres that each write depth punch
+              // holes in one another; without this the plume reads as a pile of
+              // hard balls instead of one soft mass.
+              depthWrite={false}
             />
           </mesh>
         );
