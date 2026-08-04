@@ -115,8 +115,15 @@ interface PrimaryAlt {
   roomName: string;
   score: number;
 }
-/** Two suggested spots closer than this are the same suggestion (m). */
-const ALT_MIN_APART = 1.0;
+/** Two suggested spots closer than this are the same suggestion (m).
+ *
+ *  Was 1.0, which is a whole metre — in a 4 m bathroom that is a quarter of the
+ *  room, and it meant "move it a bit further along" had no card to offer,
+ *  because every nearby alternative had been folded into the winner. Someone
+ *  asking for a small adjustment is asking for exactly the option this was
+ *  discarding. 0.6 m is still comfortably more than a hand's width, so the
+ *  gallery does not fill up with the same spot four times. */
+const ALT_MIN_APART = 0.6;
 
 /** Which side of the home a window is on, so an option can say WHICH one it
  *  wants open rather than just "a window". */
@@ -739,7 +746,7 @@ function placeDevices(
   for (const a of primaryAlts) {
     if (spread.some((k) => Math.hypot(k.pos[0] - a.pos[0], k.pos[2] - a.pos[2]) < ALT_MIN_APART)) continue;
     spread.push(a);
-    if (spread.length >= 4) break;
+    if (spread.length >= 6) break;
   }
   primaryAlts = spread;
   return { plan: working, changes, primaryAlts };
@@ -1033,16 +1040,43 @@ export function withholdComplete(
     // collapse onto each other (or onto a full solution) whenever a task has
     // only one movable device, and three cards that apply the same change are
     // the "why did it suggest the same thing twice" complaint by another route.
-    const key = JSON.stringify([
-      c.s.plan.items.map((i) => [i.id, i.position[0].toFixed(2), i.position[2].toFixed(2), i.rotationY.toFixed(2), i.on ?? true]),
-      [...c.s.plan.doors, ...c.s.plan.windows].map((o) => [o.id, o.open]),
-    ]);
+    const key = layoutKey(c.s.plan);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(c.s);
     if (out.length >= want) break;
   }
   return out;
+}
+
+/** Everything about a plan that a suggestion can change, as one comparable
+ *  string: where each device sits, which way it points, whether it is running,
+ *  and where each opening is and whether it is open.
+ *
+ *  Used for three things that are all the same complaint — "it keeps giving me
+ *  the same answer": collapsing options that produce an identical home, dropping
+ *  an option that is the home you already have, and remembering across a session
+ *  which layouts have already been offered. The opening POSITION is in the key
+ *  because the humidity task can move a window, so two options that differ only
+ *  in where the glazing went are genuinely different advice. */
+export function layoutKey(plan: FloorPlan): string {
+  return JSON.stringify([
+    plan.items
+      .map((i) =>
+        [
+          i.id,
+          i.position[0].toFixed(2),
+          i.position[2].toFixed(2),
+          i.rotationY.toFixed(2),
+          i.on ?? true,
+          i.power ?? 2,
+        ].join(":"),
+      )
+      .sort(),
+    [...plan.doors, ...plan.windows]
+      .map((o) => [o.id, o.open, o.a[0].toFixed(2), o.a[1].toFixed(2), o.b[0].toFixed(2), o.b[1].toFixed(2)].join(":"))
+      .sort(),
+  ]);
 }
 
 export type { PlacedItem };
