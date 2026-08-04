@@ -310,74 +310,75 @@ function KitchenSink([w, h, d]: V) {
   );
 }
 
-// A placed "smell source": a glowing magenta orb on a small stem, plus rising
-// wisp rings so it reads as an odor source.
-function Smell(size: V): JSX.Element {
+/** A placed CONTAMINANT SOURCE: a glowing orb on a small stem with a wisp ring
+ *  over it, so it reads as something being given off rather than an object.
+ *
+ *  ONE SHAPE, TWO HUES. Smell and moisture are the same thing to the solver —
+ *  a scalar the airflow has to carry out — and they are the same question to
+ *  the participant: this is where it comes from, now go and design around it.
+ *  Drawing them as two different objects made that look like two different
+ *  kinds of problem, and the moisture one went through three shapes of its own
+ *  (a puddle, a stack of rings, a plume of puffs) chasing a likeness to steam
+ *  that was never what the marker is for. So the shape is shared and only the
+ *  colour changes, which is exactly the relationship the two field ramps have.
+ *
+ *  Each palette is its own ramp's business end: violet is where the smell ramp
+ *  goes when the air is foul, blue is where the damp ramp goes when the wall is
+ *  wet. A source therefore matches the worst reading around it instead of
+ *  competing with the field for the same pixels. */
+interface SourcePalette {
+  /** The stem — the darkest of the three, so it reads against a pale floor. */
+  stem: string;
+  /** The orb, and its glow. */
+  orb: string;
+  orbGlow: string;
+  /** The wisp ring above it — the palest, so it reads as vapour. */
+  wisp: string;
+}
+
+function SourceOrb(size: V, c: SourcePalette): JSX.Element {
   const r = Math.min(size[0], size[2]) * 0.42;
   return (
     <group>
-      <Box size={[0.05, size[1] * 0.5, 0.05]} position={[0, size[1] * 0.25, 0]} color="#7c3aed" />
+      <Box size={[0.05, size[1] * 0.5, 0.05]} position={[0, size[1] * 0.25, 0]} color={c.stem} />
       <mesh position={[0, size[1] * 0.6, 0]} castShadow>
         <sphereGeometry args={[r, 18, 18]} />
-        <meshStandardMaterial color="#a855f7" emissive="#7c3aed" emissiveIntensity={0.7} toneMapped={false} />
+        <meshStandardMaterial color={c.orb} emissive={c.orbGlow} emissiveIntensity={0.7} toneMapped={false} />
       </mesh>
       <mesh position={[0, size[1] * 0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[r * 0.7, 0.012, 8, 20]} />
-        <meshStandardMaterial color="#c084fc" emissive="#a855f7" emissiveIntensity={0.5} toneMapped={false} transparent opacity={0.7} />
+        <meshStandardMaterial color={c.wisp} emissive={c.orb} emissiveIntensity={0.5} toneMapped={false} transparent opacity={0.7} />
       </mesh>
     </group>
   );
 }
 
-/** The moisture source: steam rising off the wet floor, drawn as a soft plume
- *  of overlapping puffs.
+/** Odour. Violet, the foul end of the smell ramp. */
+function Smell(size: V): JSX.Element {
+  return SourceOrb(size, { stem: "#7c3aed", orb: "#a855f7", orbGlow: "#7c3aed", wisp: "#c084fc" });
+}
+
+/** Moisture. The same orb as the smell source, in the wet end of the DAMP ramp:
+ *  a deep blue stem, a bright water-blue orb and a pale cyan wisp.
  *
- *  Two earlier versions and why neither worked. A blue puddle with wisps over
- *  it read as spilled water — something that has already happened and is lying
- *  there — when what it represents is vapour being produced now and going up,
- *  and the whole question this task asks is where the air takes it. A stack of
- *  widening rings said "rising" from the side but the top view is the one
- *  people plan in, and seen from directly above a stack of horizontal rings is
- *  concentric circles: a wifi icon sitting on the floor.
+ *  Four shapes were tried here before giving up and reusing the smell one. A
+ *  puddle with wisps read as spilled water — something that has already
+ *  happened and is lying there — when what it represents is vapour being
+ *  produced now and going up. A stack of widening rings said "rising" from the
+ *  side, but the top view is the one people plan in, and from directly above a
+ *  stack of horizontal rings is a wifi icon on the floor. A plume of puffs
+ *  survived both angles but competed with the humidity field for the same
+ *  pixels. A flat magenta disc beat the field but then matched nothing: an
+ *  off-ramp colour on an off-ramp shape, the only object in the app drawn that
+ *  way, which is its own kind of confusing.
  *
- *  Puffs work from both angles because they have no orientation to lose. From
- *  above they are a soft cluster; from the side, a column that swells and then
- *  thins. The shape does the explaining: it starts small at the floor, is
- *  widest at chest height where a plume actually spreads, and fades out rather
- *  than stopping, because steam does not have a top edge. */
+ *  None of that was ever the problem to solve. The marker's job is "the wet
+ *  comes from HERE", which is the same job the smell source already does well,
+ *  and the app is more legible when the same job looks the same. The colour
+ *  carries the difference, because the colour is the thing that already means
+ *  moisture everywhere else on screen. */
 function Damp(size: V): JSX.Element {
-  const r = Math.min(size[0], size[2]) * 0.5;
-  const floor = -size[1] / 2;
-  // A DISC ON THE FLOOR, in a colour nothing else in the room uses. Two
-  // sculpted versions came before this — rings, then puffs — and both spent
-  // their effort on looking like steam, which is not the job. The job is "this
-  // is the thing making the room wet, and it is HERE": one flat mark, read in a
-  // glance from the top view, findable while the floor around it is being
-  // painted amber-to-navy by the humidity field. A translucent plume competes
-  // with that field for the same pixels; a solid ring sits on top of it.
-  //
-  // Magenta on purpose. The humidity ramp runs amber → green → teal → navy, so
-  // it is the one hue that can never be mistaken for a reading.
-  const MARK = "#d81b8c";
-  return (
-    <group>
-      {/* soft halo, so it reads as a source rather than a sticker */}
-      <mesh position={[0, floor + 0.008, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[r * 1.15, 32]} />
-        <meshStandardMaterial color={MARK} transparent opacity={0.18} depthWrite={false} />
-      </mesh>
-      {/* the mark itself */}
-      <mesh position={[0, floor + 0.014, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[r * 0.72, 32]} />
-        <meshStandardMaterial color={MARK} emissive={MARK} emissiveIntensity={0.45} toneMapped={false} transparent opacity={0.9} depthWrite={false} />
-      </mesh>
-      {/* a ring around it, which is what keeps the edge crisp against a busy floor */}
-      <mesh position={[0, floor + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[r * 0.86, r * 0.98, 40]} />
-        <meshStandardMaterial color={MARK} emissive={MARK} emissiveIntensity={0.5} toneMapped={false} transparent opacity={0.85} depthWrite={false} />
-      </mesh>
-    </group>
-  );
+  return SourceOrb(size, { stem: "#0b5e94", orb: "#1c9fd6", orbGlow: "#0e7fb8", wisp: "#7fd4ef" });
 }
 
 /** Shower: a riser and a head on the wall over a shallow tray. NO GLASS.

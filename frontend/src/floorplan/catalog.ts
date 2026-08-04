@@ -45,7 +45,9 @@ export const CATALOG: Record<string, ItemSpec> = {
   return: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Extract vent" },
   bin: { size: [0.4, 0.7, 0.4], category: "furniture", mount: "floor", label: "Kitchen bin" },
   smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
-  damp: { size: [0.5, 0.5, 0.5], category: "hvac", mount: "floor", label: "Damp patch" },
+  // "Damp patch" described the old flat-on-the-floor drawing. It is the same
+  // orb the smell source uses now, and it names the same kind of thing.
+  damp: { size: [0.5, 0.5, 0.5], category: "hvac", mount: "floor", label: "Moisture source" },
 };
 
 /** Items offered in the "add" palette, grouped. */
