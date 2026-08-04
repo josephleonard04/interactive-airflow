@@ -299,20 +299,47 @@ export function Panel() {
                   </button>
                 </div>
               )}
-              {(selected.type === "ac" || selected.type === "fan") && (
-                <div className="field" style={{ marginTop: 6 }}>
-                  <span>vertical aim (− down / + up) · {Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}°</span>
-                  <input
-                    type="range"
-                    min={-60}
-                    max={60}
-                    step={5}
-                    value={Math.round(((selected.tilt ?? 0) * 180) / Math.PI)}
-                    onChange={(e) => updateItem(selected.id, { tilt: (Number(e.target.value) * Math.PI) / 180 })}
-                    title="Tilt the airflow up (+) or down (−). 0° = straight out along the facing."
-                  />
-                </div>
-              )}
+              {(selected.type === "ac" || selected.type === "fan") && (() => {
+                const deg = Math.round(((selected.tilt ?? 0) * 180) / Math.PI);
+                const setDeg = (d: number) =>
+                  updateItem(selected.id, { tilt: (Math.max(-60, Math.min(60, d)) * Math.PI) / 180 });
+                return (
+                  <div style={{ marginTop: 6 }}>
+                    <div className="field">
+                      <span>
+                        aim up / down · {deg > 0 ? `${deg}° up` : deg < 0 ? `${-deg}° down` : "straight ahead"}
+                      </span>
+                      {/* BUTTONS AS WELL AS THE SLIDER. A range input is a drag,
+                          and the two ends of this one are the two things people
+                          actually want — point it over your head, point it at
+                          the floor. Nudging in steps also makes the louvre on
+                          the model visibly step, which is how you learn the
+                          control does anything at all. */}
+                      <div className="tools">
+                        <button className="tool" onClick={() => setDeg(deg - 15)} title="Aim further down">
+                          ▼ down
+                        </button>
+                        <button className="tool" onClick={() => setDeg(0)} title="Straight out along the facing">
+                          level
+                        </button>
+                        <button className="tool" onClick={() => setDeg(deg + 15)} title="Aim further up">
+                          ▲ up
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={-60}
+                      max={60}
+                      step={5}
+                      value={deg}
+                      onChange={(e) => setDeg(Number(e.target.value))}
+                      title="Tilt the airflow up (+) or down (−). 0° = straight out along the facing."
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                );
+              })()}
             </>
           )}
           {/* An EXTRACT has no aim. It pulls air in from every direction at

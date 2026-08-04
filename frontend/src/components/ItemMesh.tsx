@@ -73,7 +73,7 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
         {/* `on` is undefined on anything that has no switch (furniture), which
             reads as running — right for a vent, and ignored by every other
             model. */}
-        <Model type={item.type} size={item.size} on={item.on !== false} />
+        <Model type={item.type} size={item.size} on={item.on !== false} tilt={item.tilt ?? 0} />
       </group>
     </group>
   );
