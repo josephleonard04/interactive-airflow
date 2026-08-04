@@ -19,7 +19,7 @@ import {
   type BackendHealth,
 } from "../engine/accurate";
 import { type OptimizeGoal } from "../intent/optimize";
-import { findSolutions, withholdComplete, type Solution } from "../intent/solutions";
+import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
 import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
 import { parseGoal, type Objective } from "../intent/objectives";
@@ -160,6 +160,10 @@ export interface SceneState {
   ) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
   solutionOptions: Solution[];
+  /** Layouts already offered as options this session, as layoutKey strings, so a
+   *  repeated ask can lead with something the participant has not already
+   *  turned down. Session state, not part of the plan — see runSearch. */
+  offeredLayouts: string[];
   /** The goal text those options answer, for the option-panel heading. */
   solutionGoal: string | null;
   /** Rooms the goal asked about, so the option cards can show their temperature. */
@@ -472,6 +476,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   },
 
   solutionOptions: [],
+  offeredLayouts: [],
   solutionGoal: null,
   solutionTargets: [],
   dismissSolutions: () => set({ solutionOptions: [], solutionGoal: null, solutionTargets: [] }),
@@ -508,9 +513,16 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     // Every room the goal named, not just the first. "Cool the living room and
     // the bedroom" used to keep objs[0] and silently discard the rest, so the
     // optimizer only ever worked on one of the two rooms the user asked about.
-    const targetIds = Array.from(
+    let targetIds = Array.from(
       new Set(objs.filter((o) => o.scalar === obj.scalar && o.regionId).map((o) => o.regionId!)),
     );
+    // "MY ROOM IS MUCH COLDER THAN THE REST" NAMES NO ROOM. Neither does "a bit
+    // warmer, please" — and both are perfectly clear requests about the whole
+    // home. They arrived here with an empty target list, which is not the same
+    // thing as "everywhere": it left the search scoring against nothing in
+    // particular, so the ranking came down to tie-breaks and the answers were
+    // arbitrary. An unnamed room means all of them.
+    if (targetIds.length === 0 && !obj.regionRect) targetIds = s.plan.rooms.map((r) => r.id);
     // A calm-air goal ("no draft on the bed") wants LESS air movement — quiet
     // the movers rather than searching for a stronger layout.
     const calm = obj.scalar === "draft" && obj.direction === "low";
@@ -560,9 +572,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           s.tools.movable.length || s.tools.addable.length || s.tools.aimable.length
             ? Array.from(new Set([...s.tools.movable, ...s.tools.addable, ...s.tools.aimable]))
             : undefined;
+        // DIG DEEPER ONCE SOMETHING HAS BEEN OFFERED. Three cards is the right
+        // number to SHOW, but it was also all the search ever ranked — so on a
+        // second ask the pool was the same three, and demoting the ones already
+        // seen had nothing to promote in their place. Asking for six on a repeat
+        // gives the ordering below real alternatives to lead with. It costs a
+        // display-fidelity re-score each (~0.3 s), which is why it only happens
+        // when there is history to avoid.
+        const depth = s.offeredLayouts.length ? 6 : 3;
         const found = findSolutions(before, goal, targetIds, {
           outdoorTemp: s.outdoorTemp,
-          want: 3,
+          want: depth,
           lockPower: s.tools.lockPower === true,
           allowedDevices,
           flow,
@@ -581,19 +601,40 @@ export const useSceneStore = create<SceneState>((set, get) => ({
               before,
               targetIds,
               s.outdoorTemp,
-              3,
+              depth,
               allowedDevices,
             )
           : found;
+        // ASKING AGAIN SHOULD GET YOU SOMETHING ELSE. Two ways the gallery
+        // repeated itself, both of which read as the tool ignoring the request:
+        // an option that IS the home already on screen (nothing to accept), and
+        // the identical card the last search already offered — which is what
+        // "even a minor adjustment gives the same answer" is.
+        //
+        // Repeats are demoted rather than dropped. The best layout is still the
+        // best layout on the second ask, and hiding it to look responsive would
+        // be worse advice; it just stops being the headline while a genuinely
+        // different option is available.
+        const hereKey = layoutKey(before);
+        const alreadySeen = new Set(s.offeredLayouts);
+        const usable = options.filter((o) => layoutKey(o.plan) !== hereKey);
+        const fresh = usable.filter((o) => !alreadySeen.has(layoutKey(o.plan)));
+        const repeats = usable.filter((o) => alreadySeen.has(layoutKey(o.plan)));
+        const ordered = (fresh.length ? [...fresh, ...repeats] : usable).slice(0, 3);
+        // Remembered for the session, not for ever: a fresh scenario starts
+        // clean (see startScenario), because there the layout genuinely is new.
+        const offeredLayouts = [...s.offeredLayouts, ...ordered.map((o) => layoutKey(o.plan))].slice(-40);
         get().logEvent("goal", {
           text: goalText,
           targets: targetIds,
           found: found.length,
-          withheld: found.length - options.length,
-          offered: options.map((o) => ({ id: o.id, label: o.label, score: o.score })),
+          withheld: found.length - ordered.length,
+          repeated: ordered.length - fresh.length,
+          offered: ordered.map((o) => ({ id: o.id, label: o.label, score: o.score })),
         });
         set({
-          solutionOptions: options,
+          offeredLayouts,
+          solutionOptions: ordered,
           solutionGoal: goalText,
           solutionTargets: targetIds,
           optimizing: false,
@@ -658,6 +699,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       simReady: false,
       simulatedModes: [], // a fresh task starts with nothing verified
       solutionOptions: [],
+      // A different home entirely, so nothing offered on the last task counts
+      // as already-seen here.
+      offeredLayouts: [],
       solutionGoal: null,
       solutionTargets: [],
       pendingChange: null,
