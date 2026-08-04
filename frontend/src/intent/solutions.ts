@@ -1,6 +1,6 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean, zoneSpeed } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { windowPlacements, windowSideName, withOpeningMoved } from "../floorplan/openings";
@@ -145,6 +145,39 @@ function headingName(yaw: number): string {
   return ["at the near wall", "to the right", "at the far wall", "to the left"][q];
 }
 
+/** One line per device this option actually moves, aimed or switches on, said
+ *  in the words the spot names use. Computed from the two plans, so it cannot
+ *  drift from what applying the card would do. */
+function movedLines(before: FloorPlan, after: FloorPlan): string[] {
+  const rows: Array<{ name: string; spot: string | null; side: string | null; extra: string | null }> = [];
+  for (const a of before.items) {
+    const b = after.items.find((i) => i.id === a.id);
+    if (!b) continue;
+    const name = DEVICE_LABEL[a.type] ?? a.type;
+    const moved = Math.hypot(b.position[0] - a.position[0], b.position[2] - a.position[2]) > 0.05;
+    const turned = Math.abs(Math.atan2(Math.sin(b.rotationY - a.rotationY), Math.cos(b.rotationY - a.rotationY))) > 0.2;
+    const room = after.rooms.find((r) => r.id === b.roomId);
+    if (moved && room) {
+      rows.push({ name, spot: spotName(after, b.roomId, b.position), side: wallSideName(room.rect, b.position), extra: null });
+    } else if (turned) {
+      rows.push({ name, spot: null, side: null, extra: `aimed ${headingName(b.rotationY)}` });
+    }
+    if ((a.on ?? true) === false && (b.on ?? true) === true) {
+      rows.push({ name, spot: null, side: null, extra: "switched on" });
+    }
+  }
+  // TWO DEVICES CAN LAND ON THE SAME SPOT NAME. "Under the window" covers a
+  // 1.2 m radius and the heater and the fan can both be inside it, so the card
+  // read "Heater → under the window · Fan → under the window" and looked like it
+  // was repeating itself. Where the spot name collides, say which wall as well;
+  // where it does not, the plain name is the better sentence.
+  return rows.map((r, i) => {
+    if (r.spot === null) return `${r.name} → ${r.extra}`;
+    const clash = rows.some((o, j) => j !== i && o.spot === r.spot);
+    return clash && r.side ? `${r.name} → ${r.spot}, ${r.side}` : `${r.name} → ${r.spot}`;
+  });
+}
+
 /** Which corner of the room a spot leans toward — the last-resort tie-breaker
  *  when two options share both a name and a wall. */
 function quadrantName(rect: Rect, pos: Vec3): string {
@@ -193,6 +226,26 @@ function wallSideName(rect: Rect, pos: Vec3): string {
 const DRAFT_CAP = 0.35;
 const DRAFT_PENALTY = 8;
 
+/** One of the ACTIVE TASK's own checkable lines, reduced to something the
+ *  screening pass can measure: which quantity, over which patch of floor, and
+ *  which side of which number counts as done.
+ *
+ *  The search used to optimise a generic proxy for the goal word it was handed
+ *  — "ventilate" meant room-mean freshness — while the task graded something
+ *  else entirely. In the studio those are different questions: the goal is smell
+ *  over the BED, and a fan that freshens the room average by stirring the bin
+ *  end scores well and fails the task. Handing the search the task's own lines
+ *  closes that gap, and it is the difference between the smell task's search
+ *  finding 0.296 (against a 0.17 bar) and finding the answer. */
+export interface TaskZone {
+  metric: "temperature" | "smell" | "draft" | "drying";
+  /** The patch to measure over. Null = the whole room named by `roomId`. */
+  zone: Rect | null;
+  roomId: string;
+  atLeast?: number;
+  atMost?: number;
+}
+
 export interface SolutionMetrics {
   /** Absolute °C per room. */
   roomTempC: Map<string, number>;
@@ -208,6 +261,9 @@ export interface SolutionMetrics {
    *  option could be told from another. Minutes is also the unit this task is
    *  actually scored in, so the card and the goal finally agree. */
   roomDryMin: Map<string, number>;
+  /** Per TaskZone, how far this plan is from satisfying it: 0 = met, larger =
+   *  further away, in units of the goal's own tolerance. Empty off-scenario. */
+  taskShortfall: number[];
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
   meanTargetC: number;
@@ -306,7 +362,7 @@ function withDevices(plan: FloorPlan, devices: Strategy["devices"]): FloorPlan {
 
 // ---- scoring ----
 
-function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid: typeof SCREEN): SolutionMetrics {
+function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid: typeof SCREEN, zones: TaskZone[] = []): SolutionMetrics {
   const built = buildSim3D(plan, { targetCells: fid.targetCells, iterations: fid.iterations });
   for (let s = 0; s < fid.steps; s++) built.sim.step(0.05);
   const { sim, nx, ny, nz, ambient, inside, roomIndex, roomIds } = built;
@@ -322,6 +378,28 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   // looking at cannot disagree about how bad it is.
   for (const [id, v] of roomMeans(built, smell)) {
     roomFresh.set(id, Math.max(0, Math.min(1, 1 - v / SMELL_FULL_SCALE)));
+  }
+
+  // THE TASK'S OWN LINES, measured here so the screening pass can rank by them.
+  // Each is normalised to its own tolerance so a 0.03 m/s draught overshoot and
+  // a 0.4 °C temperature overshoot are comparable, and clamped at 0 once met —
+  // beyond the bar is done, not better, and rewarding overshoot would trade one
+  // satisfied line against another.
+  const taskShortfall: number[] = [];
+  for (const g of zones) {
+    const rect = g.zone ?? plan.rooms.find((r) => r.id === g.roomId)?.rect ?? null;
+    if (!rect) { taskShortfall.push(0); continue; }
+    let v: number | null = null;
+    let scale = 1;
+    if (g.metric === "draft") { v = zoneSpeed(built, rect); scale = 0.1; }
+    else if (g.metric === "temperature") { const d = zoneMean(built, temp, rect); v = d === null ? null : outdoorTemp + d; scale = 1; }
+    else if (g.metric === "drying") { v = slowestDry(built, dryF, rect); scale = 30; }
+    else { v = zoneMean(built, smell, rect); scale = 0.05; }
+    if (v === null) { taskShortfall.push(0); continue; }
+    let short = 0;
+    if (g.atMost !== undefined) short += Math.max(0, v - g.atMost) / scale;
+    if (g.atLeast !== undefined) short += Math.max(0, g.atLeast - v) / scale;
+    taskShortfall.push(short);
   }
 
   let heaterWindowC: number | null = null;
@@ -376,6 +454,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     roomTempC,
     roomFresh,
     roomDryMin,
+    taskShortfall,
     worstTargetC: tTemps.length ? Math.max(...tTemps) : NaN, // see scoreOf: sign depends on the goal
     meanTargetC: tTemps.length ? tTemps.reduce((a, b) => a + b, 0) / tTemps.length : NaN,
     houseMeanSpeed,
@@ -390,6 +469,30 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
  *  max–min form so every requested room has to be handled, plus a draught
  *  penalty ("coolest layout that doesn't blast the room"). */
 function scoreOf(
+  goal: OptimizeGoal,
+  m: SolutionMetrics,
+  targetTemps: number[],
+  targetIds: string[] = [],
+  drying = false,
+): number {
+  // THE TASK'S OWN LINES WIN when the app knows them. Nothing below is wrong,
+  // but all of it is a PROXY for the goal word the sentence was reduced to, and
+  // a proxy that disagrees with the tick-boxes is a search that confidently
+  // recommends a failing layout. Scored on total shortfall, so a layout that
+  // satisfies both lines beats every layout that satisfies one, and among those
+  // that satisfy neither the closest wins — which is what makes the gallery
+  // useful before the task is finished. The proxy stays as the tiebreak, at a
+  // weight small enough that it can only order layouts the task cannot tell
+  // apart.
+  if (m.taskShortfall.length) {
+    const total = m.taskShortfall.reduce((a, b) => a + b, 0);
+    return -100 * total + 0.001 * proxyScore(goal, m, targetTemps, targetIds, drying);
+  }
+  return proxyScore(goal, m, targetTemps, targetIds, drying);
+}
+
+/** The original goal-word scoring: what to rank by when there is no task. */
+function proxyScore(
   goal: OptimizeGoal,
   m: SolutionMetrics,
   targetTemps: number[],
@@ -451,8 +554,9 @@ function evaluate(
   outdoorTemp: number,
   fid: typeof SCREEN,
   drying = false,
+  zones: TaskZone[] = [],
 ): { metrics: SolutionMetrics; score: number } {
-  const metrics = measure(plan, targetIds, outdoorTemp, fid);
+  const metrics = measure(plan, targetIds, outdoorTemp, fid, zones);
   const targetTemps = targetIds.map((id) => metrics.roomTempC.get(id)).filter((v): v is number => v !== undefined);
   return { metrics, score: scoreOf(goal, metrics, targetTemps, targetIds, drying) };
 }
@@ -654,6 +758,7 @@ function placeDevices(
   allowed?: string[],
   drying = false,
   flow?: FlowHint,
+  zones: TaskZone[] = [],
   /** Of `allowed`, the subset the search may REPOSITION. Undefined = all of
    *  them, which is the unrestricted app. See the aim-only branch below. */
   movableDevices?: string[],
@@ -795,7 +900,7 @@ function placeDevices(
             ),
           };
           budget.left--;
-          const { score } = evaluate(trial, goal, targetIds, outdoorTemp, drying ? SCREEN_DRY : SCREEN, drying);
+          const { score } = evaluate(trial, goal, targetIds, outdoorTemp, drying ? SCREEN_DRY : SCREEN, drying, zones);
           if (it.type === primary && sweep === 1) {
             primaryAlts.push({ pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, score });
           }
@@ -857,6 +962,173 @@ function placeDevices(
   return { plan: working, changes, primaryAlts };
 }
 
+/** Hill-climb a plan by NUDGING what the task lets you move: small steps in
+ *  position and small turns of the aim, keeping anything that scores better,
+ *  until nothing does.
+ *
+ *  THE CANDIDATE GRID CANNOT BE THE LAST WORD. It is a coarse sample of a
+ *  continuous space — the studio's answer wants the fan roughly 30 cm off the
+ *  glass at a heading no cardinal direction expresses — so the search would
+ *  land in the right neighbourhood and stop a metre short. Screening more grid
+ *  points is the expensive way to fix that (the grid grows as the square);
+ *  walking downhill from the best few is the cheap one, and it is also the only
+ *  thing that can answer "a bit further along", which is the other half of what
+ *  this is for.
+ *
+ *  Deliberately local and deliberately small: it refines an answer, it does not
+ *  search for one. Two rounds at a shrinking step, which is enough to close the
+ *  gap between a grid point and the optimum near it without turning into a
+ *  second global search. */
+function refine(
+  start: FloorPlan,
+  goal: OptimizeGoal,
+  targetIds: string[],
+  outdoorTemp: number,
+  fid: typeof SCREEN,
+  drying: boolean,
+  zones: TaskZone[],
+  movable: string[] | undefined,
+  aimable: string[] | undefined,
+  budget: { left: number },
+): { plan: FloorPlan; improved: boolean; neighbours: Array<{ plan: FloorPlan; score: number }> } {
+  const canMove = (t: string) => !movable || movable.includes(t);
+  const canAim = (t: string) => !aimable || aimable.includes(t);
+  const targets = start.items.filter(
+    (it) => it.on !== false && (canMove(it.type) || canAim(it.type)) && (movable || aimable ? true : false),
+  );
+  if (targets.length === 0) return { plan: start, improved: false, neighbours: [] };
+
+  let best = start;
+  let bestScore = evaluate(start, goal, targetIds, outdoorTemp, fid, drying, zones).score;
+  const startScore = bestScore;
+  // Every distinct layout the walk looked at, best first. When the starting
+  // point is ALREADY a local optimum — which it is whenever the participant is
+  // asking to adjust something the search itself just polished — there is no
+  // improvement to report, and answering "nothing to offer" is not useful. The
+  // nearest alternatives are still the answer to "show me something slightly
+  // different"; they are just not better.
+  const neighbours: Array<{ plan: FloorPlan; score: number }> = [];
+
+  for (const step of [0.55, 0.28]) {
+    const turn = step > 0.4 ? Math.PI / 6 : Math.PI / 12;
+    for (const it of targets) {
+      const here = best.items.find((o) => o.id === it.id);
+      if (!here) continue;
+      const room = best.rooms.find((r) => r.id === here.roomId);
+      if (!room) continue;
+      const moves: Array<{ dx: number; dz: number; dr: number }> = [];
+      if (canMove(it.type)) {
+        for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step], [step, step], [-step, -step], [step, -step], [-step, step]]) {
+          moves.push({ dx, dz, dr: 0 });
+        }
+      }
+      if (canAim(it.type)) for (const dr of [turn, -turn]) moves.push({ dx: 0, dz: 0, dr });
+      for (const m of moves) {
+        if (budget.left <= 0) break;
+        const cur = best.items.find((o) => o.id === it.id)!;
+        const px = cur.position[0] + m.dx;
+        const pz = cur.position[2] + m.dz;
+        // Stay inside the room it is already in — a nudge is not a relocation,
+        // and a wall-mounted unit must stay on its wall, so only aim moves for
+        // anything the task will not let the participant carry.
+        if (m.dx || m.dz) {
+          if (!canMove(it.type) || cur.mount !== "floor") continue;
+          if (px < room.rect.x + 0.3 || px > room.rect.x + room.rect.w - 0.3) continue;
+          if (pz < room.rect.z + 0.3 || pz > room.rect.z + room.rect.d - 0.3) continue;
+          const others = best.items.filter((o) => o.id !== it.id);
+          const blockers = it.type === "heater" ? best.doors : [...best.doors, ...best.windows];
+          const free = findFreeSpot(room.rect, { size: it.size, rotationY: cur.rotationY, mount: it.mount }, others, [px, cur.position[1], pz], "area", 0.04, blockers, true);
+          if (!free || Math.hypot(free[0] - px, free[2] - pz) > 0.05) continue;
+        }
+        const trial: FloorPlan = {
+          ...best,
+          items: best.items.map((o) =>
+            o.id === it.id
+              ? { ...o, position: [px, o.position[1], pz] as Vec3, rotationY: o.rotationY + m.dr }
+              : o,
+          ),
+        };
+        budget.left--;
+        const { score } = evaluate(trial, goal, targetIds, outdoorTemp, fid, drying, zones);
+        neighbours.push({ plan: trial, score });
+        if (score > bestScore) {
+          bestScore = score;
+          best = trial;
+        }
+      }
+    }
+  }
+  neighbours.sort((a, b) => b.score - a.score);
+  return { plan: best, improved: bestScore > startScore + 1e-6, neighbours };
+}
+
+
+/** "the ac only" is not how anyone writes it — acronyms keep their case. */
+const acronymSafe = (l: string) => (l === l.toUpperCase() ? l : l.toLowerCase());
+
+/** The gallery for a MICRO-ADJUSTMENT: two or three layouts a short walk from
+ *  the one already on screen, rather than a fresh search.
+ *
+ *  Three walks, because "nudge it" is ambiguous about WHAT to nudge and the
+ *  honest answer is to show the small set of readings: move everything a
+ *  little, move only the device the goal turns on, or leave everything where it
+ *  is and only change the aim. Whichever the person meant, one of these is it,
+ *  and all three are recognisably the layout they already have. */
+function refineOptions(
+  plan: FloorPlan,
+  goal: OptimizeGoal,
+  targetIds: string[],
+  opts: FindOptions,
+  dryingTask: boolean,
+  want: number,
+): Solution[] {
+  const fid = dryingTask ? SCREEN_DRY : SCREEN;
+  const primary = primaryFor(goal, plan, opts.allowedDevices);
+  const movable = opts.movableDevices;
+  const aimable = opts.allowedDevices;
+  const walks: Array<{ label: string; note: string; movable?: string[]; aimable?: string[] }> = [
+    { label: "Nudged — everything a little", note: "The same idea, moved a step", movable, aimable },
+    {
+      label: `Nudged — the ${acronymSafe(DEVICE_LABEL[primary] ?? primary)} only`,
+      note: "Only the one thing this goal turns on",
+      movable: movable?.filter((t) => t === primary) ?? [primary],
+      aimable: [primary],
+    },
+    { label: "Re-aimed only — nothing moved", note: "Same places, different angles", movable: [], aimable },
+  ];
+  const out: Solution[] = [];
+  const seen = new Set<string>([layoutKey(plan)]);
+  for (const w of walks) {
+    if (out.length >= want) break;
+    const budget = { left: opts.refineBudget ?? 70 };
+    const { plan: better, improved, neighbours } = refine(
+      plan, goal, targetIds, opts.outdoorTemp, fid, dryingTask,
+      opts.taskZones ?? [], w.movable, w.aimable, budget,
+    );
+    // Improved if it can be; otherwise the best thing it looked at. A layout
+    // the search has already polished has no better neighbour by definition,
+    // and "no options" in answer to "nudge it" is the dead end this whole path
+    // exists to remove.
+    const pick = improved ? better : neighbours.find((n) => !seen.has(layoutKey(n.plan)))?.plan;
+    if (!pick) continue;
+    const key = layoutKey(pick);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const { metrics, score } = evaluate(pick, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask, opts.taskZones);
+    out.push({
+      id: `refine-${out.length}`,
+      readout: dryingTask ? "drying" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
+      label: w.label,
+      detail: [w.note, ...movedLines(plan, pick)],
+      plan: pick,
+      metrics,
+      score,
+    });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
 // ---- top level ----
 
 export interface FindOptions {
@@ -872,6 +1144,20 @@ export interface FindOptions {
    *  question the task had deliberately closed. Undefined = no restriction (the
    *  unrestricted app). */
   allowedDevices?: string[];
+  /** The ACTIVE TASK's checkable lines, so the search optimises what the
+   *  participant is graded on rather than a proxy for it. Omit off-scenario. */
+  taskZones?: TaskZone[];
+  /** Screening evaluations the local polish pass may spend across all finalists.
+   *  Separate from screenBudget because it buys something different: not more
+   *  places to look, but a better answer at the places already found. */
+  refineBudget?: number;
+  /** MICRO-ADJUSTMENT MODE. Skip the strategies and the global placement sweep
+   *  entirely and just walk downhill from the layout the participant already
+   *  has. This is what "move it a bit further along" means: they are not asking
+   *  to be shown somewhere else, they are asking for the same idea, nudged —
+   *  and a full search answers by proposing a different idea, which reads as
+   *  not having been listened to. */
+  refineOnly?: boolean;
   /** Of `allowedDevices`, the ones that may actually MOVE. A device that is
    *  allowed but not movable is re-aimed in place — a rented studio's AC is
    *  bolted to the wall and the task is entirely about which way it points.
@@ -915,7 +1201,16 @@ export function findSolutions(
   // A room with a moisture source is asking "how long until it is dry", not
   // "how fresh is the air" — see roomDryMin.
   const dryingTask = plan.items.some((it) => it.type === "damp");
-  const budget = { left: opts.screenBudget ?? 48 };
+
+  if (opts.refineOnly) return refineOptions(plan, goal, targetIds, opts, dryingTask, want);
+
+  // RAISED FROM 48. It was never the binding constraint — tripling it changed
+  // nothing, because the candidate LISTS ran out first — so widening those (see
+  // candidateSpots: a fan now gets a grid x four headings instead of two spots
+  // facing one way) needs a budget that can actually spend them. Screening is
+  // ~25 ms a shot, so this is a few seconds at worst, behind a spinner, on a
+  // button the participant pressed deliberately.
+  const budget = { left: opts.screenBudget ?? 180 };
   const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds, movable: opts.movableDevices });
 
   // Split the screening budget EVENLY across strategies. A single shared
@@ -929,21 +1224,21 @@ export function findSolutions(
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
     const fid = dryingTask ? SCREEN_DRY : SCREEN;
-    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow, opts.movableDevices);
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow, opts.taskZones, opts.movableDevices);
     // …and then, if the task allows it, where the GLAZING goes. Done after the
     // devices rather than as another strategy dimension: window position times
     // open/shut times power would multiply the strategy count past the point
     // where any of them get a placement search worth the name, and in practice
     // a person settles the extract first and then asks where the window should
     // be relative to it.
-    let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, dryingTask).score };
+    let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones).score };
     if (opts.moveOpenings) {
       for (const win of placed.windows) {
         if (win.fixed || win.locked) continue;
         for (const spot of windowPlacements(placed, win)) {
           if (spot.a[0] === win.a[0] && spot.a[1] === win.a[1]) continue;
           const trial = withOpeningMoved(best.plan, { ...spot, open: win.open });
-          const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask);
+          const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones);
           if (score > best.score) {
             best = {
               plan: trial,
@@ -990,10 +1285,12 @@ export function findSolutions(
           ...top!.strategy,
           id: `${top!.strategy.id}-alt${screened.length}`,
           label: `${DEVICE_LABEL[primaryType] ?? primaryType} ${where}`,
-          // The strategy note is identical on every one of these — same doors,
-          // same windows — so repeating it three times just pushes the one line
-          // that differs off the bottom of the card.
-          note: aimOnlyPrimary ? `${DEVICE_LABEL[primaryType] ?? primaryType} ${where}` : `In ${alt.roomName}, ${where}`,
+          // The note stays the STRATEGY's — which doors and windows this option
+          // wants — because the placement is now spelled out by movedLines,
+          // computed per card. It used to be overwritten with the spot name to
+          // stop three identical notes crowding out the one line that differed;
+          // now the differing lines are generated, so the note can go back to
+          // carrying the thing none of them say.
         },
         plan: variant,
         score: alt.score,
@@ -1013,9 +1310,27 @@ export function findSolutions(
   // actually show. (The screening validation says the true winner is inside the
   // screen's top 4, which this covers for want<=3.)
   const finalists = screened.slice(0, Math.max(want, 3));
+  // POLISH THE ONES WE ARE ABOUT TO SHOW. Each is a grid point, and the grid is
+  // a sample of a continuous space; a couple of hundred milliseconds of walking
+  // downhill from it is worth more than the same time spent screening more grid.
+  const polish = { left: opts.refineBudget ?? 90 };
+  for (const f of finalists) {
+    const { plan: better, improved } = refine(
+      f.plan, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN,
+      dryingTask, opts.taskZones ?? [], opts.movableDevices, opts.allowedDevices, polish,
+    );
+    if (improved) f.plan = better;
+  }
   const solutions: Solution[] = finalists.map((f) => {
-    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask);
-    const detail = [f.strategy.note, ...f.changes];
+    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask, opts.taskZones);
+    // WHAT THIS CARD ACTUALLY DOES, read off the plan rather than inherited.
+    // The alternatives are built on the winner's plan and were carrying the
+    // winner's change lines, so a card that moved the heater somewhere else
+    // still described the winner's heater — and a card that moved the fan as
+    // well never mentioned the fan at all. On the winter task that reads as
+    // "the tool thinks the fan does not matter", which is the opposite of the
+    // lesson.
+    const detail = [f.strategy.note, ...movedLines(plan, f.plan), ...f.changes.filter((c) => c.startsWith("Window"))];
     return {
       id: f.strategy.id,
       readout: dryingTask ? "drying" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
@@ -1183,9 +1498,16 @@ export function withholdComplete(
     };
   };
 
-  const candidates = [...options, ...options.slice(0, 1).map(trim)];
   const keep = (list: Solution[]) => list.map((s) => ({ s, ...metCount(s.plan) })).filter((c) => c.total === 0 || c.met < c.total);
-  let scored = keep(candidates);
+  let scored = keep(options);
+  // THE ONE-DEVICE HALF-STEP IS A LAST RESORT TOO, and it was not: it was mixed
+  // in with the full options and usually outscored them, so the winter task —
+  // where the heater and the fan BOTH have to move, and the runner-up options
+  // move both — led with a card that moved only the heater. Reading that, the
+  // obvious inference is that the tool thinks the fan does not matter, which is
+  // the opposite of the lesson. It earns its place only when every full option
+  // finishes the job and is therefore withheld.
+  if (scored.length === 0) scored = keep(options.slice(0, 1).map(trim));
   // ONLY WHEN THERE IS NOTHING LEFT. The openings-only step is a last resort,
   // not a standing extra card: adding it unconditionally changed what every
   // other task offers, and those were already the way they should be. It earns

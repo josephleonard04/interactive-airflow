@@ -84,10 +84,17 @@ export function candidateSpots(
     mk(x + 0.14, y, cz, Math.PI / 2, "z"); // west wall, blows +x
     mk(x + w - 0.14, y, cz, -Math.PI / 2, "z"); // east wall, blows -x
   } else if (type === "heater") {
-    mk(x + 0.2, 0.25, cz, Math.PI / 2, "z");
-    mk(x + w - 0.2, 0.25, cz, -Math.PI / 2, "z");
-    mk(cx, 0.25, z + 0.2, 0, "x");
-    mk(cx, 0.25, z + d - 0.2, Math.PI, "x");
+    // Wall midpoints AND thirds. A radiator goes against a wall, but "against
+    // the far wall" is a three-metre run in these rooms and the midpoint is not
+    // always the best metre of it — the winter task's answer depends on which
+    // end of the living room the heat starts from, and only the midpoint was
+    // ever tried.
+    for (const f of [0.28, 0.5, 0.72]) {
+      mk(x + 0.2, 0.25, z + d * f, Math.PI / 2, "z");
+      mk(x + w - 0.2, 0.25, z + d * f, -Math.PI / 2, "z");
+      mk(x + w * f, 0.25, z + 0.2, 0, "x");
+      mk(x + w * f, 0.25, z + d - 0.2, Math.PI, "x");
+    }
     for (const o of openings) {
       if (o.kind !== "window" || !o.rooms.includes(room.id) || !o.rooms.includes("outside")) continue;
       const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3; // window runs along z
@@ -134,11 +141,45 @@ export function candidateSpots(
     mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0, "area");
     mk(x + w * 0.7, wallHeight - 0.1, z + d * 0.7, 0, "area");
   } else {
-    // fan: two spots × sweep on/off — oscillation is part of the search
-    mk(cx, 0.65, cz, 0, "area", true);
-    mk(cx, 0.65, cz, 0, "area", false);
-    mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", true);
-    mk(x + w * 0.3, 0.65, z + d * 0.35, 0, "area", false);
+    // FAN: A GRID OF SPOTS x FOUR HEADINGS. It used to be two spots, both facing
+    // +z whatever the room was doing, plus the doorway pair below — so the one
+    // variable that decides what a fan does was not searched at all. Sweeping
+    // the studio by hand shows why that mattered: over the bed, air speed runs
+    // from 0.09 to 1.37 m/s across fan positions and headings, and the search
+    // was choosing from four points in that space, all at one heading.
+    //
+    // 3x3 interior grid x 4 cardinal headings = 36, plus a swept variant at each
+    // grid point (a stand fan oscillating is a real, different thing and the old
+    // set had it on two spots only). ~45 candidates per room against a screening
+    // pass of ~25 ms; the budget below was raised to match, and it is only spent
+    // where a fan is actually one of the devices in play.
+    // AND STANDING IN AN OPEN WINDOW'S INFLOW, pointing into the room. This is
+    // the studio smell task's actual answer — put the fan where the fresh air
+    // comes in and push it across — and no interior grid point expresses it: the
+    // spot is 30 cm off the glass, and the nearest grid row is a metre away. The
+    // search found 0.296 against a 0.17 bar until this existed, i.e. it could
+    // not reach the answer at all, however long it was given.
+    for (const o of openings) {
+      if (o.kind !== "window" || !o.rooms.includes(room.id) || !o.rooms.includes("outside")) continue;
+      const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+      const mid = vertical ? (o.a[1] + o.b[1]) / 2 : (o.a[0] + o.b[0]) / 2;
+      const line = vertical ? o.a[0] : o.a[1];
+      const stand = 0.45; // far enough in to fit, close enough to be "at" it
+      let px: number, pz: number;
+      if (vertical) {
+        const west = Math.abs(line - x) < Math.abs(line - (x + w));
+        px = west ? x + stand : x + w - stand;
+        pz = clamp(mid, z + 0.4, z + d - 0.4);
+      } else {
+        const south = Math.abs(line - z) < Math.abs(line - (z + d));
+        px = clamp(mid, x + 0.4, x + w - 0.4);
+        pz = south ? z + stand : z + d - stand;
+      }
+      // aimed straight in off the glass, and along the wall each way
+      const inward = Math.atan2(cx - px, cz - pz);
+      for (const yaw of [inward, inward + Math.PI / 2, inward - Math.PI / 2]) mk(px, 0.65, pz, yaw, "area", false);
+      mk(px, 0.65, pz, inward, "area", true);
+    }
     // Plus, standing back from each interior doorway and pointing THROUGH it.
     // A fan's whole job in a multi-room home is carrying conditioned air to the
     // room next door, and neither of the spots above can express that: both sit
@@ -156,6 +197,21 @@ export function candidateSpots(
       const yaw = Math.atan2(dxm - px, dzm - pz); // yaw 0 = +z, +pi/2 = +x
       mk(px, 0.65, pz, yaw, "area", false);
       mk(px, 0.65, pz, yaw, "area", true);
+    }
+    // THE GRID LAST, AND THAT ORDER MATTERS. The screening budget is finite and
+    // spent in list order, so a candidate that never fits inside it might as
+    // well not exist — the studio's answer (fan in the bed-side window) was
+    // generated, sat at position 46 of 53, and was cut off every single run.
+    // The opening-derived spots above are the ones a person would actually try
+    // first and the ones the tasks are built around; the grid is the sweep that
+    // catches everything else, and it is the part worth truncating.
+    for (const fx of [0.25, 0.5, 0.75]) {
+      for (const fz of [0.25, 0.5, 0.75]) {
+        const px = x + w * fx;
+        const pz = z + d * fz;
+        for (const yaw of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) mk(px, 0.65, pz, yaw, "area", false);
+        mk(px, 0.65, pz, 0, "area", true);
+      }
     }
   }
   return out;
