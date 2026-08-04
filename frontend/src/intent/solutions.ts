@@ -1,5 +1,5 @@
 import { findFreeSpot } from "../floorplan/collision";
-import type { FloorPlan, Opening, PlacedItem, Vec3 } from "../floorplan/types";
+import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
@@ -150,7 +150,17 @@ function spotName(plan: FloorPlan, roomId: string, pos: Vec3): string {
   if (win && near(win) < 1.2) return "under the window";
   const door = plan.doors.filter((o) => o.rooms.includes(roomId)).sort((a, b) => near(a) - near(b))[0];
   if (door && near(door) < 1.2) return "beside the doorway";
-  const { x, z, w, d } = room.rect;
+  return wallSideName(room.rect, pos);
+}
+
+/** Which wall (or the middle) a spot sits against, with no reference to doors or
+ *  windows. Split out of spotName because it is also the tie-breaker: the
+ *  opening-relative names are the ones people actually use, but they cover a
+ *  1.2 m radius, and in a 3.6 m bathroom two genuinely different spots are both
+ *  "beside the doorway". Same words, different plans, wildly different results —
+ *  which is the "it gave me the same answer twice" complaint, earned. */
+function wallSideName(rect: Rect, pos: Vec3): string {
+  const { x, z, w, d } = rect;
   const fx = (pos[0] - x) / w;
   const fz = (pos[2] - z) / d;
   const edge = Math.min(fx, 1 - fx, fz, 1 - fz);
@@ -881,7 +891,11 @@ export function findSolutions(
         },
         plan: variant,
         score: alt.score,
-        changes: [],
+        // The alternatives are built on the winner's PLAN, window move and all,
+        // so they have to inherit its change lines too. Dropping them meant a
+        // card that relocates the glazing said nothing about the glazing, and
+        // the participant only found out by applying it.
+        changes: [...top!.changes],
       });
     }
   }
@@ -922,6 +936,29 @@ export function findSolutions(
     );
     if (!dup) kept.push(s);
     if (kept.length >= want) break;
+  }
+
+  // TWO CARDS MAY NOT SHARE A HEADING. The opening-relative spot names are the
+  // ones people actually use — "beside the doorway" beats "at (2.4, 0.9)" — but
+  // they describe a 1.2 m radius, so in a small room two spots that are metres
+  // apart in effect can land on the same words. The bathroom task produced
+  // exactly that: two "return beside the doorway" cards, 35 and 71 minutes of
+  // drying, indistinguishable until you applied one. Where that happens the
+  // wall the device is against is appended, which is the next thing you would
+  // say pointing at it.
+  const primaryType = primaryFor(goal, plan, opts.allowedDevices);
+  const byLabel = new Map<string, Solution[]>();
+  for (const s of kept) byLabel.set(s.label, [...(byLabel.get(s.label) ?? []), s]);
+  for (const [, group] of byLabel) {
+    if (group.length < 2) continue;
+    for (const s of group) {
+      const it = s.plan.items.find((i) => i.type === primaryType && i.on !== false);
+      const room = it ? s.plan.rooms.find((r) => r.id === it.roomId) : null;
+      if (!it || !room) continue;
+      const side = wallSideName(room.rect, it.position);
+      // Only helps if it does not just repeat the name we already have.
+      if (!s.label.includes(side)) s.label = `${s.label}, ${side}`;
+    }
   }
   return kept.length ? kept : solutions.slice(0, 1);
 }

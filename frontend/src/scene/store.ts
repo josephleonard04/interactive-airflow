@@ -432,11 +432,25 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   // mode happened to be open when the solve finished and never the ones the
   // participant switched to afterwards.
   setSimMode: (m) =>
-    set((s) => ({
-      simMode: m,
-      simulatedModes:
-        s.simActive && s.simReady && !s.simulatedModes.includes(m) ? [...s.simulatedModes, m] : s.simulatedModes,
-    })),
+    set((s) => {
+      // A TASK'S VIEW LIST IS A LIMIT, NOT A MENU. It used to govern only which
+      // tabs were drawn, so anything that set the mode programmatically could
+      // still switch to a view the task had removed — and then the panel showed
+      // a temperature map, an outdoor-air row and a °C legend with no tab lit,
+      // in a task about drying a bathroom. (What did it was a goal misparsing to
+      // temperature; the parse is fixed, but a view the task has ruled out
+      // should be unreachable however the mode gets set, not just when the
+      // parser behaves.)
+      const allowed = s.scenarioId ? SCENARIOS[s.scenarioId].views : undefined;
+      const mode = allowed && !allowed.includes(m) ? s.simMode : m;
+      return {
+        simMode: mode,
+        simulatedModes:
+          s.simActive && s.simReady && !s.simulatedModes.includes(mode)
+            ? [...s.simulatedModes, mode]
+            : s.simulatedModes,
+      };
+    }),
   setAirflowStyle: (airflowStyle) => set({ airflowStyle }),
   toggleSimPause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSource: (id) => set({ simSourceRoomId: id, simReady: false }),
@@ -697,6 +711,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       mode: "select",
       simActive: false,
       simReady: false,
+      // Start on a view this task actually offers. Carrying the last task's
+      // mode over is how you land in a bathroom looking at a temperature map.
+      simMode: sc.views?.[0] ?? "airflow",
       simulatedModes: [], // a fresh task starts with nothing verified
       solutionOptions: [],
       // A different home entirely, so nothing offered on the last task counts
