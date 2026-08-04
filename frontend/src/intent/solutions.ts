@@ -839,11 +839,20 @@ function placeDevices(
       // For an aim-only device the candidate set is its CURRENT position at
       // every heading, which is exactly the lever the participant has.
       const aimOnly = movableDevices !== undefined && !movableDevices.includes(it.type);
+      // A UNIT ON A WALL CANNOT BLOW THROUGH IT. Sweeping the full circle put a
+      // third of the candidate aims into the plaster behind the casing — plans
+      // the solver dutifully scored and the vanes could not represent. The arc
+      // is the wall's normal plus or minus 75 degrees, which is about what a
+      // real louvre reaches.
+      const fixedAt = it.mountYaw;
       for (const room of aimOnly ? rooms.filter((r) => r.id === it.roomId) : rooms) {
         const spots = aimOnly
-          ? Array.from({ length: 12 }, (_, i) => ({
+          ? Array.from({ length: 11 }, (_, i) => ({
               position: it.position,
-              rotationY: -Math.PI + (i * 2 * Math.PI) / 12,
+              rotationY:
+                fixedAt === undefined
+                  ? -Math.PI + (i * 2 * Math.PI) / 11
+                  : fixedAt - 1.31 + (i * 2.62) / 10,
               roomId: it.roomId,
               roomName: room.name,
               axis: "area" as const,
@@ -1022,7 +1031,17 @@ function refine(
           moves.push({ dx, dz, dr: 0 });
         }
       }
-      if (canAim(it.type)) for (const dr of [turn, -turn]) moves.push({ dx: 0, dz: 0, dr });
+      if (canAim(it.type)) {
+        for (const dr of [turn, -turn]) {
+          // …and the polish stays inside that arc as well, or it walks the aim
+          // round into the wall one nudge at a time.
+          if (here.mountYaw !== undefined) {
+            const off = Math.atan2(Math.sin(here.rotationY + dr - here.mountYaw), Math.cos(here.rotationY + dr - here.mountYaw));
+            if (Math.abs(off) > 1.31) continue;
+          }
+          moves.push({ dx: 0, dz: 0, dr });
+        }
+      }
       for (const m of moves) {
         if (budget.left <= 0) break;
         const cur = best.items.find((o) => o.id === it.id)!;

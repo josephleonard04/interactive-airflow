@@ -176,13 +176,29 @@ function Bathtub([w, h, d]: V) {
  *  physics and nothing on screen, so a participant could set it, watch the
  *  picture change, and have no idea which control had done it — or drag the
  *  slider to the end and reasonably conclude it was broken. */
-function Ac([w, h, d]: V, tilt = 0) {
+function Ac([w, h, d]: V, tilt = 0, yaw = 0) {
   // The blade reads the tilt back at roughly life size: a real louvre swings
   // about 60 degrees end to end, which is the slider's own range.
   const blade = clamp(-tilt, -Math.PI / 3, Math.PI / 3);
+  // …and the SIDEWAYS aim is the vertical vanes behind it, not the box. `yaw`
+  // arrives as the offset from the wall the casing is fixed to (see mountYaw),
+  // so it is 0 for a unit blowing straight out and the vanes stand square.
+  const vane = clamp(yaw, -Math.PI / 3, Math.PI / 3);
+  const vanes = 5;
   return (
     <group>
       <Box size={[w, h, d]} position={[0, 0, 0]} color="#eef1f4" roughness={0.5} />
+      {/* vertical vanes across the mouth, turned to the sideways aim */}
+      {Array.from({ length: vanes }, (_, i) => (
+        <mesh
+          key={i}
+          position={[(-w * 0.35) + (i * w * 0.7) / (vanes - 1), -h * 0.12, d / 2 - 0.012]}
+          rotation={[0, vane, 0]}
+        >
+          <boxGeometry args={[0.012, h * 0.34, d * 0.42]} />
+          <meshStandardMaterial color="#aeb7c0" roughness={0.55} />
+        </mesh>
+      ))}
       {/* the louvre, hinged along the bottom lip of the mouth */}
       <group position={[0, -h * 0.28, d / 2]} rotation={[blade, 0, 0]}>
         <Box size={[w * 0.82, 0.03, d * 0.55]} position={[0, 0, d * 0.26]} color="#c2cad2" />
@@ -464,7 +480,7 @@ function Bin(size: V): JSX.Element {
   );
 }
 
-export function Model({ type, size, on = true, tilt = 0 }: { type: string; size: V; on?: boolean; tilt?: number }) {
+export function Model({ type, size, on = true, tilt = 0, yaw = 0 }: { type: string; size: V; on?: boolean; tilt?: number; yaw?: number }) {
   switch (type) {
     case "bed":
       return Bed(size);
@@ -489,7 +505,7 @@ export function Model({ type, size, on = true, tilt = 0 }: { type: string; size:
     case "bathtub":
       return Bathtub(size);
     case "ac":
-      return Ac(size, tilt);
+      return Ac(size, tilt, yaw);
     case "heater":
       return Heater(size);
     case "fan":

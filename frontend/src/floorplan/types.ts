@@ -51,6 +51,17 @@ export interface PlacedItem {
    *  with rotationY this lets an AC be angled away from a bed, or a fan be aimed
    *  up/down/diagonally. Undefined = 0 (horizontal). */
   tilt?: number;
+  /** Wall-mounted units only: the yaw the CASING is fixed at, i.e. the normal of
+   *  the wall it is screwed to. Undefined = the casing follows rotationY.
+   *
+   *  A split AC does not swivel. It is bolted flat to the wall and aims by
+   *  swinging the vanes across its mouth, so driving the whole box from
+   *  rotationY drew it hanging off the wall at an angle the moment it was aimed
+   *  anywhere but straight out — which is what an 8.6 degree default aim looked
+   *  like in the studio task. Keeping the two apart lets the casing stay flush
+   *  while `rotationY` goes on meaning what the solver needs it to mean: the
+   *  direction the air actually leaves in. */
+  mountYaw?: number;
   movable: boolean;
 }
 

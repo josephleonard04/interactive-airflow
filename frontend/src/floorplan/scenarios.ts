@@ -276,7 +276,7 @@ function spot(
   x: number,
   z: number,
   rotationY: number,
-  opts: { category?: PlacedItem["category"]; mount?: PlacedItem["mount"]; y?: number; flow?: number; on?: boolean } = {},
+  opts: { category?: PlacedItem["category"]; mount?: PlacedItem["mount"]; y?: number; flow?: number; on?: boolean; mountYaw?: number } = {},
 ): PlacedItem {
   const mount = opts.mount ?? "floor";
   return {
@@ -290,6 +290,7 @@ function spot(
     mount,
     flow: opts.flow,
     ...(opts.on !== undefined ? { on: opts.on } : {}),
+    ...(opts.mountYaw !== undefined ? { mountYaw: opts.mountYaw } : {}),
     movable: true,
   };
 }
@@ -679,11 +680,12 @@ function buildAcStudio(): FloorPlan {
         // — and the bed is at the far end of that run, which is why the problem
         // exists: the louvre was left pointing down the room at the pillow.
         //
-        // yaw 0.15 is almost straight ahead (+z), leaning a little right to line
-        // up with the headboard at (6.3, 4.0). Re-aiming is one of the two
-        // levers, so this is where it was found and not a fact about the room.
-        spot(gen, studio, "ac", [0.85, 0.32, 0.22], 5.74, 0.17, 0.15, {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.5, on: true,
+        // yaw 0 — straight out into the room, which from x 5.74 runs the length
+        // of the studio and lands on the bed. `mountYaw` pins the CASING to this
+        // wall so re-aiming swings the vanes instead of turning the whole unit
+        // off the plaster; a split AC does not swivel.
+        spot(gen, studio, "ac", [0.85, 0.32, 0.22], 5.74, 0.17, 0, {
+          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.5, on: true, mountYaw: 0,
         }),
         // The fan, standing in the top-left corner out of the way — where one
         // lives when nobody is using it. Standing it in the room rather than
