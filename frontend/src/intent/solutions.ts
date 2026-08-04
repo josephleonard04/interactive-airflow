@@ -1,6 +1,6 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean, zoneSpeed } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { windowPlacements, windowSideName, withOpeningMoved } from "../floorplan/openings";
@@ -239,6 +239,8 @@ const DRAFT_PENALTY = 8;
  *  finding 0.296 (against a 0.17 bar) and finding the answer. */
 export interface TaskZone {
   metric: "temperature" | "smell" | "draft" | "drying";
+  /** Temperature goals: grade the room by its WARMEST part. See warmestPart. */
+  everywhere?: boolean;
   /** The patch to measure over. Null = the whole room named by `roomId`. */
   zone: Rect | null;
   roomId: string;
@@ -392,7 +394,11 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     let v: number | null = null;
     let scale = 1;
     if (g.metric === "draft") { v = zoneSpeed(built, rect); scale = 0.1; }
-    else if (g.metric === "temperature") { const d = zoneMean(built, temp, rect); v = d === null ? null : outdoorTemp + d; scale = 1; }
+    else if (g.metric === "temperature") {
+      const d = g.everywhere ? warmestPart(built, temp, rect) : zoneMean(built, temp, rect);
+      v = d === null ? null : outdoorTemp + d;
+      scale = 1;
+    }
     else if (g.metric === "drying") { v = slowestDry(built, dryF, rect); scale = 30; }
     else { v = zoneMean(built, smell, rect); scale = 0.05; }
     if (v === null) { taskShortfall.push(0); continue; }

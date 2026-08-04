@@ -623,7 +623,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             const d = swapped ? it.size[0] : it.size[2];
             zone = { x: it.position[0] - w / 2, z: it.position[2] - d / 2, w, d };
           }
-          return { metric: g.metric, zone, roomId: g.roomId, atLeast: g.atLeast, atMost: g.atMost };
+          return { metric: g.metric, zone, roomId: g.roomId, everywhere: g.everywhere, atLeast: g.atLeast, atMost: g.atMost };
         });
         const found = findSolutions(before, goal, targetIds, {
           taskZones: zoneGoals,

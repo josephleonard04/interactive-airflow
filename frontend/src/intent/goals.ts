@@ -1,7 +1,7 @@
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import { dampColor } from "../viz/smell";
 import type { FloorPlan, Rect } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, zoneMean, zoneSpeed } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
 
 // Score a task's tick-boxes against the current home.
 //
@@ -300,6 +300,18 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
     // task turns on exactly that distinction — an air conditioner aimed into a
     // corner drops the room mean perfectly well while the far side of the studio
     // stays hot, and a room-mean goal would call that a success.
+    // "COOL EVERYWHERE", graded on the part of the room doing worst. See
+    // warmestPart: a mean is satisfied by cooling one end hard, and a single
+    // measuring spot only chooses a different end to ignore.
+    if (g.metric === "temperature" && g.everywhere) {
+      const rect = plan.rooms.find((r) => r.id === g.roomId)?.rect;
+      if (!rect) return { label: g.label, met: false, detail: "", word: "" };
+      const c = Number((outdoorTemp + warmestPart(built, fields.temp, rect)).toFixed(1));
+      const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
+      const word = warmthWord(c, g);
+      return { label: g.label, met, detail: `${c.toFixed(1)} °C in the warmest part`, word, color: tempSwatch(word) };
+    }
+
     if (g.metric === "temperature" && g.nearItem) {
       const zone = itemZone(plan, g.nearItem);
       const d = zone ? zoneMean(built, fields.temp, zone) : null;

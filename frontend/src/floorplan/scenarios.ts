@@ -96,6 +96,11 @@ export interface ScenarioGoal {
    *  studio a room-mean smell cannot tell the bed from the bin two metres away.
    *  Applies to `draft` and `smell` goals. */
   nearItem?: string;
+  /** Temperature goals only: grade the room by its WARMEST part rather than its
+   *  mean or one measuring spot. "Keep everywhere cool" is a coverage claim, and
+   *  neither a mean nor a single zone can express it — a mean is satisfied by
+   *  cooling one end hard, and a zone just picks a different end to ignore. */
+  everywhere?: boolean;
   /** Extra condition on a room temperature goal: the strip of floor just inside
    *  the room's exterior window must ALSO be at least this warm.
    *
@@ -1150,76 +1155,76 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     views: ["airflow", "temperature"],
     // TWO GOALS THAT PULL APART, which is the design rule for all four tasks.
     //
+    // The task in one line: do not sleep in a blast, and do not leave half the
+    // studio hot. Those fight because the fan is the only thing that carries the
+    // AC's cold out of the corner it pools in, and the placements that carry it
+    // best are the ones that put it over the bed.
+    //
     // WHAT THE AC'S POSITION COSTS THE TASK, recorded because it was measured
     // three times over. With the unit above the desk on the TOP wall, the bed is
     // 3.9 m down the room from it, and at that range the jet has spread out: the
     // bed reads 0.099-0.120 m/s across EVERY aim and tilt, and the AC's jet
     // speed is already clamped at the model's maximum, so a bigger unit changes
-    // nothing (flow 0.5, 1.0, 1.8 and 3.0 all give byte-identical numbers).
+    // nothing (flow 0.5, 1.0, 1.8 and 3.0 give byte-identical numbers).
     //
     // An air conditioner four metres away cannot blow on you. That is a real
-    // result and not a tuning failure — the earlier version had it on the
+    // result and not a tuning failure — an earlier version had it on the
     // right-hand wall beside the bed, where the aim was worth a 3x swing on the
-    // pillow, and the version before that had it in a different room entirely,
-    // where it was worth nothing at all. Above the desk sits in between: the aim
-    // is a fine adjustment (0.43 °C at the table on its own, about 0.15 °C
-    // between the passing layouts) and the FAN is the lever.
+    // pillow, and the one before that had it in a different room entirely, where
+    // it was worth nothing at all. Above the desk sits in between: aiming it is
+    // a fine adjustment (about 0.08 °C across the full tilt range and 0.01 °C
+    // between yaw -34° and +34°) and the FAN is the lever. Aims beyond about
+    // ±69° do fail, so "point it along the wall" is still a wrong answer.
     //
-    // So the tension moved rather than disappeared. The AC pools cold at the top
-    // of the room; the fan is what carries it to the middle and the far end. But
-    // the fan placements that carry it best stand beside the unit at the bed's
-    // end of the room, and from there the fan itself is what blows on the bed —
-    // so the strongest cooling and the calm bed are still competing, just over
-    // the fan rather than over the louvre.
+    // MEASURED at REPORT_FIDELITY, 149 layouts (fan on a 7x5 grid x 4 headings,
+    // plus the no-fan case at nine AC settings):
     //
-    // MEASURED at REPORT_FIDELITY over 402 layouts (9 aims x 2 tilts, plus 3
-    // aims x 2 tilts x 5x4 fan positions x 4 fan headings):
+    //   as found (fan parked in the corner)     bed 0.111   warmest 25.59
+    //   best AC setting, NO FAN                 bed 0.101   warmest 25.60
+    //   coolest of all 149 (fan mid-room)       bed 1.297   warmest 24.55
+    //   best warmest-part with the bed calm     bed 0.127   warmest 24.67
     //
-    //   as found (fan parked in the corner)      bed 0.111   table 23.13
-    //   best aim, NO FAN                         bed 0.102   table 23.15
-    //   coolest of all 402 (fan beside the AC)   bed 0.175   table 22.14
-    //   best table with the bed calm             bed 0.107   table 22.17
-    //
-    // The bed starts calm and the room starts warm, so the task opens with one
-    // box ticked and the obvious way to tick the second — put the fan where it
-    // moves the most air — unticks the first. Seven of the ten coolest layouts
-    // fail the draught line. The answer stands the fan in the MIDDLE of the top
-    // wall pointing down the room: it still reaches, and it is far enough from
-    // the bed not to be felt there. 13 of 402 clear both.
+    // The bed starts calm and the room starts hot, so the task opens with one
+    // box ticked and the obvious way to tick the second — stand the fan where it
+    // shifts the most air — unticks it. The four coolest layouts in the sweep
+    // all fail the bed. The answer stands the fan in the upper middle of the
+    // room pointing down its length: far enough from the bed not to be felt
+    // there, close enough to the unit to pick up what it is producing.
     goals: [
-      // 0.15 m/s over the whole bed, not the pillow: air you can feel on your
-      // legs still wakes you. Well under the app's 0.28 no-noticeable figure,
-      // because this room is quiet to begin with — the bar has to sit below what
-      // doing nothing already achieves (0.111) or the goal is free.
-      { label: "No air blowing on the bed while you sleep", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.15 },
-      // 22.6 °C at the TABLE in the middle of the studio — the far end from the
-      // AC, and where you stand when you are not in bed.
+      // 0.20 m/s over the whole bed, not the pillow: air you can feel on your
+      // legs still wakes you. This is a STRONG-draught line rather than a
+      // stillness one — the app's own no-noticeable figure is 0.28 and the room
+      // never goes below 0.092 with anything running, so demanding stillness
+      // would be demanding something the task cannot deliver. What it rules out
+      // is the blast: the failing layouts sit at 0.38 to 1.89 m/s.
+      { label: "No strong draught on the bed while you sleep", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.2 },
+      // 25.0 °C in the WARMEST PART of the studio — not the mean, and not one
+      // measuring spot. "Cool everywhere" is a coverage claim and neither of
+      // those can express it: a mean is satisfied by cooling one end hard, and a
+      // zone just picks a different end to ignore. Graded on the 90th percentile
+      // of the room, the same way the bathroom is graded on the corner that
+      // stays damp. See warmestPart.
       //
-      // Measured at the table and not as a room mean, and this is the whole
-      // reason temperature goals learned to take a zone (see intent/goals.ts).
-      // An AC pooling cold in its own corner drops the room MEAN perfectly well
-      // while the middle of the studio stays warm, so a room-mean goal could not
-      // tell the answer from the failure.
-      //
-      // 22.6 sits in the 22.17 -> 23.15 gap: it admits the fan-assisted family
-      // and rejects doing nothing by 0.55 °C, at every aim tried.
-      { label: "The middle of the studio cools down too", metric: "temperature", roomId: "studio", nearItem: "table", atMost: 22.6 },
+      // 25.0 sits in the 24.67 -> 25.60 gap: it admits the fan-assisted family
+      // and rejects doing nothing by 0.6 °C, at every AC setting tried.
+      { label: "The whole studio cools down, not just one end", metric: "temperature", roomId: "studio", everywhere: true, atMost: 25 },
     ],
     // Denser than the default 14: one open room where the whole question is
     // which way the air crosses it, so a sparse picture just looks like nothing
     // is happening.
     viz: { maxSeeds: 26 },
     success:
-      "Bed ≤ 0.15 m/s AND the table ≤ 22.6 °C. The bed starts calm and the room starts warm, " +
-      "so the task opens with one box already ticked and the obvious way to tick the second — " +
-      "stand the fan where it shifts the most air, beside the AC at the bed's end — unticks it. " +
-      "Seven of the ten coolest layouts in the sweep fail the draught line that way. The answer " +
-      "is the fan in the MIDDLE of the top wall pointing down the room: 22.17 °C at the table " +
-      "with 0.107 m/s at the bed. The fan is required — every AC aim on its own leaves the " +
-      "table at 23.15 °C — and the trap is treating it as a second cooler rather than as the " +
-      "thing that carries the AC's cold out of the corner it pools in. Re-aiming the unit is a " +
-      "fine adjustment here (about 0.15 °C between passing layouts), not the main lever: from " +
-      "above the desk it is four metres from the bed and cannot reach it. 13 of 402 clear both.",
+      "Bed ≤ 0.20 m/s AND the warmest part of the studio ≤ 25.0 °C. The bed starts calm and " +
+      "the room starts hot, so the task opens with one box ticked and the obvious way to tick " +
+      "the second — stand the fan where it shifts the most air, out in the middle — unticks it: " +
+      "the four coolest layouts in the sweep put 0.38 to 1.89 m/s over the bed. The answer is " +
+      "the fan in the upper middle of the room pointing down its length, around (3.3, 1.5): " +
+      "24.67 °C in the warmest part with 0.127 m/s at the bed. The fan is required — every AC " +
+      "setting on its own leaves the room at 25.60 °C — and the trap is treating it as a second " +
+      "cooler rather than as the thing that carries the AC's cold out of the corner it pools " +
+      "in. Re-aiming the unit is a fine adjustment here (0.08 °C across the whole tilt range), " +
+      "not the main lever: from above the desk it is four metres from the bed and cannot reach " +
+      "it. Pointing it along the wall (beyond about ±69°) does still fail.",
     build: buildAcStudio,
   },
 };

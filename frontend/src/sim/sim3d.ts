@@ -1104,6 +1104,37 @@ export function slowestDry(s: Sim3D, dry: Float32Array, rect: Rect): number {
   return vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.9))];
 }
 
+/** The WARMEST part of a room — its 90th-percentile temperature, in the same
+ *  delta-from-outdoor units the temp field carries.
+ *
+ *  "Keep everywhere cool" is not a question a mean can answer. An air
+ *  conditioner pooling cold in its own corner drops the average perfectly well
+ *  while the far end of the room stays hot, and a single measuring spot only
+ *  moves the problem: it grades one patch and ignores whichever OTHER patch the
+ *  air is not reaching. The 90th percentile grades the room by the part of it
+ *  that is doing worst — the same reasoning, and the same percentile, as
+ *  slowestDry uses for the corner that stays damp.
+ *
+ *  Occupied band only (below 2 m): the warm layer against the ceiling is real,
+ *  and nobody is standing in it. */
+export function warmestPart(s: Sim3D, temp: Float32Array, rect: Rect): number {
+  const { sim, nx, ny, nz, cellCenter, inside } = s;
+  const vals: number[] = [];
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const c = sim.cIdx(i, j, k);
+        if (sim.solid[c] || !inside[c]) continue;
+        const [x, y, z] = cellCenter(i, j, k);
+        if (y < 0.2 || y > 2.0) continue;
+        if (x < rect.x || x > rect.x + rect.w || z < rect.z || z > rect.z + rect.d) continue;
+        vals.push(temp[c]);
+      }
+  if (!vals.length) return 0;
+  vals.sort((a, b) => a - b);
+  return vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.9))];
+}
+
 /** Mean of a per-cell field over an arbitrary ZONE — a corner, a bed, a couch —
  *  rather than a whole room.
  *
