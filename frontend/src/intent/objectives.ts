@@ -172,6 +172,27 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
   },
 ];
 
+/** Comparatives, which behave differently from the plain words they come from.
+ *
+ *  "A BIT WARMER PLEASE" ASKED THE ROOM TO GET COLDER. `bit` is a complaint
+ *  marker — it has to be, for "it's a bit cold in here" — so the nearest-marker
+ *  scan read "a bit warmer" as a complaint about warmth and inverted it. The
+ *  degree words are genuinely ambiguous on their own; what disambiguates them is
+ *  the verb. "It GETS a bit warmer" describes what happens; "a bit warmer,
+ *  please" asks for it. So for a comparative only the state verbs below count as
+ *  complaint markers, and the bare intensifiers do not. */
+const COMPARATIVES = [
+  "warmer", "hotter", "cooler", "colder", "chillier", "drier", "dryer",
+  "fresher", "breezier", "damper", "wetter",
+];
+
+/** Verbs that turn a comparative into a description of what IS, not a request. */
+const STATE_VERBS = [
+  "is", "was", "are", "were", "gets", "getting", "got", "feels", "feeling",
+  "seems", "keeps", "becomes", "becoming", "turns", "runs",
+  "always", "still", "constantly",
+];
+
 /** Said before a temperature word, these mark it as the PROBLEM. */
 const COMPLAINT_MARKERS = [
   "too", "so", "very", "really", "extremely", "unbearably", "always", "still",
@@ -209,7 +230,7 @@ const PREDICATE_NEGATERS = ["never", "isnt", "arent", "wasnt", "wont", "doesnt",
  *  box could not read at all. These verbs, applied to air, always mean "get
  *  some of it moving", so they flip the draught goal's direction the way
  *  "more" and "stronger" already do. */
-const MOVE_AIR = /\b(move|moving|bring|brings|bringing|push|pushing|send|sending|get|getting|carry|carrying|circulate|circulating|blow|blowing)\b[^.]{0,18}\b(air|breeze|draft|draught|airflow|wind)\b/;
+const MOVE_AIR = /\b(move|moving|bring|brings|bringing|push|pushing|send|sending|get|getting|carry|carrying|circulate|circulating|blow|blowing|point|pointing|aim|aiming|direct|shift|shifting|reposition|relocate|slide|nudge)\b[^.]{0,18}\b(air|breeze|draft|draught|airflow|wind|fan|vent|extract)\b/;
 
 /** Words that say a place should be BETTER without saying which way.
  *
@@ -232,12 +253,42 @@ const COMFORT_HOT_C = 26;
 /** At or below this, it means warm it up. */
 const COMFORT_COLD_C = 16;
 
+/** "I WANT BOTH ROOMS TO BE SIMILAR TEMPERATURE." — the sentence that started
+ *  this, and the dictionary matched not one word of it. `temperature` was never
+ *  in the lexicon (only the sensations were: hot, cold, warm…), and evenness had
+ *  no vocabulary at all, so the single most natural way to describe the winter
+ *  task's actual problem — one room warm, the other freezing — parsed to nothing.
+ *
+ *  Evenness is not a direction, which is why it needs its own path: "make them
+ *  the same" says nothing about whether to warm or cool. The weather decides,
+ *  the same way it decides for the comfort words, and the goal lands on EVERY
+ *  room rather than a nearest one — an evenness request is inherently about all
+ *  of them, and grounding it to a single room is how you get the search
+ *  optimising the room that was already fine. */
+const EVEN_WORDS = [
+  "similar", "similarly", "same", "even", "evenly", "equal", "equally",
+  "balance", "balanced", "balancing", "consistent", "consistently", "uniform",
+  "uniformly", "match", "matching", "alike", "level", "difference",
+  "differences", "gap", "spread", "throughout", "everywhere", "overall",
+  "across", "between",
+];
+
+/** Temperature named as a QUANTITY rather than a sensation. On its own this
+ *  asks for nothing ("what's the temperature?"), so it only ever fires in
+ *  combination — with an evenness word here, or with a direction word via the
+ *  sensation lists above. */
+const TEMP_NOUNS = ["temperature", "temperatures", "temp", "temps", "degrees", "climate", "thermal"];
+
 /** Every single word the dictionary knows, for spelling and compound repair. */
 const VOCABULARY: Vocabulary = {
   words: new Set<string>([
     ...TEMP_WORDS.flatMap((t) => t.words),
     ...LEXICON.flatMap((l) => l.words),
     ...COMFORT_WORDS,
+    ...EVEN_WORDS,
+    ...TEMP_NOUNS,
+    ...COMPARATIVES,
+    ...STATE_VERBS,
     ...COMPLAINT_MARKERS,
     ...WISH_MARKERS,
     ...REMOVERS,
@@ -279,7 +330,9 @@ const VOCABULARY: Vocabulary = {
  *    "never gets warm"        → complaint of ABSENCE, so back to wanting it
  */
 function wantsOpposite(text: string, at: number, word: string, entry: TempWord): boolean {
-  const after = text.slice(at + word.length + 1).trim().split(/\s+/).slice(0, 2);
+  // `at` is the word's own index now that wordAt anchors both ends; it used to
+  // be the index of the space in front of it, which is where the +1s came from.
+  const after = text.slice(at + word.length).trim().split(/\s+/).slice(0, 2);
   // "warm enough" / "not warm enough" both ask for MORE warmth. The idiom
   // outranks everything else, including the negation sitting in front of it.
   if (after.includes("enough")) return false;
@@ -290,12 +343,20 @@ function wantsOpposite(text: string, at: number, word: string, entry: TempWord):
   const before = text.slice(0, at).trim().split(/\s+/).slice(-8);
   if (before.some((w) => REMOVERS.includes(w))) return true;
 
+  // A comparison to somewhere else — "colder THAN the rest", "warmer than the
+  // living room" — is always a complaint about here, whatever precedes it.
+  const comparative = COMPARATIVES.includes(word);
+  if (comparative && /^\s*(\S+\s+){0,3}than\b/.test(text.slice(at + word.length))) return true;
+
   let complaint = entry.alwaysComplaint ?? false;
   if (!complaint) {
     // Nearest marker wins; a wish marker beats a complaint one at equal distance.
+    // For a comparative the complaint list narrows to the state verbs, so the
+    // degree words in "a bit warmer" no longer flip it — see COMPARATIVES.
+    const complaints = comparative ? STATE_VERBS : COMPLAINT_MARKERS;
     for (let i = before.length - 1; i >= 0; i--) {
       if (WISH_MARKERS.includes(before[i])) break;
-      if (COMPLAINT_MARKERS.includes(before[i])) {
+      if (complaints.includes(before[i])) {
         complaint = true;
         break;
       }
@@ -425,12 +486,41 @@ export function parseGoal(
     });
   }
 
+  // EVENNESS BEFORE DIRECTION. "Both rooms the same temperature" contains
+  // `temperature` and possibly `warm` too, and running the sensation loop on it
+  // would ground a direction to one nearest room — which is the opposite of what
+  // was asked. So this is checked first and, when it fires, stands in for the
+  // whole temperature reading.
+  const evenAt = firstOf(t, EVEN_WORDS);
+  const tempNounAt = firstOf(t, TEMP_NOUNS);
+  const tempSenseAt = firstOf(t, TEMP_WORDS.flatMap((e) => e.words));
+  const wantsEven = evenAt >= 0 && (tempNounAt >= 0 || tempSenseAt >= 0) && plan.rooms.length > 1;
+  if (wantsEven) {
+    // Which way to even them out is the weather's call, not the sentence's:
+    // in February you level a home up, in a heatwave you level it down. With no
+    // weather to hand, level up — an evenness complaint about a home with a cold
+    // room is far commoner than one about a warm one.
+    const outdoor = opts.outdoorTemp;
+    const direction: Direction = outdoor != null && outdoor >= COMFORT_HOT_C ? "low" : "high";
+    for (const r of plan.rooms) {
+      out.push({
+        raw: text,
+        scalar: "temperature",
+        direction,
+        regionId: r.id,
+        regionName: r.name,
+        regionRect: null,
+      });
+    }
+  }
+
   // Temperature first, each word's direction decided from how it is framed.
   for (const entry of TEMP_WORDS) {
+    if (wantsEven) break;
     const hits = entry.words
-      .map((w) => ({ w, at: t.indexOf(` ${w}`) }))
+      .map((w) => ({ w, at: wordAt(t, w) }))
       .filter((h) => h.at >= 0)
-      .sort((a, b) => a.at - b.at);
+      .sort((a, b) => a.at - b.at || b.w.length - a.w.length);
     if (hits.length === 0) continue;
     const { w, at } = hits[0];
     // A complaint asks for the OPPOSITE of the sensation it names: "too hot"
@@ -442,7 +532,7 @@ export function parseGoal(
   }
 
   for (const lex of LEXICON) {
-    const idx = lex.words.map((w) => t.indexOf(` ${w}`)).filter((i) => i >= 0);
+    const idx = lex.words.map((w) => wordAt(t, w)).filter((i) => i >= 0);
     if (idx.length === 0) continue;
     const at = Math.min(...idx);
 
@@ -561,6 +651,40 @@ function destinationRoom(
     }
   }
   return rooms[rooms.length - 1];
+}
+
+/** Where `w` occurs as a WHOLE WORD in the normalized text, or -1.
+ *
+ *  Every lookup here used to be `t.indexOf(" " + w)`, which anchors the front of
+ *  the word and nothing else, and two live bugs came straight out of that:
+ *
+ *    "a bit warmer"        matched `warm`, not `warmer`, so the comparative rule
+ *                          never saw a comparative and the sentence still parsed
+ *                          as a complaint about warmth — i.e. cool the room down.
+ *    "even out the humidity"  matched `humid`, a heat complaint, so a sentence
+ *                          about moisture set a TEMPERATURE goal.
+ *
+ *  Both are the prefix leaking. Anchoring both ends fixes them together. */
+function wordAt(t: string, w: string): number {
+  let from = 0;
+  for (;;) {
+    const i = t.indexOf(w, from);
+    if (i < 0) return -1;
+    const before = i === 0 ? " " : t[i - 1];
+    const after = i + w.length >= t.length ? " " : t[i + w.length];
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return i;
+    from = i + 1;
+  }
+}
+
+/** Position of the earliest of `words` in the normalized text, or -1. */
+function firstOf(t: string, words: string[]): number {
+  let best = -1;
+  for (const w of words) {
+    const i = wordAt(t, w);
+    if (i >= 0 && (best < 0 || i < best)) best = i;
+  }
+  return best;
 }
 
 function nearestRoom(rooms: Array<{ id: string; name: string; at: number }>, at: number) {
