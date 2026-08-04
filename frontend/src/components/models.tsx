@@ -348,44 +348,34 @@ function Smell(size: V): JSX.Element {
 function Damp(size: V): JSX.Element {
   const r = Math.min(size[0], size[2]) * 0.5;
   const floor = -size[1] / 2;
-  /** How high the plume climbs (m). Short of the ceiling on purpose — it should
-   *  read as rising toward the extract, not as a column propping up the roof. */
-  const RISE = 1.35;
-  const PUFFS = 7;
+  // A DISC ON THE FLOOR, in a colour nothing else in the room uses. Two
+  // sculpted versions came before this — rings, then puffs — and both spent
+  // their effort on looking like steam, which is not the job. The job is "this
+  // is the thing making the room wet, and it is HERE": one flat mark, read in a
+  // glance from the top view, findable while the floor around it is being
+  // painted amber-to-navy by the humidity field. A translucent plume competes
+  // with that field for the same pixels; a solid ring sits on top of it.
+  //
+  // Magenta on purpose. The humidity ramp runs amber → green → teal → navy, so
+  // it is the one hue that can never be mistaken for a reading.
+  const MARK = "#d81b8c";
   return (
     <group>
-      {/* the wet patch it is coming off — the only part that touches the floor */}
-      <mesh position={[0, floor + 0.012, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[r * 0.9, 28]} />
-        <meshStandardMaterial color="#dcecf3" roughness={0.9} transparent opacity={0.45} />
+      {/* soft halo, so it reads as a source rather than a sticker */}
+      <mesh position={[0, floor + 0.008, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[r * 1.15, 32]} />
+        <meshStandardMaterial color={MARK} transparent opacity={0.18} depthWrite={false} />
       </mesh>
-      {Array.from({ length: PUFFS }, (_, i) => {
-        const t = i / (PUFFS - 1);
-        // Widest around the middle and tapering at both ends — a sine through
-        // the plume's height, rather than a straight widening, is what stops it
-        // reading as a cone or a stack.
-        const rad = r * (0.34 + 0.5 * Math.sin(Math.PI * (0.15 + 0.85 * t)));
-        return (
-          <mesh
-            key={i}
-            position={[0.42 * r * Math.sin(t * 2.4), floor + 0.06 + t * RISE, 0.18 * r * Math.sin(t * 3.1)]}
-          >
-            <sphereGeometry args={[rad, 14, 12]} />
-            <meshStandardMaterial
-              color="#f2f9fc"
-              emissive="#bcdcea"
-              emissiveIntensity={0.35 * (1 - t * 0.6)}
-              toneMapped={false}
-              transparent
-              opacity={0.06 + 0.42 * (1 - t * 0.75)}
-              // Overlapping translucent spheres that each write depth punch
-              // holes in one another; without this the plume reads as a pile of
-              // hard balls instead of one soft mass.
-              depthWrite={false}
-            />
-          </mesh>
-        );
-      })}
+      {/* the mark itself */}
+      <mesh position={[0, floor + 0.014, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[r * 0.72, 32]} />
+        <meshStandardMaterial color={MARK} emissive={MARK} emissiveIntensity={0.45} toneMapped={false} transparent opacity={0.9} depthWrite={false} />
+      </mesh>
+      {/* a ring around it, which is what keeps the edge crisp against a busy floor */}
+      <mesh position={[0, floor + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[r * 0.86, r * 0.98, 40]} />
+        <meshStandardMaterial color={MARK} emissive={MARK} emissiveIntensity={0.5} toneMapped={false} transparent opacity={0.85} depthWrite={false} />
+      </mesh>
     </group>
   );
 }
