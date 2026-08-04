@@ -236,8 +236,17 @@ const room = (
 const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 /** Add an extra window to a room's wall AFTER assembly (placeWindows only makes
- *  one per room). `side` is which wall of the room; `frac` is 0..1 along it. */
-function addWindow(plan: FloorPlan, roomId: string, side: "north" | "south" | "east" | "west", frac: number, open: boolean): void {
+ *  one per room). `side` is which wall of the room; `frac` is 0..1 along it.
+ *  `width` defaults to the standard casement — pass a bigger number for glazing
+ *  that is part of the room's character rather than a hole in a wall. */
+function addWindow(
+  plan: FloorPlan,
+  roomId: string,
+  side: "north" | "south" | "east" | "west",
+  frac: number,
+  open: boolean,
+  width = WINDOW_WIDTH,
+): void {
   const r = plan.rooms.find((x) => x.id === roomId);
   if (!r) return;
   const { x, z, w, d } = r.rect;
@@ -247,8 +256,8 @@ function addWindow(plan: FloorPlan, roomId: string, side: "north" | "south" | "e
     : side === "east" ? (["z", x + w, z, z + d] as const)
     : (["z", x, z, z + d] as const);
   const mid = lo + frac * (hi - lo);
-  const s = clampf(mid - WINDOW_WIDTH / 2, lo + 0.2, hi - 0.2 - WINDOW_WIDTH);
-  const o = makeOpening(`window-x-${roomId}-${side}`, "window", axis, line, s, s + WINDOW_WIDTH, [roomId, "outside"]);
+  const s = clampf(mid - width / 2, lo + 0.2, hi - 0.2 - width);
+  const o = makeOpening(`window-x-${roomId}-${side}`, "window", axis, line, s, s + width, [roomId, "outside"]);
   o.open = open;
   carveOpening(plan.walls, o);
   plan.windows.push(o);
@@ -645,40 +654,35 @@ function buildAcStudio(): FloorPlan {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
       const [studio] = rs;
       return [
-        // THE BED, along the bottom wall at the right-hand end. Turned a
-        // quarter-turn rather than reshaped: the model puts the headboard and
-        // pillows at its local -z, and yaw = pi/2 maps that to -x, so the
-        // pillows end up at the LEFT end of the bed — around x 4.0, which is
-        // where the AC's factory aim lands. That is the whole problem stated in
-        // one line of geometry.
-        spot(gen, studio, "bed", [1.5, 0.5, 2.0], 4.95, 3.99, Math.PI / 2),
-        // Closet down the right-hand wall, desk in the top-right corner, TV on
-        // the left wall, table in the middle. None of it is the participant's to
+        // THE BED, in the bottom-RIGHT corner with the headboard against the
+        // right-hand wall. Turned rather than reshaped: the model puts the
+        // headboard and pillows at its local -z, and yaw = -pi/2 maps that to
+        // +x, so the pillows end up hard against the right wall at about
+        // x 6.3 — directly under the run of the room the AC looks down.
+        spot(gen, studio, "bed", [1.5, 0.5, 2.0], 5.34, 3.99, -Math.PI / 2),
+        // Closet in the bottom-LEFT corner, desk in the top-right, TV on the
+        // left wall, table in the middle. None of it is the participant's to
         // move; it is here because an empty box is not a room, and because the
         // furniture is what makes one corner of the studio harder to reach than
         // another.
-        against(gen, studio, c(studio), "east", 0.5, "closet", [1.0, 2.0, 0.6]),
+        inCorner(gen, studio, "north", "start", "closet", [1.0, 2.0, 0.6]),
         inCorner(gen, studio, "south", "end", "desk", [1.2, 0.75, 0.6]),
+        // Hung at eye level for someone standing, not dropped toward the
+        // skirting: y is the CENTRE of a 0.8 m panel, so 1.55 puts it 1.15-1.95
+        // up a 2.7 m wall, which is where a wall-mounted television actually goes.
         against(gen, studio, c(studio), "west", 0.5, "tv", [1.4, 0.8, 0.1], {
-          mount: "wall", y: 1.2,
+          mount: "wall", y: 1.55,
         }),
         spot(gen, studio, "table", [1.1, 0.45, 0.7], 3.0, 2.3, 0),
-        // THE AIR CONDITIONER, high on the right-hand wall — the "AC wall" of the
-        // sketch — and RUNNING. It sits at the sleeping end of that wall, which
-        // is exactly why the problem exists: from up there it looks out over the
-        // foot of the bed, and the louvre was left aimed along it at the pillow.
+        // THE AIR CONDITIONER, high on the TOP wall directly above the desk, and
+        // RUNNING. From up there it looks straight down the length of the studio
+        // — and the bed is at the far end of that run, which is why the problem
+        // exists: the louvre was left pointing down the room at the pillow.
         //
-        // The height along the wall was measured, not chosen. From the top-right
-        // corner the jet had 3.6 m of room to cross and arrived at the pillow at
-        // 0.05 m/s — nothing anyone would wake up from — and re-aiming it moved
-        // the room mean by half a degree, so neither goal could tell one aim
-        // from another. At the sleeping end the same unit puts 0.13 m/s on the
-        // pillow and 0.05 when aimed away: a 3x spread, which is a task.
-        //
-        // yaw -1.0 points it down the length of the bed at the headboard.
-        // Re-aiming is one of the participant's two levers, so this is where it
-        // was found and not a fact about the room.
-        spot(gen, studio, "ac", [0.85, 0.32, 0.22], 6.23, 3.2, -1.0, {
+        // yaw 0.15 is almost straight ahead (+z), leaning a little right to line
+        // up with the headboard at (6.3, 4.0). Re-aiming is one of the two
+        // levers, so this is where it was found and not a fact about the room.
+        spot(gen, studio, "ac", [0.85, 0.32, 0.22], 5.74, 0.17, 0.15, {
           category: "hvac", mount: "wall", y: H - 0.5, flow: 0.5, on: true,
         }),
         // The fan, standing in the top-left corner out of the way — where one
@@ -692,10 +696,13 @@ function buildAcStudio(): FloorPlan {
     },
     { windows: false },
   );
-  // One window, in the bottom wall left of the bed, and SHUT. It is shut because
-  // it is 31 degrees outside and the AC is running — opening it is not a move
-  // anyone makes, and this task does not offer it as one.
-  addWindow(plan, "studio", "north", 0.3, false);
+  // ONE BIG WINDOW across the bottom wall, and SHUT. Wide rather than a standard
+  // casement because it is the room's one source of daylight and reads as part
+  // of the studio rather than a hole punched in a wall; 2.8 m fits the clear run
+  // between the closet in the left corner and the bed in the right one. It is
+  // shut because it is 31 degrees outside and the AC is running — opening it is
+  // not a move anyone makes, and this task does not offer it as one.
+  addWindow(plan, "studio", "north", 0.42, false, 2.8);
   for (const o of [...plan.doors, ...plan.windows]) { o.fixed = true; o.locked = true; }
   return plan;
 }
@@ -1141,79 +1148,76 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     views: ["airflow", "temperature"],
     // TWO GOALS THAT PULL APART, which is the design rule for all four tasks.
     //
-    // Aiming the AC off the bed is trivial on its own — point it anywhere but
-    // down the bed and the pillow goes calm. Cooling the studio is trivial on
-    // its own — point it into the room and it cools. The pair is not, because
-    // the AC only has one nozzle: every degree of aim that takes the jet off
-    // the bed also takes it off the route into the rest of the room.
+    // WHAT THE AC'S POSITION COSTS THE TASK, recorded because it was measured
+    // three times over. With the unit above the desk on the TOP wall, the bed is
+    // 3.9 m down the room from it, and at that range the jet has spread out: the
+    // bed reads 0.099-0.120 m/s across EVERY aim and tilt, and the AC's jet
+    // speed is already clamped at the model's maximum, so a bigger unit changes
+    // nothing (flow 0.5, 1.0, 1.8 and 3.0 all give byte-identical numbers).
     //
-    // The fan is what resolves it, and that is the thing people do not reach
-    // for, because a fan feels like something you use INSTEAD of an AC on a hot
-    // night rather than something that makes one work better. Its job here is
-    // not to cool anybody — it moves no heat at all — it is to pick up the cold
-    // air pooling where the AC is now aimed and carry it to the far end.
+    // An air conditioner four metres away cannot blow on you. That is a real
+    // result and not a tuning failure — the earlier version had it on the
+    // right-hand wall beside the bed, where the aim was worth a 3x swing on the
+    // pillow, and the version before that had it in a different room entirely,
+    // where it was worth nothing at all. Above the desk sits in between: the aim
+    // is a fine adjustment (0.43 °C at the table on its own, about 0.15 °C
+    // between the passing layouts) and the FAN is the lever.
     //
-    // WHY THIS IS A STUDIO AND NOT THE TWO-ROOM HOME. It was built on the winter
-    // plan first, with the AC in the living room and the bed next door, and the
-    // aim turned out not to be a lever at all: across every angle tried the
-    // couch moved 0.01 m/s and the bedroom 0.18 °C. A unit three metres away in
-    // another room can neither blow on you nor cool you — only the air moving
-    // between the rooms can, and then the task is about the fan and the AC is
-    // scenery. Putting the bed and the unit in ONE room is what makes the aim
-    // matter, which is the question this task exists to ask.
+    // So the tension moved rather than disappeared. The AC pools cold at the top
+    // of the room; the fan is what carries it to the middle and the far end. But
+    // the fan placements that carry it best stand beside the unit at the bed's
+    // end of the room, and from there the fan itself is what blows on the bed —
+    // so the strongest cooling and the calm bed are still competing, just over
+    // the fan rather than over the louvre.
     //
-    // MEASURED, at REPORT_FIDELITY, over 729 layouts: 9 AC aims x (no fan + 5x4
-    // fan positions x 4 fan headings).
+    // MEASURED at REPORT_FIDELITY over 402 layouts (9 aims x 2 tilts, plus 3
+    // aims x 2 tilts x 5x4 fan positions x 4 fan headings):
     //
-    //   as found (AC down the bed, fan in the corner)   bed 0.395   table 23.08
-    //   best aim, NO FAN                                bed 0.174   table 23.31
-    //   best aim + fan beside the AC pushing across     bed 0.236   table 22.34
+    //   as found (fan parked in the corner)      bed 0.111   table 23.13
+    //   best aim, NO FAN                         bed 0.102   table 23.15
+    //   coolest of all 402 (fan beside the AC)   bed 0.175   table 22.14
+    //   best table with the bed calm             bed 0.107   table 22.17
     //
-    // Both goals fail at the start: the bed is in the jet AND the middle of the
-    // room is warm. Re-aiming alone fixes the bed and leaves the table at 23.31,
-    // above the bar however the louvre is turned — 36 aims tried. Only a fan
-    // that carries the AC's output away from its corner clears both, and the
-    // best placements stand it on the RIGHT-hand side near the unit, pushing
-    // across the room (22.34): the fan works with the AC rather than replacing
-    // it, which is the finding worth watching a participant reach.
+    // The bed starts calm and the room starts warm, so the task opens with one
+    // box ticked and the obvious way to tick the second — put the fan where it
+    // moves the most air — unticks the first. Seven of the ten coolest layouts
+    // fail the draught line. The answer stands the fan in the MIDDLE of the top
+    // wall pointing down the room: it still reaches, and it is far enough from
+    // the bed not to be felt there. 13 of 402 clear both.
     goals: [
-      // 0.24 m/s, which is the app's own no-noticeable-air-movement figure
-      // (0.28 in evaluate.ts) with a margin. Measured over the whole bed, not
-      // the pillow: air you can feel on your legs still wakes you.
-      //
-      // The bed zone never goes fully still — 0.154 m/s is the floor across all
-      // 729 layouts, because the room has air moving in it by definition — so
-      // the bar is set against what is REACHABLE, not against zero. As found it
-      // is 0.395; 141 of 729 layouts get under 0.24.
-      { label: "No air blowing on the bed while you sleep", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.24 },
-      // 22.9 °C at the TABLE in the middle of the studio — the far end from the
+      // 0.15 m/s over the whole bed, not the pillow: air you can feel on your
+      // legs still wakes you. Well under the app's 0.28 no-noticeable figure,
+      // because this room is quiet to begin with — the bar has to sit below what
+      // doing nothing already achieves (0.111) or the goal is free.
+      { label: "No air blowing on the bed while you sleep", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.15 },
+      // 22.6 °C at the TABLE in the middle of the studio — the far end from the
       // AC, and where you stand when you are not in bed.
       //
       // Measured at the table and not as a room mean, and this is the whole
       // reason temperature goals learned to take a zone (see intent/goals.ts).
-      // An AC aimed into a corner drops the room MEAN perfectly well while the
-      // middle of the studio stays warm — the mean spread only 0.5 °C across
-      // every layout tried, so a room-mean goal could not tell the answer from
-      // the failure. At the table the same layouts spread 22.34 to 23.45.
+      // An AC pooling cold in its own corner drops the room MEAN perfectly well
+      // while the middle of the studio stays warm, so a room-mean goal could not
+      // tell the answer from the failure.
       //
-      // 22.9 sits in the 22.89 -> 23.31 gap: it admits the fan-assisted family
-      // and rejects every no-fan aim by 0.42 °C.
-      { label: "The middle of the studio cools down too", metric: "temperature", roomId: "studio", nearItem: "table", atMost: 22.9 },
+      // 22.6 sits in the 22.17 -> 23.15 gap: it admits the fan-assisted family
+      // and rejects doing nothing by 0.55 °C, at every aim tried.
+      { label: "The middle of the studio cools down too", metric: "temperature", roomId: "studio", nearItem: "table", atMost: 22.6 },
     ],
     // Denser than the default 14: one open room where the whole question is
     // which way the air crosses it, so a sparse picture just looks like nothing
     // is happening.
     viz: { maxSeeds: 26 },
     success:
-      "Bed ≤ 0.24 m/s AND the table ≤ 22.9 °C. Aim the AC away from the bed — anywhere from " +
-      "about 1.6 to 2.8 rad, i.e. back along the wall or across the room rather than down the " +
-      "mattress — and then stand the fan where it can pick up the cold air and carry it to the " +
-      "far end. The strongest placements are on the RIGHT-hand side near the unit, pointing " +
-      "across the room (table 22.34 °C, bed 0.236). Both levers are needed and this is the " +
-      "point of the task: re-aiming alone calms the bed (0.174) but leaves the table at 23.31 " +
-      "for EVERY aim tried, and the fan alone cannot help while the jet is still on the pillow. " +
-      "The trap is treating the fan as a second cooler — it moves no heat — rather than as the " +
-      "thing that distributes the AC's.",
+      "Bed ≤ 0.15 m/s AND the table ≤ 22.6 °C. The bed starts calm and the room starts warm, " +
+      "so the task opens with one box already ticked and the obvious way to tick the second — " +
+      "stand the fan where it shifts the most air, beside the AC at the bed's end — unticks it. " +
+      "Seven of the ten coolest layouts in the sweep fail the draught line that way. The answer " +
+      "is the fan in the MIDDLE of the top wall pointing down the room: 22.17 °C at the table " +
+      "with 0.107 m/s at the bed. The fan is required — every AC aim on its own leaves the " +
+      "table at 23.15 °C — and the trap is treating it as a second cooler rather than as the " +
+      "thing that carries the AC's cold out of the corner it pools in. Re-aiming the unit is a " +
+      "fine adjustment here (about 0.15 °C between passing layouts), not the main lever: from " +
+      "above the desk it is four metres from the bed and cannot reach it. 13 of 402 clear both.",
     build: buildAcStudio,
   },
 };
