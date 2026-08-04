@@ -93,7 +93,14 @@ const TEMP_WORDS: TempWord[] = [
     alwaysComplaint: true,
     words: [
       "boiling", "roasting", "baking", "sweltering", "scorching", "stifling",
-      "muggy", "sweaty", "sweating", "overheating", "overheated", "humid",
+      // `humid` is NOT here. It reads as a heat complaint in ordinary English —
+      // a muggy day is a hot one — but this app has moisture as a scalar of its
+      // own, and in the one task where anybody types the word it is the whole
+      // subject. "I want the bathroom to be less humid" was parsing to
+      // temperature/low, so the search went looking for a way to COOL a room in
+      // a task about drying it, and offered nothing worth having. It lives in
+      // the damp lexicon below. `muggy` stays: that one really is about heat.
+      "muggy", "sweaty", "sweating", "overheating", "overheated",
       "sauna", "oven", "furnace", "tropical", "burning", "blazing",
     ],
   },
@@ -153,7 +160,7 @@ const LEXICON: Array<{ words: string[]; scalar: Scalar; direction: Direction }> 
       "damp", "dampness", "moisture", "moist", "condensation", "condensating",
       "mould", "mold", "mouldy", "moldy", "mildew", "soggy", "sodden",
       "drying", "dries", "dried", "dry", "drier", "dryer", "steamy", "steam",
-      "steaming", "sweating", "humidity", "wet", "wetness", "wetter", "clammy",
+      "steaming", "sweating", "humid", "humidity", "wet", "wetness", "wetter", "clammy",
       "black", "blackening", "blotch", "blotches", "stain", "stains",
       "stained", "staining", "peeling", "flaking", "spores", "musty",
     ],
