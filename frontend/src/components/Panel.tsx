@@ -484,9 +484,16 @@ export function Panel() {
         {tools.editOpeningSet === false ? (
           <p className="muted-line">
             The doors and windows are part of the building.{" "}
-            {[...plan.doors, ...plan.windows].some((o) => !o.fixed)
-              ? "You can open and close them, and drag the window this task is about onto any wall of its room."
-              : "You can open and close them, but not move them."}
+            {/* A task can lock every opening it has — the summer studio does,
+                because on a 31 °C night opening one is not a cooling strategy.
+                Telling that participant "you can open and close them" next to
+                two greyed-out toggles reads as a broken control rather than a
+                closed question, and sends them hunting for the enabled one. */}
+            {[...plan.doors, ...plan.windows].every((o) => o.locked)
+              ? "They stay exactly as they are for this task."
+              : [...plan.doors, ...plan.windows].some((o) => !o.fixed)
+                ? "You can open and close them, and drag the window this task is about onto any wall of its room."
+                : "You can open and close them, but not move them."}
           </p>
         ) : (
           <p className="muted-line">To add one: click a wall in the view, then “Add door / window”.</p>

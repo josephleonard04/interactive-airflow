@@ -295,6 +295,22 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
       return { label: g.label, met: ok, detail: speed.toFixed(2), word: ok ? "calm" : "you'd feel it" };
     }
 
+    // TEMPERATURE OVER A ZONE, for the same reason smell has one below: in a
+    // single open room a mean cannot tell one end from the other. The summer
+    // task turns on exactly that distinction — an air conditioner aimed into a
+    // corner drops the room mean perfectly well while the far side of the studio
+    // stays hot, and a room-mean goal would call that a success.
+    if (g.metric === "temperature" && g.nearItem) {
+      const zone = itemZone(plan, g.nearItem);
+      const d = zone ? zoneMean(built, fields.temp, zone) : null;
+      if (d === null) return { label: g.label, met: false, detail: "", word: "" };
+      const c = outdoorTemp + d;
+      const shown = Number(c.toFixed(1));
+      const met = (g.atLeast === undefined || shown >= g.atLeast) && (g.atMost === undefined || shown <= g.atMost);
+      const word = warmthWord(shown, g);
+      return { label: g.label, met, detail: `${shown.toFixed(1)} °C`, word, color: tempSwatch(word) };
+    }
+
     // A smell goal can be measured over one object's footprint rather than the
     // whole room — "the smell stays off the BED". In a studio the bed and the
     // bin are in the same room, so a room mean cannot tell the sleeping end
