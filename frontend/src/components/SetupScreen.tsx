@@ -8,11 +8,12 @@ import { SCENARIOS, SCENARIO_ORDER, type ScenarioId } from "../floorplan/scenari
  *  than four blocks of similar-looking text. */
 const SCENARIO_EMOJI: Record<ScenarioId, string> = {
   winter: "❄️",
-  summer: "☀️",
+  // The studio task is the BIN, not the weather — a sun promises a temperature
+  // task and this one has no temperature goal in it at all.
+  summer: "🗑️",
   humidity: "💧",
-  // A frying pan reads as heat, and this is the one task with no temperature
-  // in it at all — it is about the bin. The bin is the icon.
-  smell: "🗑️",
+  // …and this slot is the draught task now (see scenarios.ts on the id).
+  smell: "🌬️",
 };
 
 // First screen: the homeowner enters their home's footprint (length × width ×
