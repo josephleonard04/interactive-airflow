@@ -48,6 +48,8 @@ function Cyl({ r, h, position = [0, 0, 0], color, metalness = 0.6 }: { r: number
   );
 }
 
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
 const DARK = "#5b4a36";
 const METAL = "#9aa3ad";
 
@@ -166,11 +168,25 @@ function Bathtub([w, h, d]: V) {
   );
 }
 
-function Ac([w, h, d]: V) {
+/** Wall-mounted split unit. `tilt` swings the LOUVRE, not the casing — the box
+ *  is screwed to the wall and only the blade across its mouth moves, which is
+ *  what you are setting when you aim one of these.
+ *
+ *  It moves at all because it did not: the vertical-aim slider changed the
+ *  physics and nothing on screen, so a participant could set it, watch the
+ *  picture change, and have no idea which control had done it — or drag the
+ *  slider to the end and reasonably conclude it was broken. */
+function Ac([w, h, d]: V, tilt = 0) {
+  // The blade reads the tilt back at roughly life size: a real louvre swings
+  // about 60 degrees end to end, which is the slider's own range.
+  const blade = clamp(-tilt, -Math.PI / 3, Math.PI / 3);
   return (
     <group>
       <Box size={[w, h, d]} position={[0, 0, 0]} color="#eef1f4" roughness={0.5} />
-      <Box size={[w * 0.82, 0.03, 0.02]} position={[0, -h * 0.28, d / 2]} color="#c2cad2" />
+      {/* the louvre, hinged along the bottom lip of the mouth */}
+      <group position={[0, -h * 0.28, d / 2]} rotation={[blade, 0, 0]}>
+        <Box size={[w * 0.82, 0.03, d * 0.55]} position={[0, 0, d * 0.26]} color="#c2cad2" />
+      </group>
       <Box size={[0.06, 0.03, 0.02]} position={[w * 0.3, h * 0.2, d / 2]} color="#34d399" emissive="#10b981" />
     </group>
   );
@@ -194,9 +210,12 @@ function Heater([w, h, d]: V) {
 // hub — no cage ring.
 // Pedestal fan: wide overlapping paddle blades on a motor housing, on a
 // pole + weighted base. Faces +z; no cage ring.
-function Fan([w, h, d]: V) {
+function Fan([w, h, d]: V, tilt = 0) {
   const r = w * 0.6;
   const blades = 5;
+  // The HEAD tips on its neck; the pole and base stay upright, which is how a
+  // pedestal fan actually works and makes the vertical-aim slider visible.
+  const head = clamp(-tilt, -Math.PI / 3, Math.PI / 3);
   return (
     <group>
       {/* weighted base (disc + slight dome) + pole + neck */}
@@ -207,7 +226,7 @@ function Fan([w, h, d]: V) {
       </mesh>
       <Cyl r={0.024} h={h * 0.66} position={[0, -h * 0.08, 0]} color="#c2c8cf" metalness={0.55} />
       {/* head */}
-      <group position={[0, h * 0.32, 0]}>
+      <group position={[0, h * 0.32, 0]} rotation={[head, 0, 0]}>
         {/* motor housing behind the blades */}
         <mesh position={[0, 0, -d * 0.1]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[w * 0.17, w * 0.21, d * 0.26, 22]} />
@@ -445,7 +464,7 @@ function Bin(size: V): JSX.Element {
   );
 }
 
-export function Model({ type, size, on = true }: { type: string; size: V; on?: boolean }) {
+export function Model({ type, size, on = true, tilt = 0 }: { type: string; size: V; on?: boolean; tilt?: number }) {
   switch (type) {
     case "bed":
       return Bed(size);
@@ -470,11 +489,11 @@ export function Model({ type, size, on = true }: { type: string; size: V; on?: b
     case "bathtub":
       return Bathtub(size);
     case "ac":
-      return Ac(size);
+      return Ac(size, tilt);
     case "heater":
       return Heater(size);
     case "fan":
-      return Fan(size);
+      return Fan(size, tilt);
     case "supply":
       return Vent(size, on);
     case "return":
