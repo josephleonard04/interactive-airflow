@@ -16,7 +16,7 @@ import {
 // A top-down mini-map of the home the user DRAWS on to state what they want.
 //
 // A box on its own says "somewhere around here" and nothing else, so the pen
-// carries the meaning: pick warm / cool / fresh air / no draught, then draw
+// carries the meaning: pick warm / cool / fresh air / no wind, then draw
 // where you mean it. The arrow pen is a different kind of statement — not "make
 // this room X" but "move the air this way, from here to there" — which is
 // exactly the sentence people reach for and the clumsiest one to type.
@@ -30,7 +30,7 @@ const TOOLS: Array<{ id: SketchTool; label: string; hint: string }> = [
   { id: "warm", label: "🔥 Warm", hint: "Box the area you want warmer" },
   { id: "cool", label: "❄️ Cool", hint: "Box the area you want cooler" },
   { id: "fresh", label: "🌬️ Fresh air", hint: "Box the area you want aired out" },
-  { id: "nodraft", label: "🚫 No draught", hint: "Box the area that should stay calm" },
+  { id: "nodraft", label: "🚫 No wind", hint: "Box the area where you do not want air blowing on you" },
   { id: "arrow", label: "➜ Air flow", hint: "Drag an arrow: move air from here to there" },
 ];
 
