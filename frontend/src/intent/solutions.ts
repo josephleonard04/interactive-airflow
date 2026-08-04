@@ -145,6 +145,14 @@ function headingName(yaw: number): string {
   return ["at the near wall", "to the right", "at the far wall", "to the left"][q];
 }
 
+/** Which corner of the room a spot leans toward — the last-resort tie-breaker
+ *  when two options share both a name and a wall. */
+function quadrantName(rect: Rect, pos: Vec3): string {
+  const fx = (pos[0] - rect.x) / rect.w;
+  const fz = (pos[2] - rect.z) / rect.d;
+  return `${fz < 0.5 ? "far" : "near"} ${fx < 0.5 ? "left" : "right"} side`;
+}
+
 /** Where in the room a spot is, in the words someone would use pointing at it.
  *  "Heater somewhere else" twice over is not two options, it is one option and
  *  a shrug — the card has to say which spot it means or the participant has to
@@ -1069,8 +1077,13 @@ export function findSolutions(
       const room = it ? s.plan.rooms.find((r) => r.id === it.roomId) : null;
       if (!it || !room) continue;
       const side = wallSideName(room.rect, it.position);
-      // Only helps if it does not just repeat the name we already have.
-      if (!s.label.includes(side)) s.label = `${s.label}, ${side}`;
+      // The wall name is the first tie-breaker, but two spots can share that
+      // too — "out in the middle of the room" covers the whole middle, so two
+      // mid-room fan placements collided on it as well. Fall back to the
+      // quadrant, which two distinguishable spots cannot both be in.
+      const q = quadrantName(room.rect, it.position);
+      const add = !s.label.includes(side) ? side : !s.label.includes(q) ? q : null;
+      if (add) s.label = `${s.label}, ${add}`;
     }
   }
   return kept.length ? kept : solutions.slice(0, 1);

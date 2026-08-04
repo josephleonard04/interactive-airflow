@@ -636,7 +636,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // different option is available.
         const hereKey = layoutKey(before);
         const alreadySeen = new Set(s.offeredLayouts);
-        const usable = options.filter((o) => layoutKey(o.plan) !== hereKey);
+        // NEVER OFFER A STEP BACKWARDS. The search answers the sentence that was
+        // typed, and a task has more lines than that sentence mentions — so
+        // "cool the bedroom" could hand back a layout that cools the bedroom and
+        // breaks the draught line that was already passing. The participant
+        // applies it, watches a tick-box switch off, and reasonably concludes
+        // the tool does not know what the task is.
+        const metNow = taskGoals.length
+          ? checkGoals(taskGoals, before, s.outdoorTemp).filter((r) => r.met).length
+          : 0;
+        const usable = options.filter(
+          (o) =>
+            layoutKey(o.plan) !== hereKey &&
+            (!taskGoals.length ||
+              checkGoals(taskGoals, o.plan, s.outdoorTemp).filter((r) => r.met).length >= metNow),
+        );
         const fresh = usable.filter((o) => !alreadySeen.has(layoutKey(o.plan)));
         const repeats = usable.filter((o) => alreadySeen.has(layoutKey(o.plan)));
         const ordered = (fresh.length ? [...fresh, ...repeats] : usable).slice(0, 3);
