@@ -10,7 +10,9 @@ const SCENARIO_EMOJI: Record<ScenarioId, string> = {
   winter: "❄️",
   summer: "☀️",
   humidity: "💧",
-  smell: "🍳",
+  // A frying pan reads as heat, and this is the one task with no temperature
+  // in it at all — it is about the bin. The bin is the icon.
+  smell: "🗑️",
 };
 
 // First screen: the homeowner enters their home's footprint (length × width ×
