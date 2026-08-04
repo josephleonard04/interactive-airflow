@@ -378,7 +378,14 @@ function Smell(size: V): JSX.Element {
  *  carries the difference, because the colour is the thing that already means
  *  moisture everywhere else on screen. */
 function Damp(size: V): JSX.Element {
-  return SourceOrb(size, { stem: "#0b5e94", orb: "#1c9fd6", orbGlow: "#0e7fb8", wisp: "#7fd4ef" });
+  // DRAWN AT THE SMELL SOURCE'S SIZE, not at its own footprint. The damp item is
+  // 0.5 m square where the smell one is 0.34, so sharing the geometry made the
+  // orb half again as wide — a blue balloon in a small bathroom. The footprint
+  // is what seeds the wet cells and is not a drawing decision, so the drawing
+  // ignores it and matches the object it is a sibling of.
+  const SMELL_FOOTPRINT = 0.34;
+  const draw: V = [SMELL_FOOTPRINT, size[1], SMELL_FOOTPRINT];
+  return SourceOrb(draw, { stem: "#0b5e94", orb: "#1c9fd6", orbGlow: "#0e7fb8", wisp: "#7fd4ef" });
 }
 
 /** Shower: a riser and a head on the wall over a shallow tray. NO GLASS.
