@@ -51,7 +51,10 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
   return (
     <group
       position={item.position}
-      rotation={[0, item.rotationY, 0]}
+      // A wall unit's CASING is fixed to its wall; only its vanes move. See
+      // PlacedItem.mountYaw — without this, aiming an AC drew the box hanging
+      // off the plaster at whatever angle it had been aimed at.
+      rotation={[0, item.mountYaw ?? item.rotationY, 0]}
       onPointerDown={onPointerDown}
       onPointerOver={(e) => {
         if (!selectable) return; // no hover affordance on scenery
@@ -73,7 +76,13 @@ export function ItemMesh({ item }: { item: PlacedItem }) {
         {/* `on` is undefined on anything that has no switch (furniture), which
             reads as running — right for a vent, and ignored by every other
             model. */}
-        <Model type={item.type} size={item.size} on={item.on !== false} tilt={item.tilt ?? 0} />
+        <Model
+          type={item.type}
+          size={item.size}
+          on={item.on !== false}
+          tilt={item.tilt ?? 0}
+          yaw={item.mountYaw === undefined ? 0 : item.rotationY - item.mountYaw}
+        />
       </group>
     </group>
   );
