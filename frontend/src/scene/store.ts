@@ -599,6 +599,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           want: depth,
           lockPower: s.tools.lockPower === true,
           allowedDevices,
+          // Allowed-to-touch and allowed-to-MOVE are different permissions, and
+          // the summer studio is the task that needs them apart: its AC may be
+          // re-aimed and may not be unbolted. Without this the search happily
+          // proposed carrying it to the opposite wall.
+          movableDevices: Array.from(new Set([...s.tools.movable, ...s.tools.addable])),
           flow,
           moveOpenings: s.tools.movableOpenings === true,
         });

@@ -124,6 +124,10 @@ interface PrimaryAlt {
  *  discarding. 0.6 m is still comfortably more than a hand's width, so the
  *  gallery does not fill up with the same spot four times. */
 const ALT_MIN_APART = 0.6;
+/** …and two aims closer than this are the same aim (radians, ~40°). Wide enough
+ *  that the gallery does not offer four nudges of the same louvre, narrow enough
+ *  that "across the room" and "along the wall" are separate cards. */
+const ALT_MIN_TURN = 0.7;
 
 /** Which side of the home a window is on, so an option can say WHICH one it
  *  wants open rather than just "a window". */
@@ -132,6 +136,13 @@ function sideOfWindow(plan: FloorPlan, w: Opening): string {
   const vertical = Math.abs(w.a[0] - w.b[0]) < 1e-3;
   if (vertical) return Math.abs(w.a[0] - b.x) < Math.abs(w.a[0] - (b.x + b.w)) ? "left-hand" : "right-hand";
   return Math.abs(w.a[1] - b.z) < Math.abs(w.a[1] - (b.z + b.d)) ? "far" : "near";
+}
+
+/** Which way a device now points, in words. yaw 0 blows +z (toward the near /
+ *  screen-bottom wall), yaw pi/2 blows +x (to the right) — see aimVec. */
+function headingName(yaw: number): string {
+  const q = ((Math.round(yaw / (Math.PI / 2)) % 4) + 4) % 4;
+  return ["at the near wall", "to the right", "at the far wall", "to the left"][q];
 }
 
 /** Where in the room a spot is, in the words someone would use pointing at it.
@@ -465,7 +476,7 @@ function strategiesFor(
   goal: OptimizeGoal,
   lockPower = false,
   allowed?: string[],
-  ctx?: { plan: FloorPlan; targetIds: string[] },
+  ctx?: { plan: FloorPlan; targetIds: string[]; movable?: string[] },
 ): Strategy[] {
   /** Strip device settings the task does not let anyone change, so a strategy
    *  never quietly switches something the participant cannot reach. */
@@ -479,13 +490,37 @@ function strategiesFor(
    *  option card used to read "Move the fan and vents" on a task where the vent
    *  is bolted to the wall and running all night — describing a change it was
    *  no longer making. */
+  /** "the ac" is not how anyone writes it. Acronyms keep their case. */
+  const deviceWord = (t: string): string => {
+    const l = DEVICE_LABEL[t] ?? t;
+    return l === l.toUpperCase() ? l : l.toLowerCase();
+  };
   const movedNames = (devices: Strategy["devices"]): string => {
     const names = Object.keys(devices)
       .filter((t) => !allowed || allowed.includes(t))
-      .map((t) => (DEVICE_LABEL[t] ?? t).toLowerCase());
+      .map(deviceWord);
     if (names.length === 0) return "the openings";
     if (names.length === 1) return `the ${names[0]}`;
     return `the ${names.slice(0, -1).join(", the ")} and the ${names[names.length - 1]}`;
+  };
+  /** The whole verb phrase, because MOVE is not always the verb. A rented
+   *  studio's air conditioner is bolted to the wall and the task is which way it
+   *  points, so "Move the ac and the fan" describes something nobody can do —
+   *  the same complaint as "Move the fan and vents" above, one step further on.
+   *  Devices the task will not let anyone carry are AIMED. */
+  const movable = ctx?.movable;
+  const actionOn = (devices: Strategy["devices"]): string => {
+    const types = Object.keys(devices).filter((t) => !allowed || allowed.includes(t));
+    if (!movable || types.length === 0) return `Move ${movedNames(devices)}`;
+    const pick = (keep: boolean) =>
+      types.filter((t) => movable.includes(t) === keep).map(deviceWord);
+    const list = (n: string[]) =>
+      n.length === 1 ? `the ${n[0]}` : `the ${n.slice(0, -1).join(", the ")} and the ${n[n.length - 1]}`;
+    const moves = pick(true);
+    const aims = pick(false);
+    if (aims.length === 0) return `Move ${list(moves)}`;
+    if (moves.length === 0) return `Aim ${list(aims)}`;
+    return `Aim ${list(aims)}, move ${list(moves)}`;
   };
   const out: Strategy[] = [];
   const add = (s: Strategy) => out.push(s);
@@ -513,7 +548,7 @@ function strategiesFor(
           // With the dial locked the only thing that varies is placement, so the
           // label must describe THAT rather than a power the user can't set.
           label: lockPower
-            ? `Move ${movedNames(devices)}`
+            ? actionOn(devices)
             : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
           devices,
           interiorDoors: doorsOpen,
@@ -585,7 +620,7 @@ function strategiesFor(
       add({
         id: `air${power}-w${ids.join("_") || "none"}`,
         label: titleFor(
-          lockPower ? `Move ${movedNames(devices)}` : `Air movers on ${power === 3 ? "high" : "medium"}`,
+          lockPower ? actionOn(devices) : `Air movers on ${power === 3 ? "high" : "medium"}`,
           ids,
         ),
         devices,
@@ -611,6 +646,9 @@ function placeDevices(
   allowed?: string[],
   drying = false,
   flow?: FlowHint,
+  /** Of `allowed`, the subset the search may REPOSITION. Undefined = all of
+   *  them, which is the unrestricted app. See the aim-only branch below. */
+  movableDevices?: string[],
 ): { plan: FloorPlan; changes: string[]; primaryAlts: PrimaryAlt[] } {
   const wanted = allowed
     ? GOAL_DEVICES[goal].filter((t) => allowed.includes(t))
@@ -678,8 +716,27 @@ function placeDevices(
           ? [flowRoom]
           : roomOrder;
       let best: { pos: Vec3; rot: number; roomId: string; roomName: string; osc?: boolean; score: number } | null = null;
-      for (const room of rooms) {
-        const spots = candidateSpots(room, it.type, working.wallHeight, openings);
+      // BOLTED DOWN IS NOT THE SAME AS OFF-LIMITS. A task can let you re-aim a
+      // device without letting you move it — a rented studio's air conditioner
+      // is the case the distinction exists for — and the search only knew one
+      // kind of permission, so allowing the AC at all allowed relocating it. It
+      // proposed carrying a wall-mounted unit 3.4 m to the opposite wall, which
+      // is not a suggestion; it is the extract-vent bug again in another room.
+      //
+      // For an aim-only device the candidate set is its CURRENT position at
+      // every heading, which is exactly the lever the participant has.
+      const aimOnly = movableDevices !== undefined && !movableDevices.includes(it.type);
+      for (const room of aimOnly ? rooms.filter((r) => r.id === it.roomId) : rooms) {
+        const spots = aimOnly
+          ? Array.from({ length: 12 }, (_, i) => ({
+              position: it.position,
+              rotationY: -Math.PI + (i * 2 * Math.PI) / 12,
+              roomId: it.roomId,
+              roomName: room.name,
+              axis: "area" as const,
+              oscillate: false,
+            }))
+          : candidateSpots(room, it.type, working.wallHeight, openings);
         // The tail of the arrow itself, aimed along it: the spot the user
         // literally pointed at, which no generic candidate list contains.
         if (flow && room.id === flow.fromRoomId && !ROOM_BOUND_DEVICES.includes(it.type)) {
@@ -697,7 +754,13 @@ function placeDevices(
           if (budget.left <= 0) break;
           const others = working.items.filter((o) => o.id !== it.id);
           const wallBound = cand.axis !== "area";
-          const pos = findFreeSpot(
+          // An aim-only device is already where it belongs and is not competing
+          // for floor space — running it through the collision solver only lets
+          // it drift a few centimetres off its own bracket, which then reads as
+          // a move on the card.
+          const pos = aimOnly
+            ? it.position
+            : findFreeSpot(
             room.rect,
             { size: it.size, rotationY: cand.rotationY, mount: it.mount },
             others,
@@ -708,7 +771,9 @@ function placeDevices(
             !wallBound,
           );
           if (!pos) continue;
-          const placed: Vec3 = wallBound
+          const placed: Vec3 = aimOnly
+            ? it.position
+            : wallBound
             ? cand.axis === "x"
               ? [pos[0], cand.position[1], cand.position[2]]
               : [cand.position[0], cand.position[1], pos[2]]
@@ -745,7 +810,17 @@ function placeDevices(
             : o,
         ),
       };
-      if (moved && sweep === 1) changes.push(`${DEVICE_LABEL[it.type] ?? it.type} → ${best.roomName}`);
+      // "AC -> Studio" is a nonsense line for a unit bolted to the wall of the
+      // studio it is already in: nothing went anywhere, the louvre turned. Say
+      // which way it now points instead, in the compass words the rest of the
+      // cards use.
+      if (moved && sweep === 1) {
+        changes.push(
+          aimOnly
+            ? `${DEVICE_LABEL[it.type] ?? it.type} → aimed ${headingName(best.rot)}`
+            : `${DEVICE_LABEL[it.type] ?? it.type} → ${best.roomName}`,
+        );
+      }
     }
   }
   // Best first, and only spots that are meaningfully APART — two candidates
@@ -754,7 +829,19 @@ function placeDevices(
   primaryAlts.sort((a, b) => b.score - a.score);
   const spread: PrimaryAlt[] = [];
   for (const a of primaryAlts) {
-    if (spread.some((k) => Math.hypot(k.pos[0] - a.pos[0], k.pos[2] - a.pos[2]) < ALT_MIN_APART)) continue;
+    // Two alternatives are the same alternative when they are close in position
+    // AND pointing the same way. Distance alone was enough while every primary
+    // could be carried around; for a device that is bolted down and only aimed,
+    // every alternative shares one position and the whole set collapsed to a
+    // single card — on the task where the aim IS the question.
+    if (
+      spread.some(
+        (k) =>
+          Math.hypot(k.pos[0] - a.pos[0], k.pos[2] - a.pos[2]) < ALT_MIN_APART &&
+          Math.abs(Math.atan2(Math.sin(k.rot - a.rot), Math.cos(k.rot - a.rot))) < ALT_MIN_TURN,
+      )
+    )
+      continue;
     spread.push(a);
     if (spread.length >= 6) break;
   }
@@ -777,6 +864,11 @@ export interface FindOptions {
    *  question the task had deliberately closed. Undefined = no restriction (the
    *  unrestricted app). */
   allowedDevices?: string[];
+  /** Of `allowedDevices`, the ones that may actually MOVE. A device that is
+   *  allowed but not movable is re-aimed in place — a rented studio's AC is
+   *  bolted to the wall and the task is entirely about which way it points.
+   *  Undefined = everything allowed is also movable. */
+  movableDevices?: string[];
   /** How many solutions to offer. */
   want?: number;
   /** Coarse screening evaluations to spend across all strategies. */
@@ -816,7 +908,7 @@ export function findSolutions(
   // "how fresh is the air" — see roomDryMin.
   const dryingTask = plan.items.some((it) => it.type === "damp");
   const budget = { left: opts.screenBudget ?? 48 };
-  const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds });
+  const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds, movable: opts.movableDevices });
 
   // Split the screening budget EVENLY across strategies. A single shared
   // counter let the first strategy consume everything and left the rest with no
@@ -829,7 +921,7 @@ export function findSolutions(
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
     const fid = dryingTask ? SCREEN_DRY : SCREEN;
-    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow);
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow, opts.movableDevices);
     // …and then, if the task allows it, where the GLAZING goes. Done after the
     // devices rather than as another strategy dimension: window position times
     // open/shut times power would multiply the strategy count past the point
@@ -878,7 +970,13 @@ export function findSolutions(
             : it,
         ),
       };
-      const where = spotName(plan, alt.roomId, alt.pos);
+      // An aim-only primary has ONE position and many headings, so naming the
+      // card after the spot gives every alternative the same title and, worse,
+      // describes a move that is not on offer — "AC against the right-hand
+      // wall" is where it has always been bolted.
+      const aimOnlyPrimary =
+        opts.movableDevices !== undefined && !opts.movableDevices.includes(primaryType);
+      const where = aimOnlyPrimary ? `aimed ${headingName(alt.rot)}` : spotName(plan, alt.roomId, alt.pos);
       screened.push({
         strategy: {
           ...top!.strategy,
@@ -887,7 +985,7 @@ export function findSolutions(
           // The strategy note is identical on every one of these — same doors,
           // same windows — so repeating it three times just pushes the one line
           // that differs off the bottom of the card.
-          note: `In ${alt.roomName}, ${where}`,
+          note: aimOnlyPrimary ? `${DEVICE_LABEL[primaryType] ?? primaryType} ${where}` : `In ${alt.roomName}, ${where}`,
         },
         plan: variant,
         score: alt.score,
@@ -924,9 +1022,25 @@ export function findSolutions(
 
   // Drop options that are indistinguishable from a better one — a gallery of
   // near-identical choices is worse than one answer.
+  // WHEN THE AIM IS THE QUESTION, THE AIM IS THE DIFFERENCE. The similarity test
+  // below asks whether two options produce a different ROOM — mean temperature,
+  // mean air speed — and for a bolted-down device that is precisely the wrong
+  // question: this task exists because an AC's aim barely moves the room mean
+  // (0.5 °C across every layout tried) while completely changing where the cold
+  // goes and who is sleeping in the draught. Every alternative aim therefore
+  // looked like a duplicate of the first and the gallery collapsed to one card,
+  // on the one task where the gallery is a list of aims.
+  const primaryType = primaryFor(goal, plan, opts.allowedDevices);
+  const aimIsTheAnswer =
+    opts.movableDevices !== undefined && !opts.movableDevices.includes(primaryType);
+  const aimOf = (p: FloorPlan) => p.items.find((i) => i.type === primaryType)?.rotationY ?? 0;
   const kept: Solution[] = [];
   for (const s of solutions) {
-    const dup = kept.some((k) =>
+    const dup = aimIsTheAnswer
+      ? kept.some(
+          (k) => Math.abs(Math.atan2(Math.sin(aimOf(k.plan) - aimOf(s.plan)), Math.cos(aimOf(k.plan) - aimOf(s.plan)))) < ALT_MIN_TURN,
+        )
+      : kept.some((k) =>
       dryingTask
         ? Math.abs(
             Math.max(...[...k.metrics.roomDryMin.values()]) - Math.max(...[...s.metrics.roomDryMin.values()]),
@@ -946,7 +1060,6 @@ export function findSolutions(
   // drying, indistinguishable until you applied one. Where that happens the
   // wall the device is against is appended, which is the next thing you would
   // say pointing at it.
-  const primaryType = primaryFor(goal, plan, opts.allowedDevices);
   const byLabel = new Map<string, Solution[]>();
   for (const s of kept) byLabel.set(s.label, [...(byLabel.get(s.label) ?? []), s]);
   for (const [, group] of byLabel) {
