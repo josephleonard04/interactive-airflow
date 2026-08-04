@@ -22,7 +22,7 @@ import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
 import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
-import { parseGoal, type Objective } from "../intent/objectives";
+import { isAdjustment, parseGoal, type Objective } from "../intent/objectives";
 import type {
   FloorPlan,
   HomeSize,
@@ -157,6 +157,8 @@ export interface SceneState {
     regionName: string | null,
     /** Where a drawn arrow starts and ends, so a fan lands at its TAIL. */
     flow?: FlowHint,
+    /** Nudge the layout already on screen instead of searching afresh. */
+    refineOnly?: boolean,
   ) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
   solutionOptions: Solution[];
@@ -164,6 +166,9 @@ export interface SceneState {
    *  repeated ask can lead with something the participant has not already
    *  turned down. Session state, not part of the plan — see runSearch. */
   offeredLayouts: string[];
+  /** The last goal the search actually ran, so a follow-up that only says "a bit
+   *  more" has something to be a follow-up TO. */
+  lastSearch: { goal: OptimizeGoal; targetIds: string[]; text: string } | null;
   /** The goal text those options answer, for the option-panel heading. */
   solutionGoal: string | null;
   /** Rooms the goal asked about, so the option cards can show their temperature. */
@@ -491,6 +496,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   solutionOptions: [],
   offeredLayouts: [],
+  lastSearch: null,
   solutionGoal: null,
   solutionTargets: [],
   dismissSolutions: () => set({ solutionOptions: [], solutionGoal: null, solutionTargets: [] }),
@@ -522,6 +528,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   applyObjectives: (objs, goalText) => {
     const s = get();
+    // A FOLLOW-UP INHERITS THE QUESTION. "Move it a bit further along" names no
+    // room and no quantity — it is not a new goal, it is the previous one said
+    // again with a correction — so parsing it on its own produced either
+    // nothing or a wrong guess, and the search answered a question nobody had
+    // asked. See isAdjustment and FindOptions.refineOnly.
+    if (isAdjustment(goalText) && s.lastSearch) {
+      const { goal, targetIds } = s.lastSearch;
+      return s.runSearch(goal, targetIds, goalText, false, null, undefined, true);
+    }
     const obj = objs[0];
     if (!obj) return false;
     // Every room the goal named, not just the first. "Cool the living room and
@@ -554,7 +569,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   // The one search path, shared by the typed and the drawn input. Both arrive
   // here as (goal, rooms, a sentence to show) — downstream nothing knows or
   // cares which one the user reached for.
-  runSearch: (goal, targetIds, goalText, calm, regionName, flow) => {
+  runSearch: (goal, targetIds, goalText, calm, regionName, flow, refineOnly) => {
     if (get().optimizing) return false;
     set({ optimizing: true });
     window.setTimeout(() => {
@@ -594,7 +609,24 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // display-fidelity re-score each (~0.3 s), which is why it only happens
         // when there is history to avoid.
         const depth = s.offeredLayouts.length ? 6 : 3;
+        // HAND THE SEARCH THE TASK'S OWN LINES. Without them it optimises a
+        // proxy for the one goal word the sentence was reduced to, and on the
+        // studio those are different questions — "ventilate" means room-mean
+        // freshness, the task means smell over the BED, and a fan that stirs
+        // the bin end scores well and fails. See TaskZone.
+        const zoneGoals = (s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : []).map((g) => {
+          const it = g.nearItem ? before.items.find((i) => i.type === g.nearItem) : undefined;
+          let zone: Rect | null = null;
+          if (it) {
+            const swapped = Math.abs(Math.round(it.rotationY / (Math.PI / 2))) % 2 === 1;
+            const w = swapped ? it.size[2] : it.size[0];
+            const d = swapped ? it.size[0] : it.size[2];
+            zone = { x: it.position[0] - w / 2, z: it.position[2] - d / 2, w, d };
+          }
+          return { metric: g.metric, zone, roomId: g.roomId, atLeast: g.atLeast, atMost: g.atMost };
+        });
         const found = findSolutions(before, goal, targetIds, {
+          taskZones: zoneGoals,
           outdoorTemp: s.outdoorTemp,
           want: depth,
           lockPower: s.tools.lockPower === true,
@@ -605,6 +637,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           // proposed carrying it to the opposite wall.
           movableDevices: Array.from(new Set([...s.tools.movable, ...s.tools.addable])),
           flow,
+          refineOnly,
           moveOpenings: s.tools.movableOpenings === true,
         });
         // Never hand back a finished task — see withholdComplete.
@@ -667,6 +700,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         });
         set({
           offeredLayouts,
+          lastSearch: { goal, targetIds, text: goalText },
           solutionOptions: ordered,
           solutionGoal: goalText,
           solutionTargets: targetIds,
@@ -738,6 +772,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // A different home entirely, so nothing offered on the last task counts
       // as already-seen here.
       offeredLayouts: [],
+      lastSearch: null,
       solutionGoal: null,
       solutionTargets: [],
       pendingChange: null,

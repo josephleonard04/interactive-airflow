@@ -286,6 +286,34 @@ const EVEN_WORDS = [
  *  sensation lists above. */
 const TEMP_NOUNS = ["temperature", "temperatures", "temp", "temps", "degrees", "climate", "thermal"];
 
+/** "A BIT MORE", "MOVE IT SLIGHTLY LEFT", "TRY AGAIN A LITTLE CLOSER" — a
+ *  follow-up asking for the SAME idea, adjusted, rather than a different one.
+ *
+ *  It matters because the two need completely different searches. A fresh
+ *  search answers "nudge it" by proposing somewhere else entirely, which reads
+ *  as not having been listened to; what the person wants is the layout they are
+ *  looking at, moved a step. See FindOptions.refineOnly.
+ *
+ *  Deliberately requires a degree word AND either an adjustment verb or an
+ *  explicit back-reference, so "make the bedroom a little warmer" — a real goal
+ *  that happens to contain "a little" — is not swallowed by it. */
+const ADJUST_DEGREE = /\b(bit|little|slightly|touch|tad|nudge|marginally|somewhat|smidge|hair|fraction|closer|further|nearer|again|more|less)\b/;
+const ADJUST_VERB = /\b(adjust|adjusted|tweak|tweaked|nudge|nudged|shift|shifted|move|moved|change|changed|try|refine|tune|improve|better|fix|redo|retry)\b/;
+const ADJUST_DIR = /\b(left|right|up|down|toward|towards|over|back|forward|away|closer|nearer|further|farther)\b/;
+const ADJUST_BACKREF = /\b(that|this|it|them|the same|again|previous|last one|current)\b/;
+
+/** True when the sentence is asking to adjust what is already there. */
+export function isAdjustment(text: string): boolean {
+  const t = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  if (!ADJUST_DEGREE.test(t)) return false;
+  // A degree word plus a direction is an adjustment even with no verb — "a
+  // touch more to the right" is not a goal, it is a correction. So is a very
+  // short sentence built entirely of degree words: nobody opens with "a bit
+  // more", they say it about what they are already looking at.
+  const words = t.trim().split(/\s+/).length;
+  return ADJUST_VERB.test(t) || ADJUST_BACKREF.test(t) || ADJUST_DIR.test(t) || words <= 4;
+}
+
 /** Every single word the dictionary knows, for spelling and compound repair. */
 const VOCABULARY: Vocabulary = {
   words: new Set<string>([

@@ -6,6 +6,7 @@ import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
 import { objectivesFromScenario } from "../intent/fallback";
+import { isAdjustment } from "../intent/objectives";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { contaminantGradientCss, smellColor } from "../viz/smell";
 import { drySwatch } from "../intent/goals";
@@ -149,6 +150,17 @@ export function SimPanel() {
     } finally {
       setReading(false);
     }
+    // A FOLLOW-UP IS NOT A NEW QUESTION. "Move it a bit further along" parses to
+    // nothing groundable and would fall through to the scenario-goal fallback,
+    // which re-runs the whole search and comes back with somewhere else — the
+    // one answer that reads as not having listened. Routed straight through, it
+    // nudges the layout on screen instead. See isAdjustment / refineOnly.
+    if (isAdjustment(t) && useSceneStore.getState().lastSearch) {
+      setGuessedGoal(null);
+      if (applyObjectives(objectives, t)) recheckGoal.current = t;
+      return;
+    }
+
     // The sentence itself is the finding — it is the coverage gap, verbatim, and
     // the only record of a wording neither the dictionary nor the model could
     // turn into a goal. `reason` says which of those two it was, which is the
