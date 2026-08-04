@@ -5,6 +5,7 @@ import type { LlmReason } from "../intent/llmGoal";
 import type { FloorPlan } from "../floorplan/types";
 import type { Solution } from "../intent/solutions";
 import { SCENARIOS } from "../floorplan/scenarios";
+import { objectivesFromScenario } from "../intent/fallback";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
 import { contaminantGradientCss, smellColor } from "../viz/smell";
 import { drySwatch } from "../intent/goals";
@@ -82,6 +83,11 @@ export function SimPanel() {
    *  — otherwise a two-second pause reads as a dead button and gets clicked
    *  again, which is a second round trip and a second log entry. */
   const [reading, setReading] = useState(false);
+  /** Set when the search ran on the TASK's goals because the sentence could not
+   *  be read. Saying so matters: the alternative is a gallery of options that
+   *  silently answers a different question from the one that was asked, which is
+   *  worse than the dead end it replaced. */
+  const [guessedGoal, setGuessedGoal] = useState<string | null>(null);
   const [results, setResults] = useState<Evaluation[]>([]);
   const checklistScenario = useSceneStore((s) => s.scenarioId);
   // A task with scored goals never shows a prose verdict: the goals are graded
@@ -136,23 +142,37 @@ export function SimPanel() {
     if (!t || optimizing || reading) return;
     setUnparsed(null);
     setReading(true);
+    const livePlan = useSceneStore.getState().plan;
     let objectives, via, reason;
     try {
-      const livePlan = useSceneStore.getState().plan;
       ({ objectives, via, reason } = await resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp }));
     } finally {
       setReading(false);
     }
-    if (!objectives.length) {
-      // The sentence itself is the finding — it is the coverage gap, verbatim,
-      // and the only record of a wording neither the dictionary nor the model
-      // could turn into a goal. `reason` says which of those two it was, which
-      // is the difference between "add this word" and "start the backend".
+    // The sentence itself is the finding — it is the coverage gap, verbatim, and
+    // the only record of a wording neither the dictionary nor the model could
+    // turn into a goal. `reason` says which of those two it was, which is the
+    // difference between "add this word" and "start the backend". It is logged
+    // whether or not the fallback below rescues the search, because the fallback
+    // rescuing it is exactly what would otherwise hide the gap.
+    let objs = objectives;
+    let guessed = false;
+    if (!objs.length) {
       useSceneStore.getState().logEvent("unparsed", { text: t, via, reason });
-      setUnparsed({ text: t.slice(0, 60), reason });
-      return;
+      // NEVER A DEAD END. Falling back to the task's own goals is a defensible
+      // reading of "adjust it" or "something better", and strictly better than a
+      // shrug for everything else — a participant who gets nothing back stops
+      // typing, and we lose every sentence after this one. See intent/fallback.
+      const sid = useSceneStore.getState().scenarioId;
+      objs = objectivesFromScenario(sid ? SCENARIOS[sid].goals : undefined, livePlan, t);
+      guessed = objs.length > 0;
+      if (!objs.length) {
+        setUnparsed({ text: t.slice(0, 60), reason });
+        return;
+      }
     }
-    if (applyObjectives(objectives, t)) recheckGoal.current = t;
+    setGuessedGoal(guessed ? t.slice(0, 60) : null);
+    if (applyObjectives(objs, t)) recheckGoal.current = t;
   };
 
   // A search that returns nothing is not the same as one that was never run,
@@ -223,7 +243,7 @@ export function SimPanel() {
           <>
             <textarea
               value={goal}
-              onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); }}
+              onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); if (guessedGoal) setGuessedGoal(null); }}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void checkGoal(); }}
               placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
               rows={3}
@@ -281,6 +301,24 @@ export function SimPanel() {
                     works too.
                   </>
                 )}
+              </p>
+            )}
+            {guessedGoal && !unparsed && (
+              <p
+                style={{
+                  marginTop: 8,
+                  padding: "8px 10px",
+                  borderRadius: 9,
+                  border: "1px solid var(--line)",
+                  background: "rgba(0,0,0,0.035)",
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: "var(--muted)",
+                }}
+              >
+                I wasn't sure what “{guessedGoal}” was asking for, so I searched against this
+                task's own goals instead. If that isn't what you meant, name the room or thing
+                and what you want there.
               </p>
             )}
           </>
