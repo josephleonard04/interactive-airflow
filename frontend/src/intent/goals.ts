@@ -304,9 +304,28 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
     // warmestPart: a mean is satisfied by cooling one end hard, and a single
     // measuring spot only chooses a different end to ignore.
     if (g.metric === "temperature" && g.everywhere) {
-      const rect = plan.rooms.find((r) => r.id === g.roomId)?.rect;
-      if (!rect) return { label: g.label, met: false, detail: "", word: "" };
-      const c = Number((outdoorTemp + warmestPart(built, fields.temp, rect)).toFixed(1));
+      // roomId "*" means EVERY room, graded on whichever is doing worst — which
+      // is what "cool the whole flat" asks and what two separate goals cannot
+      // say. Grading the rooms separately made the smaller one nearly free: the
+      // living room has a quarter of the bedroom's glazing, so it sits half a
+      // degree cooler before anybody does anything.
+      const rects =
+        g.roomId === "*"
+          ? plan.rooms.map((r) => ({ name: r.name, rect: r.rect }))
+          : plan.rooms.filter((r) => r.id === g.roomId).map((r) => ({ name: r.name, rect: r.rect }));
+      if (!rects.length) return { label: g.label, met: false, detail: "", word: "" };
+      let worstName = rects[0].name;
+      let worst = -Infinity;
+      for (const r of rects) {
+        const v = warmestPart(built, fields.temp, r.rect);
+        if (v > worst) { worst = v; worstName = r.name; }
+      }
+      const c = Number((outdoorTemp + worst).toFixed(1));
+      if (g.roomId === "*") {
+        const met2 = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
+        const w2 = warmthWord(c, g);
+        return { label: g.label, met: met2, detail: `${c.toFixed(1)} °C — warmest corner is in the ${worstName}`, word: w2, color: tempSwatch(w2) };
+      }
       const met = (g.atLeast === undefined || c >= g.atLeast) && (g.atMost === undefined || c <= g.atMost);
       const word = warmthWord(c, g);
       return { label: g.label, met, detail: `${c.toFixed(1)} °C in the warmest part`, word, color: tempSwatch(word) };
