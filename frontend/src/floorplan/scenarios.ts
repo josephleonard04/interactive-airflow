@@ -620,97 +620,92 @@ function buildBathroom(): FloorPlan {
 // ---------------------------------------------------------------- ac studio
 
 /**
- * AC · RENTED. A studio on a hot night, with an air conditioner bolted high
- * on the right-hand wall and aimed — as the last tenant left it — diagonally
- * across the room at the head of the bed.
+ * AC · RENTED. A one-bedroom flat on a hot night. The air conditioner is the
+ * only one in the place, it is in the BEDROOM, and whoever lived here last left
+ * it pointing down the bed at the pillow.
  *
- * THIS TASK USED TO BE A SECOND SMELL TASK. It was a studio with a kitchen bin
- * in the corner and the question was how to keep the odour off the pillow,
- * which is the same question the one-room flat asks, in the same shape of room,
- * with the same two levers. Four tasks, two of them the same task. The AC is
- * the thing a rented studio in a heatwave actually gives you and the thing
- * everybody has an opinion about, so this one now asks about that instead and
- * the smell task stands alone.
+ * It was a studio until the living room was added, and the old front door
+ * became the door between the two rooms — which is the whole point of the
+ * change. A studio asks "spread the cold across one room"; this asks "spread it
+ * across one room AND through a doorway into another", which is the same shape
+ * as the winter home's question about heat and is a much better test of whether
+ * somebody understands what a fan is for.
  *
- * The tension: aiming the AC off the bed is trivial — point it at the far wall
- * and the pillow is calm. But the cold then piles up in the corner it is aimed
- * at and the rest of the studio stays hot, and the room-wide goal fails. Aim it
- * back across the room and the room cools but you are sleeping in the jet. The
- * pair is only satisfied by aiming the AC somewhere that is neither, and using
- * the fan to carry the cold air the AC is no longer delivering — which is the
- * thing people do not think of, because a fan feels like it should make a hot
- * room worse.
- *
- * The layout is the participant's own sketch: door top-left, desk in the
- * top-right corner, closet down the right-hand wall, TV on the left, a table in
- * the middle, the bed along the bottom-right and a window in the bottom wall.
+ * The tension: the AC pools cold at the top of the bedroom and the bed is at the
+ * bottom of it, so the aim that reaches the far end of the flat and the aim that
+ * lands on the sleeper are close together — and the fan placements that carry
+ * cold through the doorway best are the ones standing where the bed can feel
+ * them. The fan is the lever; the louvre is a trim.
  */
-function buildAcStudio(): FloorPlan {
-  // 6.4 x 4.8, landscape — the long wall runs across the top view, which is the
-  // proportion the sketch has and the one a studio is normally drawn in.
-  const rooms = [room("studio", "bedroom", "Studio", 0, 0, 6.4, 4.8, true)];
+function buildAcFlat(): FloorPlan {
+  // 6.4 wide x 8.0 deep overall: living room across the top, bedroom below it.
+  // The bedroom keeps the studio's own 6.4 x 4.8 footprint and every stick of
+  // its furniture, so the layout that was drawn and approved is still the room
+  // the task is about.
+  const rooms = [
+    room("living", "living", "Living room", 0, 0, 6.4, 3.2, true),
+    room("bedroom", "bedroom", "Bedroom", 0, 3.2, 6.4, 4.8, true),
+  ];
   const plan = assemble(
-    "Studio flat",
+    "One-bedroom flat",
     rooms,
     (walls, gen, doors) => {
-      // Front door on the SOUTH wall (screen-top), over on the left.
-      entranceOnTop(walls, gen, "studio", rooms[0].rect, doors, 0.28);
+      // The front door is now on the LIVING room's outer wall, and the door that
+      // used to be the front door is the one between the two rooms.
+      placeDoor(walls, gen, rooms[0], rooms[1], doors);
+      entranceOnTop(walls, gen, "living", rooms[0].rect, doors, 0.28);
     },
     (gen, rs, openings) => {
       const c = (r: RoomDef) => doorsForRoom(r, openings);
-      const [studio] = rs;
+      const [living, bedroom] = rs;
       return [
-        // THE BED, in the bottom-RIGHT corner with the headboard against the
+        // LIVING ROOM: couch facing the television, and a low table. The TV and
+        // the table came out of the bedroom when it stopped being a studio —
+        // they are what makes a living room a living room, and the bedroom was
+        // carrying five pieces of furniture as it was.
+        against(gen, living, c(living), "west", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.55 }),
+        centreItem(gen, living, "couch", [1.8, 0.8, 0.85], -Math.PI / 2),
+        spot(gen, living, "table", [1.1, 0.45, 0.7], 4.6, 1.6, 0),
+
+        // BEDROOM, exactly as it was drawn — every position is the studio's own,
+        // shifted down by the living room's 3.2 m.
+        //
+        // THE BED, in the bottom-right corner with the headboard against the
         // right-hand wall. Turned rather than reshaped: the model puts the
         // headboard and pillows at its local -z, and yaw = -pi/2 maps that to
-        // +x, so the pillows end up hard against the right wall at about
-        // x 6.3 — directly under the run of the room the AC looks down.
-        spot(gen, studio, "bed", [1.5, 0.5, 2.0], 5.34, 3.99, -Math.PI / 2),
-        // Closet in the bottom-LEFT corner, desk in the top-right, TV on the
-        // left wall, table in the middle. None of it is the participant's to
-        // move; it is here because an empty box is not a room, and because the
-        // furniture is what makes one corner of the studio harder to reach than
-        // another.
-        inCorner(gen, studio, "north", "start", "closet", [1.0, 2.0, 0.6]),
-        inCorner(gen, studio, "south", "end", "desk", [1.2, 0.75, 0.6]),
-        // Hung at eye level for someone standing, not dropped toward the
-        // skirting: y is the CENTRE of a 0.8 m panel, so 1.55 puts it 1.15-1.95
-        // up a 2.7 m wall, which is where a wall-mounted television actually goes.
-        against(gen, studio, c(studio), "west", 0.5, "tv", [1.4, 0.8, 0.1], {
-          mount: "wall", y: 1.55,
-        }),
-        spot(gen, studio, "table", [1.1, 0.45, 0.7], 3.0, 2.3, 0),
-        // THE AIR CONDITIONER, high on the TOP wall directly above the desk, and
-        // RUNNING. From up there it looks straight down the length of the studio
-        // — and the bed is at the far end of that run, which is why the problem
-        // exists: the louvre was left pointing down the room at the pillow.
-        //
-        // yaw 0 — straight out into the room, which from x 5.74 runs the length
-        // of the studio and lands on the bed. `mountYaw` pins the CASING to this
-        // wall so re-aiming swings the vanes instead of turning the whole unit
-        // off the plaster; a split AC does not swivel.
-        spot(gen, studio, "ac", [0.85, 0.32, 0.22], 5.74, 0.17, 0, {
+        // +x, so the pillows end up hard against the right wall.
+        spot(gen, bedroom, "bed", [1.5, 0.5, 2.0], 5.34, 7.19, -Math.PI / 2),
+        inCorner(gen, bedroom, "north", "start", "closet", [1.0, 2.0, 0.6]),
+        inCorner(gen, bedroom, "south", "end", "desk", [1.2, 0.75, 0.6]),
+        // THE AIR CONDITIONER, high on the bedroom's top wall above the desk —
+        // which is now the wall it shares with the living room, and the doorway
+        // is at the far end of that same wall. RUNNING, and aimed straight out
+        // into the bedroom, which from x 5.74 runs the length of the room and
+        // lands on the bed. `mountYaw` pins the casing to the wall so re-aiming
+        // swings the vanes instead of turning the whole unit off the plaster.
+        spot(gen, bedroom, "ac", [0.85, 0.32, 0.22], 5.74, 3.37, 0, {
           category: "hvac", mount: "wall", y: H - 0.5, flow: 0.5, on: true, mountYaw: 0,
         }),
-        // The fan, standing in the top-left corner out of the way — where one
-        // lives when nobody is using it. Standing it in the room rather than
-        // leaving it in the palette states the lever plainly: the first move of
-        // the task should not be "find the right thing in a menu".
-        spot(gen, studio, "fan", [0.45, 1.3, 0.45], 0.62, 0.62, 0, {
+        // The fan, standing in the bedroom's top-left corner out of the way —
+        // where one lives when nobody is using it, and next to the doorway it
+        // will probably need to be pointed through.
+        spot(gen, bedroom, "fan", [0.45, 1.3, 0.45], 0.62, 3.82, 0, {
           category: "hvac", mount: "floor", flow: 0, on: true,
         }),
       ];
     },
     { windows: false },
   );
-  // ONE BIG WINDOW across the bottom wall, and SHUT. Wide rather than a standard
-  // casement because it is the room's one source of daylight and reads as part
-  // of the studio rather than a hole punched in a wall; 2.8 m fits the clear run
-  // between the closet in the left corner and the bed in the right one. It is
-  // shut because it is 31 degrees outside and the AC is running — opening it is
-  // not a move anyone makes, and this task does not offer it as one.
-  addWindow(plan, "studio", "north", 0.42, false, 2.8);
-  for (const o of [...plan.doors, ...plan.windows]) { o.fixed = true; o.locked = true; }
+  // The bedroom's big window across its outer wall, and one in the living room.
+  // Both SHUT: it is 31 °C outside and the AC is running, so opening either is
+  // not a move anyone makes and this task does not offer it as one.
+  addWindow(plan, "bedroom", "north", 0.42, false, 2.8);
+  addWindow(plan, "living", "east", 0.5, false);
+  for (const o of [...plan.doors, ...plan.windows]) { o.fixed = true; }
+  // Every window locked; the INTERIOR door stays free, because that one is the
+  // route between the cold and the far room and is the question this task asks.
+  for (const w of plan.windows) w.locked = true;
+  for (const d of plan.doors) if (d.rooms.includes("outside")) d.locked = true;
   return plan;
 }
 
@@ -1111,121 +1106,112 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // already recorded against it, so the id stays and the content is what it
     // says on the card.
     id: "smell",
-    title: "Studio · AC blowing on you · Rented",
+    title: "One-bedroom flat · AC blowing on you · Rented",
     outdoorTemp: 31,
     brief:
-      "It is 31 °C outside and the air conditioner in your rented studio is bolted high on " +
-      "the right-hand wall, aimed straight down the bed at your pillow. Sleep in that and you " +
-      "wake up with a stiff neck; aim it at the far wall instead and the rest of the studio " +
-      "never cools. There is a fan standing in the corner.",
+      "It is 31 °C outside and the flat has one air conditioner, in the bedroom, aimed straight " +
+      "down the bed at your pillow. Sleep in that and you wake up with a stiff neck; aim it away " +
+      "and the flat never cools. There is a fan standing in the corner.",
     situation:
-      "It is a hot night — 31 °C outside — and you are renting a studio. The air conditioner is " +
-      "bolted high on the right-hand wall at the sleeping end, and whoever lived here last left " +
-      "it pointing straight down the bed at the pillow. You have to sleep under it tonight. " +
-      "There is a fan standing in the corner by the door.",
+      "It is a hot night — 31 °C outside — and you are renting a one-bedroom flat. The only air " +
+      "conditioner is in the bedroom, bolted high on the wall it shares with the living room, " +
+      "and whoever lived here last left it pointing straight down the bed at the pillow. You " +
+      "have to sleep under it tonight, and the living room is warm too. There is a fan standing " +
+      "in the bedroom corner by the door.",
     goal:
-      "Cool the whole studio down — not just the corner the AC is pointing at — without the " +
-      "air blowing over the bed while you sleep. Keep changing things until you are happy with " +
-      "the result, then press Submit.",
+      "Cool the whole flat down — the living room as well as the bedroom — without a strong " +
+      "draught blowing over the bed while you sleep. Keep changing things until you are happy " +
+      "with the result, then press Submit.",
     youCanChange:
       "Re-aim the air conditioner: turn it left or right and tilt it up or down. Move the fan " +
-      "anywhere in the room and point it whichever way you like. Run the simulation as many " +
-      "times as you like.",
+      "anywhere in the flat and point it whichever way you like, and open or close the bedroom " +
+      "door. Run the simulation as many times as you like.",
     youCannotChange:
-      "You are renting, so nothing about the studio itself moves: the air conditioner stays " +
-      "bolted where it is and you can only change the angle it blows at, and the window, the " +
+      "You are renting, so nothing about the flat itself moves: the air conditioner stays bolted " +
+      "where it is and you can only change the angle it blows at, and the windows, the front " +
       "door and the furniture stay put. The AC and the fan both run at a fixed speed and cannot " +
-      "be turned up. The window stays shut — it is 31 °C outside. The weather is fixed.",
+      "be turned up. The windows stay shut — it is 31 °C outside. The weather is fixed.",
     tools: {
       movable: ["fan"],
       aimable: ["ac", "fan"],
       addable: [],
       walls: false,
-      // The window and the front door are both shut and locked in the build:
-      // opening either onto a 31 °C night is not a cooling strategy, and
-      // offering the toggle invites it as one.
-      openings: false,
+      // The bedroom door only — every window and the front door are locked in
+      // the build. That door is the route between the cold and the far room,
+      // which is the question this task asks.
+      openings: true,
       editOpeningSet: false,
       resize: false,
       lockPower: true,
     },
-    // Where the air goes, and how warm it is. Those are the two things this task
-    // is about, and a contaminant tab on a task with nothing to contaminate is a
-    // lever that isn't there.
     views: ["airflow", "temperature"],
     // TWO GOALS THAT PULL APART, which is the design rule for all four tasks.
     //
     // The task in one line: do not sleep in a blast, and do not leave half the
-    // studio hot. Those fight because the fan is the only thing that carries the
-    // AC's cold out of the corner it pools in, and the placements that carry it
-    // best are the ones that put it over the bed.
+    // flat hot. Those fight because the fan is the only thing that carries the
+    // AC's cold out of the corner it pools in and through the doorway, and the
+    // placements that carry it best are the ones that put it over the bed.
+    //
+    // WHY THE LIVING ROOM IS GRADED TOGETHER WITH THE BEDROOM AND NOT BESIDE
+    // IT. Graded separately the living room is nearly free: it has a quarter of
+    // the bedroom's glazing (a 1.2 m casement against a 2.8 m window) so it
+    // sits about 0.9 °C cooler before anybody touches anything, and its own
+    // line would tick itself. One line over BOTH rooms, scored on whichever is
+    // doing worst, is what "cool the whole flat" actually means — and it keeps
+    // the tick-list at two boxes.
     //
     // WHAT THE AC'S POSITION COSTS THE TASK, recorded because it was measured
-    // three times over. With the unit above the desk on the TOP wall, the bed is
-    // 3.9 m down the room from it, and at that range the jet has spread out: the
-    // bed reads 0.099-0.120 m/s across EVERY aim and tilt, and the AC's jet
-    // speed is already clamped at the model's maximum, so a bigger unit changes
-    // nothing (flow 0.5, 1.0, 1.8 and 3.0 give byte-identical numbers).
+    // four times over. The unit is on the bedroom's top wall and the bed is
+    // 3.8 m down the room from it; at that range the jet has spread out, so the
+    // bed reads 0.100-0.107 m/s across every aim, and the AC's jet speed is
+    // already clamped at the model's maximum (flow 0.5, 1.0, 1.8 and 3.0 give
+    // byte-identical numbers). An air conditioner four metres away cannot blow
+    // on you. Aiming it is a trim; the FAN is the lever.
     //
-    // An air conditioner four metres away cannot blow on you. That is a real
-    // result and not a tuning failure — an earlier version had it on the
-    // right-hand wall beside the bed, where the aim was worth a 3x swing on the
-    // pillow, and the one before that had it in a different room entirely, where
-    // it was worth nothing at all. Above the desk sits in between: aiming it is
-    // a fine adjustment (about 0.08 °C across the full tilt range and 0.01 °C
-    // between yaw -34° and +34°) and the FAN is the lever. Aims beyond about
-    // ±69° do fail, so "point it along the wall" is still a wrong answer.
+    // MEASURED at REPORT_FIDELITY, 125 layouts (fan on a 5x6 grid across BOTH
+    // rooms x 4 headings, plus the no-fan case at five AC aims):
     //
-    // MEASURED at REPORT_FIDELITY, 149 layouts (fan on a 7x5 grid x 4 headings,
-    // plus the no-fan case at nine AC settings):
+    //   as found (fan parked in the corner)   bed 0.103   bedroom 25.40  living 25.00
+    //   best AC aim, NO FAN                   bed 0.104   bedroom 25.69  living 24.76
+    //   coolest of all 125                    bed 1.655   bedroom 24.52  living 24.15
+    //   best with the bed calm                bed 0.188   bedroom 24.85  living 24.59
     //
-    //   as found (fan parked in the corner)     bed 0.111   warmest 25.59
-    //   best AC setting, NO FAN                 bed 0.101   warmest 25.60
-    //   coolest of all 149 (fan mid-room)       bed 1.297   warmest 24.55
-    //   best warmest-part with the bed calm     bed 0.127   warmest 24.67
-    //
-    // The bed starts calm and the room starts hot, so the task opens with one
-    // box ticked and the obvious way to tick the second — stand the fan where it
-    // shifts the most air — unticks it. The four coolest layouts in the sweep
-    // all fail the bed. The answer stands the fan in the upper middle of the
-    // room pointing down its length: far enough from the bed not to be felt
-    // there, close enough to the unit to pick up what it is producing.
+    // The bed starts calm and the flat starts hot, so the task opens with one
+    // box ticked and the obvious way to tick the second — stand the fan where
+    // it shifts the most air — unticks it. The answer stands the fan just
+    // inside the bedroom door, pointing down the room: close enough to the unit
+    // to pick up what it is producing, and positioned so the return leg goes
+    // back out through the doorway rather than over the bed.
     goals: [
       // 0.20 m/s over the whole bed, not the pillow: air you can feel on your
       // legs still wakes you. This is a STRONG-draught line rather than a
-      // stillness one — the app's own no-noticeable figure is 0.28 and the room
-      // never goes below 0.092 with anything running, so demanding stillness
+      // stillness one — the app's own no-noticeable figure is 0.28 and the flat
+      // never goes below 0.100 with anything running, so demanding stillness
       // would be demanding something the task cannot deliver. What it rules out
-      // is the blast: the failing layouts sit at 0.38 to 1.89 m/s.
-      { label: "No strong draught on the bed while you sleep", metric: "draft", roomId: "studio", nearItem: "bed", atMost: 0.2 },
-      // 25.0 °C in the WARMEST PART of the studio — not the mean, and not one
-      // measuring spot. "Cool everywhere" is a coverage claim and neither of
-      // those can express it: a mean is satisfied by cooling one end hard, and a
-      // zone just picks a different end to ignore. Graded on the 90th percentile
-      // of the room, the same way the bathroom is graded on the corner that
-      // stays damp. See warmestPart.
+      // is the blast: the failing layouts run to 1.66 m/s.
+      { label: "No strong draught on the bed while you sleep", metric: "draft", roomId: "bedroom", nearItem: "bed", atMost: 0.2 },
+      // 25.2 °C in the warmest part of EITHER room — roomId "*" means every
+      // room, graded on the one doing worst. Not a mean, which is satisfied by
+      // cooling one end hard, and not a single measuring spot, which just picks
+      // a different end to ignore. See warmestPart.
       //
-      // 25.0 sits in the 24.67 -> 25.60 gap: it admits the fan-assisted family
-      // and rejects doing nothing by 0.6 °C, at every AC setting tried.
-      { label: "The whole studio cools down, not just one end", metric: "temperature", roomId: "studio", everywhere: true, atMost: 25 },
+      // 25.2 sits in the 24.85 -> 25.69 gap: it admits the fan-assisted family
+      // and rejects doing nothing at every AC aim tried.
+      { label: "Both rooms cool down, not just one end", metric: "temperature", roomId: "*", everywhere: true, atMost: 25.2 },
     ],
-    // Denser than the default 14: one open room where the whole question is
-    // which way the air crosses it, so a sparse picture just looks like nothing
-    // is happening.
-    viz: { maxSeeds: 26 },
+    viz: { maxSeeds: 22 },
     success:
-      "Bed ≤ 0.20 m/s AND the warmest part of the studio ≤ 25.0 °C. The bed starts calm and " +
-      "the room starts hot, so the task opens with one box ticked and the obvious way to tick " +
-      "the second — stand the fan where it shifts the most air, out in the middle — unticks it: " +
-      "the four coolest layouts in the sweep put 0.38 to 1.89 m/s over the bed. The answer is " +
-      "the fan in the upper middle of the room pointing down its length, around (3.3, 1.5): " +
-      "24.67 °C in the warmest part with 0.127 m/s at the bed. The fan is required — every AC " +
-      "setting on its own leaves the room at 25.60 °C — and the trap is treating it as a second " +
-      "cooler rather than as the thing that carries the AC's cold out of the corner it pools " +
-      "in. Re-aiming the unit is a fine adjustment here (0.08 °C across the whole tilt range), " +
-      "not the main lever: from above the desk it is four metres from the bed and cannot reach " +
-      "it. Pointing it along the wall (beyond about ±69°) does still fail.",
-    build: buildAcStudio,
+      "Bed ≤ 0.20 m/s AND the warmest corner of EITHER room ≤ 25.2 °C. The bed starts calm and " +
+      "the flat starts hot, so the task opens with one box ticked and the obvious way to tick " +
+      "the second — stand the fan where it shifts the most air — unticks it: the coolest layout " +
+      "in the sweep puts 1.66 m/s over the bed. The answer stands the fan just inside the " +
+      "bedroom door pointing down the room, around (4.5, 3.4): 24.85 °C in the bedroom and " +
+      "24.59 °C in the living room with 0.188 m/s at the bed. The fan is required — every AC " +
+      "aim on its own leaves the bedroom at 25.69 °C — and the trap is treating it as a second " +
+      "cooler rather than as the thing that carries the AC's cold out of its corner and through " +
+      "the doorway. Re-aiming the unit is a trim here, not the main lever: from the far wall it " +
+      "is nearly four metres from the bed and cannot reach it.",
+    build: buildAcFlat,
   },
 };
 

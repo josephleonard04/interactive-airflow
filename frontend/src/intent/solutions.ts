@@ -389,6 +389,17 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   // satisfied line against another.
   const taskShortfall: number[] = [];
   for (const g of zones) {
+    // "*" is every room, graded on the worst of them — see checkGoals.
+    if (g.metric === "temperature" && g.everywhere && g.roomId === "*") {
+      let worst = -Infinity;
+      for (const r of plan.rooms) worst = Math.max(worst, warmestPart(built, temp, r.rect));
+      const c = outdoorTemp + worst;
+      let short = 0;
+      if (g.atMost !== undefined) short += Math.max(0, c - g.atMost);
+      if (g.atLeast !== undefined) short += Math.max(0, g.atLeast - c);
+      taskShortfall.push(short);
+      continue;
+    }
     const rect = g.zone ?? plan.rooms.find((r) => r.id === g.roomId)?.rect ?? null;
     if (!rect) { taskShortfall.push(0); continue; }
     let v: number | null = null;
