@@ -638,13 +638,18 @@ function buildBathroom(): FloorPlan {
  * them. The fan is the lever; the louvre is a trim.
  */
 function buildAcFlat(): FloorPlan {
-  // 6.4 wide x 8.0 deep overall: living room across the top, bedroom below it.
-  // The bedroom keeps the studio's own 6.4 x 4.8 footprint and every stick of
-  // its furniture, so the layout that was drawn and approved is still the room
-  // the task is about.
+  // 6.4 wide x 8.0 deep overall, split evenly: 4.0 m of living room across the
+  // top, 4.0 m of bedroom below it.
+  //
+  // The living room started at 3.2 against the bedroom's 4.8, which is how the
+  // split fell out of keeping the studio's footprint intact — and it looked
+  // wrong, because it IS wrong: a one-bedroom flat's living room is the bigger
+  // room, not a strip at the end. Evening them up costs the bedroom 0.8 m it
+  // was not using (the gap between the desk at the top and the bed at the
+  // bottom) and gives the living room enough floor to be somewhere you sit.
   const rooms = [
-    room("living", "living", "Living room", 0, 0, 6.4, 3.2, true),
-    room("bedroom", "bedroom", "Bedroom", 0, 3.2, 6.4, 4.8, true),
+    room("living", "living", "Living room", 0, 0, 6.4, 4.0, true),
+    room("bedroom", "bedroom", "Bedroom", 0, 4.0, 6.4, 4.0, true),
   ];
   const plan = assemble(
     "One-bedroom flat",
@@ -652,7 +657,11 @@ function buildAcFlat(): FloorPlan {
     (walls, gen, doors) => {
       // The front door is now on the LIVING room's outer wall, and the door that
       // used to be the front door is the one between the two rooms.
-      placeDoor(walls, gen, rooms[0], rooms[1], doors);
+      // The doorway sits well left of centre, which puts it at the opposite end
+      // of the shared wall from the air conditioner. That distance IS the task:
+      // it is how far the cold has to travel back across the bedroom before it
+      // can reach the living room at all.
+      placeDoor(walls, gen, rooms[0], rooms[1], doors, 0.3);
       entranceOnTop(walls, gen, "living", rooms[0].rect, doors, 0.28);
     },
     (gen, rs, openings) => {
@@ -665,10 +674,14 @@ function buildAcFlat(): FloorPlan {
         // carrying five pieces of furniture as it was.
         against(gen, living, c(living), "west", 0.5, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.55 }),
         centreItem(gen, living, "couch", [1.8, 0.8, 0.85], -Math.PI / 2),
-        spot(gen, living, "table", [1.1, 0.45, 0.7], 4.6, 1.6, 0),
+        // The coffee table goes BETWEEN the couch and the television, turned a
+        // quarter so its long side runs across the sightline — which is where
+        // one goes and how one sits, rather than off to the side of the room.
+        spot(gen, living, "table", [1.1, 0.45, 0.7], 1.5, 2.0, Math.PI / 2),
 
-        // BEDROOM, exactly as it was drawn — every position is the studio's own,
-        // shifted down by the living room's 3.2 m.
+        // BEDROOM, as it was drawn — every position is the studio's own, shifted
+        // down by the living room's depth. The bed and the closet are measured
+        // from the OUTER wall, which has not moved, so they are untouched.
         //
         // THE BED, in the bottom-right corner with the headboard against the
         // right-hand wall. Turned rather than reshaped: the model puts the
@@ -683,13 +696,13 @@ function buildAcFlat(): FloorPlan {
         // into the bedroom, which from x 5.74 runs the length of the room and
         // lands on the bed. `mountYaw` pins the casing to the wall so re-aiming
         // swings the vanes instead of turning the whole unit off the plaster.
-        spot(gen, bedroom, "ac", [0.85, 0.32, 0.22], 5.74, 3.37, 0, {
+        spot(gen, bedroom, "ac", [0.85, 0.32, 0.22], 5.74, 4.17, 0, {
           category: "hvac", mount: "wall", y: H - 0.5, flow: 0.5, on: true, mountYaw: 0,
         }),
         // The fan, standing in the bedroom's top-left corner out of the way —
         // where one lives when nobody is using it, and next to the doorway it
         // will probably need to be pointed through.
-        spot(gen, bedroom, "fan", [0.45, 1.3, 0.45], 0.62, 3.82, 0, {
+        spot(gen, bedroom, "fan", [0.45, 1.3, 0.45], 0.62, 4.62, 0, {
           category: "hvac", mount: "floor", flow: 0, on: true,
         }),
       ];
@@ -1169,19 +1182,22 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // on you. Aiming it is a trim; the FAN is the lever.
     //
     // MEASURED at REPORT_FIDELITY, 125 layouts (fan on a 5x6 grid across BOTH
-    // rooms x 4 headings, plus the no-fan case at five AC aims):
+    // rooms x 4 headings, plus the no-fan case at five AC aims). Re-measured
+    // after the rooms were evened up to 4.0 m each:
     //
-    //   as found (fan parked in the corner)   bed 0.103   bedroom 25.40  living 25.00
-    //   best AC aim, NO FAN                   bed 0.104   bedroom 25.69  living 24.76
-    //   coolest of all 125                    bed 1.655   bedroom 24.52  living 24.15
-    //   best with the bed calm                bed 0.188   bedroom 24.85  living 24.59
+    //   as found (fan parked in the corner)   bed 0.112   worst room 25.33
+    //   best AC aim, NO FAN                   bed 0.112   worst room 25.78
+    //   coolest of all 125                    bed 0.470   worst room 24.74
+    //   best with the bed calm                bed 0.148   worst room 24.88
     //
     // The bed starts calm and the flat starts hot, so the task opens with one
     // box ticked and the obvious way to tick the second — stand the fan where
-    // it shifts the most air — unticks it. The answer stands the fan just
+    // it shifts the most air — unticks it: the coolest layout in the sweep and
+    // three of the next four all fail the bed. The answer stands the fan just
     // inside the bedroom door, pointing down the room: close enough to the unit
-    // to pick up what it is producing, and positioned so the return leg goes
-    // back out through the doorway rather than over the bed.
+    // to pick up what it is producing, far enough across the room that the bed
+    // does not feel it, and lined up so the return leg goes back out through
+    // the doorway.
     goals: [
       // 0.20 m/s over the whole bed, not the pillow: air you can feel on your
       // legs still wakes you. This is a STRONG-draught line rather than a
@@ -1195,8 +1211,9 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       // cooling one end hard, and not a single measuring spot, which just picks
       // a different end to ignore. See warmestPart.
       //
-      // 25.2 sits in the 24.85 -> 25.69 gap: it admits the fan-assisted family
-      // and rejects doing nothing at every AC aim tried.
+      // 25.2 sits in the 24.88 -> 25.78 gap: it admits the fan-assisted family
+      // (five placements clear it) and rejects doing nothing by 0.6 °C at every
+      // AC aim tried.
       { label: "Both rooms cool down, not just one end", metric: "temperature", roomId: "*", everywhere: true, atMost: 25.2 },
     ],
     viz: { maxSeeds: 22 },
@@ -1204,12 +1221,12 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "Bed ≤ 0.20 m/s AND the warmest corner of EITHER room ≤ 25.2 °C. The bed starts calm and " +
       "the flat starts hot, so the task opens with one box ticked and the obvious way to tick " +
       "the second — stand the fan where it shifts the most air — unticks it: the coolest layout " +
-      "in the sweep puts 1.66 m/s over the bed. The answer stands the fan just inside the " +
-      "bedroom door pointing down the room, around (4.5, 3.4): 24.85 °C in the bedroom and " +
-      "24.59 °C in the living room with 0.188 m/s at the bed. The fan is required — every AC " +
-      "aim on its own leaves the bedroom at 25.69 °C — and the trap is treating it as a second " +
-      "cooler rather than as the thing that carries the AC's cold out of its corner and through " +
-      "the doorway. Re-aiming the unit is a trim here, not the main lever: from the far wall it " +
+      "in the sweep and three of the next four all put too much over the bed. The answer stands " +
+      "the fan just inside the bedroom door pointing down the room, around (3.2, 4.7): 24.88 °C " +
+      "in the worst room with 0.148 m/s at the bed. The fan is required — every AC aim on its " +
+      "own leaves the worst room at 25.78 °C — and the trap is treating it as a second cooler " +
+      "rather than as the thing that carries the AC’s cold out of its corner and through the " +
+      "doorway. Re-aiming the unit is a trim here, not the main lever: from the shared wall it " +
       "is nearly four metres from the bed and cannot reach it.",
     build: buildAcFlat,
   },
