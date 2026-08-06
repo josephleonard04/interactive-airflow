@@ -81,11 +81,16 @@ function freeIntervals(w: WallSeg): Array<[number, number]> {
   return out;
 }
 
-export function placeDoor(walls: WallSeg[], gen: IdGen, a: RoomDef, b: RoomDef, doors: Opening[]): void {
+/** `frac` is where along the shared wall the doorway sits, 0..1 — 0.5 (the
+ *  default) centres it. Worth setting when the doorway's position relative to
+ *  what is on the wall matters: in the AC flat the unit and the door share a
+ *  wall, and how far apart they are is the length of the trip the cold has to
+ *  make to get out of the bedroom. */
+export function placeDoor(walls: WallSeg[], gen: IdGen, a: RoomDef, b: RoomDef, doors: Opening[], frac = 0.5): void {
   const e = sharedEdge(a, b);
   if (!e) return;
-  const mid = (e.start + e.end) / 2;
-  const s = Math.max(e.start + 0.15, mid - DOOR_WIDTH / 2);
+  const mid = e.start + frac * (e.end - e.start);
+  const s = Math.min(Math.max(e.start + 0.15, mid - DOOR_WIDTH / 2), e.end - 0.15 - DOOR_WIDTH);
   const door = makeOpening(gen("door"), "door", e.axis, e.line, s, s + DOOR_WIDTH, [a.id, b.id]);
   carveOpening(walls, door);
   doors.push(door);
