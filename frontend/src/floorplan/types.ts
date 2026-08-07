@@ -161,6 +161,17 @@ export interface FloorPlan {
    *  entire lesson. Only the bathroom, where the extract is the one thing the
    *  participant moves, wants it. */
   sealedHalo?: boolean;
+  /** Multiplies the AC's jet speed, for tasks where the throw itself is the
+   *  question. Default 1.
+   *
+   *  Per-task for the same reason windowReach and ventSpread are. In the
+   *  single-bedroom apartment the whole point is that the unit blows on the
+   *  person in the bed, and the model's jet is clamped at 1.5 — four metres
+   *  down the room it arrives at 0.11 m/s, indistinguishable from still air,
+   *  so no aim the participant chose could be felt and the task had no first
+   *  lever. Raising the clamp globally would change every other scenario's
+   *  air conditioner; this changes one plan's. */
+  acThrow?: number;
   name: string;
   size: HomeSize;
   bounds: Rect;

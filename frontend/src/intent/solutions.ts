@@ -663,17 +663,24 @@ function strategiesFor(
     // warm a room in winter reads as broken advice however the numbers land.
     // Interior doors are still searched: those move heat between rooms.
     const doorStates = ctx && doorsMustStayOpen(goal, ctx.plan, ctx.targetIds) ? [true] : [true, false];
+    // A FAN IS A THING YOU CAN ALSO NOT USE. Every strategy switched it on, so
+    // "leave the fan off" was not in the search space at all — and on a task
+    // where the conditioner alone already cools the place, adding a fan is a
+    // change for its own sake and the participant is entitled to be shown that
+    // doing nothing with it is an option. The device dial stays locked either
+    // way: `power` is the AC's, and lockPower pins it at medium.
     for (const power of lockPower ? [2] : [2, 3]) {
       for (const doorsOpen of doorStates) {
+        for (const fanOn of [true, false]) {
         const devices = only({
           [dev]: { on: true, power },
           [other]: { on: false },
           // Locked tasks keep the fan on medium too — it is a device dial like
           // any other, and dropping it to low is a change the user cannot make.
-          fan: { on: true, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
+          fan: { on: fanOn, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
         });
         add({
-          id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}`,
+          id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}${fanOn ? "" : "-nofan"}`,
           // With the dial locked the only thing that varies is placement, so the
           // label must describe THAT rather than a power the user can't set.
           label: lockPower
@@ -685,8 +692,10 @@ function strategiesFor(
           note: [
             doorsOpen ? "interior doors open so the air reaches every room" : "interior doors shut to concentrate it",
             "windows shut to keep the outdoor air out",
+            fanOn ? "fan running" : "fan left off",
           ].join(", "),
         });
+        }
       }
     }
     return out;
@@ -863,18 +872,28 @@ function placeDevices(
       // real louvre reaches.
       const fixedAt = it.mountYaw;
       for (const room of aimOnly ? rooms.filter((r) => r.id === it.roomId) : rooms) {
+        // AIM IS TWO ANGLES, NOT ONE. The sweep only varied yaw, so on a task
+        // whose answer is "tilt the louvre up off the bed" the search could not
+        // reach the answer at all — it turned the unit left and right forever
+        // while the jet stayed on the pillow. Tilt is the other half of aimVec
+        // and the participant has a control for it, so the search gets one too:
+        // seven headings across the wall's arc x five angles from 40° down to
+        // 60° up, which is the range of the panel's own slider.
         const spots = aimOnly
-          ? Array.from({ length: 11 }, (_, i) => ({
-              position: it.position,
-              rotationY:
-                fixedAt === undefined
-                  ? -Math.PI + (i * 2 * Math.PI) / 11
-                  : fixedAt - 1.31 + (i * 2.62) / 10,
-              roomId: it.roomId,
-              roomName: room.name,
-              axis: "area" as const,
-              oscillate: false,
-            }))
+          ? [-0.35, 0, 0.35, 0.7, 1.05].flatMap((tilt) =>
+              Array.from({ length: 5 }, (_, i) => ({
+                position: it.position,
+                rotationY:
+                  fixedAt === undefined
+                    ? -Math.PI + (i * 2 * Math.PI) / 5
+                    : fixedAt - 1.31 + (i * 2.62) / 4,
+                tilt,
+                roomId: it.roomId,
+                roomName: room.name,
+                axis: "area" as const,
+                oscillate: false,
+              })),
+            )
           : candidateSpots(room, it.type, working.wallHeight, openings);
         // The tail of the arrow itself, aimed along it: the spot the user
         // literally pointed at, which no generic candidate list contains.
@@ -921,7 +940,14 @@ function placeDevices(
             ...working,
             items: working.items.map((o) =>
               o.id === it.id
-                ? { ...o, position: placed, rotationY: cand.rotationY, roomId: cand.roomId, ...(cand.oscillate !== undefined ? { oscillate: cand.oscillate } : {}) }
+                ? {
+                    ...o,
+                    position: placed,
+                    rotationY: cand.rotationY,
+                    roomId: cand.roomId,
+                    ...(typeof (cand as { tilt?: number }).tilt === "number" ? { tilt: (cand as { tilt?: number }).tilt } : {}),
+                    ...(cand.oscillate !== undefined ? { oscillate: cand.oscillate } : {}),
+                  }
                 : o,
             ),
           };
@@ -988,6 +1014,10 @@ function placeDevices(
   return { plan: working, changes, primaryAlts };
 }
 
+/** The panel's own vertical-aim slider runs to ±60°, so the search stays inside
+ *  what the participant could actually set. */
+const clampTilt = (t: number) => Math.max(-Math.PI / 3, Math.min(Math.PI / 3, t));
+
 /** Hill-climb a plan by NUDGING what the task lets you move: small steps in
  *  position and small turns of the aim, keeping anything that scores better,
  *  until nothing does.
@@ -1042,13 +1072,17 @@ function refine(
       if (!here) continue;
       const room = best.rooms.find((r) => r.id === here.roomId);
       if (!room) continue;
-      const moves: Array<{ dx: number; dz: number; dr: number }> = [];
+      const moves: Array<{ dx: number; dz: number; dr: number; dtilt?: number }> = [];
       if (canMove(it.type)) {
         for (const [dx, dz] of [[step, 0], [-step, 0], [0, step], [0, -step], [step, step], [-step, -step], [step, -step], [-step, step]]) {
           moves.push({ dx, dz, dr: 0 });
         }
       }
       if (canAim(it.type)) {
+        // Tilt is half the aim — see the aim-only candidate list. Without this
+        // the polish could move an air conditioner's heading and never its
+        // angle, which is the one that gets the jet off the bed.
+        for (const dt of [turn, -turn]) moves.push({ dx: 0, dz: 0, dr: 0, dtilt: dt });
         for (const dr of [turn, -turn]) {
           // …and the polish stays inside that arc as well, or it walks the aim
           // round into the wall one nudge at a time.
@@ -1080,7 +1114,12 @@ function refine(
           ...best,
           items: best.items.map((o) =>
             o.id === it.id
-              ? { ...o, position: [px, o.position[1], pz] as Vec3, rotationY: o.rotationY + m.dr }
+              ? {
+                  ...o,
+                  position: [px, o.position[1], pz] as Vec3,
+                  rotationY: o.rotationY + m.dr,
+                  ...(m.dtilt ? { tilt: clampTilt((o.tilt ?? 0) + m.dtilt) } : {}),
+                }
               : o,
           ),
         };
@@ -1246,7 +1285,10 @@ export function findSolutions(
   // facing one way) needs a budget that can actually spend them. Screening is
   // ~25 ms a shot, so this is a few seconds at worst, behind a spinner, on a
   // button the participant pressed deliberately.
-  const budget = { left: opts.screenBudget ?? 180 };
+  // 180 was the quality peak when a cooling task had two strategies; allowing the
+  // fan to be left OFF doubled that to four, which halved what each one could
+  // spend on placement. 260 restores it.
+  const budget = { left: opts.screenBudget ?? 260 };
   const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds, movable: opts.movableDevices });
 
   // Split the screening budget EVENLY across strategies. A single shared

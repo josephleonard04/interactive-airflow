@@ -431,7 +431,12 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       // the vent instead of away, pulling room air (and odour) into it. Pair a
       // supply in one room with a return in another and the air is drawn ACROSS
       // the house through the open doors — whole-house circulation.
-      const mag = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult;
+      // `acThrow` is a per-plan multiplier on the AC jet only — see FloorPlan.
+      // It sits outside the clamp on purpose: the clamp is what stops a flow
+      // value from running away, and this is a deliberate, task-scoped choice
+      // about how far one unit throws.
+      const acThrow = isAC ? (plan.acThrow ?? 1) : 1;
+      const mag = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult * acThrow;
       const speed = isReturn ? -mag : mag;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);
