@@ -1,3 +1,33 @@
+    // TWO GOALS THAT PULL APART, which is the design rule for all four tasks.
+    //
+    // WHAT THE FULL SWEEP SAYS, and it is not what the task was first written to
+    // claim. 265 layouts at REPORT_FIDELITY: 25 AC aim/tilt combinations with no
+    // fan, then 240 fan placements (5x6 grid across BOTH rooms x 4 headings x
+    // sweep on/off) with the AC left as found.
+    //
+    //   AC alone, all 25 aims and tilts   bed 0.107-0.119   worst room 25.78-26.07
+    //   as found (fan idle in the corner) bed 0.112         worst room 25.33
+    //   coolest of all 240 (fan at 4.5)   bed 0.470         worst room 24.74
+    //   best with the bed calm            bed 0.148         worst room 24.88
+    //
+    // THE BED IS ALREADY CALM AND THE AC CANNOT CHANGE THAT. Four metres down
+    // the room from the unit, the bed sits at 0.107-0.119 m/s whichever way the
+    // louvre points — a 0.012 m/s spread, against a 0.20 line. The task was
+    // originally written as "the last tenant left it aimed at your pillow"; the
+    // solver does not agree and never did, so the text no longer says it. What
+    // the AC cannot do either is reach the living room: its best across all 25
+    // settings is 25.78 °C against a 25.2 bar.
+    //
+    // So the fan is the whole task, and the draught is something the FAN
+    // creates. Both goals are live: 11 of 240 placements clear both, and the
+    // four coolest layouts in the sweep all fail the bed — they are the fan
+    // standing deep in the bedroom at x 4.5 blowing back toward the doorway,
+    // which is the shortest path for the cold and runs straight over the
+    // sleeper. The answer keeps the fan at x 2.0-3.2, on the doorway's side of
+    // the room, so its throw reaches the door without crossing the bed.
+    //
+    // With the fan placed well, all 25 AC aim/tilt combinations pass (spread:
+    // bed 0.148-0.180, worst room 24.84-25.00). The louvre is a trim.
 import { DOOR_WIDTH, WINDOW_WIDTH, boundsOf, buildWalls, carveOpening, makeOpening } from "./geometry";
 import {
   against,
@@ -620,7 +650,7 @@ function buildBathroom(): FloorPlan {
 // ---------------------------------------------------------------- ac studio
 
 /**
- * AC · RENTED. A one-bedroom flat on a hot night. The air conditioner is the
+ * AC · RENTED. A single-bedroom apartment on a hot night. The air conditioner is the
  * only one in the place, it is in the BEDROOM, and whoever lived here last left
  * it pointing down the bed at the pillow.
  *
@@ -643,7 +673,7 @@ function buildAcFlat(): FloorPlan {
   //
   // The living room started at 3.2 against the bedroom's 4.8, which is how the
   // split fell out of keeping the studio's footprint intact — and it looked
-  // wrong, because it IS wrong: a one-bedroom flat's living room is the bigger
+  // wrong, because it IS wrong: a single-bedroom apartment's living room is the bigger
   // room, not a strip at the end. Evening them up costs the bedroom 0.8 m it
   // was not using (the gap between the desk at the top and the bed at the
   // bottom) and gives the living room enough floor to be somewhere you sit.
@@ -652,7 +682,7 @@ function buildAcFlat(): FloorPlan {
     room("bedroom", "bedroom", "Bedroom", 0, 4.0, 6.4, 4.0, true),
   ];
   const plan = assemble(
-    "One-bedroom flat",
+    "Single-bedroom apartment",
     rooms,
     (walls, gen, doors) => {
       // The front door is now on the LIVING room's outer wall, and the door that
@@ -1119,31 +1149,32 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // already recorded against it, so the id stays and the content is what it
     // says on the card.
     id: "smell",
-    title: "One-bedroom flat · AC blowing on you · Rented",
+    title: "Single-bedroom apartment · Cool both rooms · Rented",
     outdoorTemp: 31,
     brief:
-      "It is 31 °C outside and the flat has one air conditioner, in the bedroom, aimed straight " +
-      "down the bed at your pillow. Sleep in that and you wake up with a stiff neck; aim it away " +
-      "and the flat never cools. There is a fan standing in the corner.",
+      "It is 31 °C outside and the apartment has one air conditioner, in the bedroom. The bedroom " +
+      "is coping; the living room is not, and the cold does not find its way through the doorway " +
+      "on its own. There is a fan in the corner — but you are sleeping in that bedroom tonight.",
     situation:
-      "It is a hot night — 31 °C outside — and you are renting a one-bedroom flat. The only air " +
-      "conditioner is in the bedroom, bolted high on the wall it shares with the living room, " +
-      "and whoever lived here last left it pointing straight down the bed at the pillow. You " +
-      "have to sleep under it tonight, and the living room is warm too. There is a fan standing " +
-      "in the bedroom corner by the door.",
+      "It is a hot night — 31 °C outside — and you are renting a single-bedroom apartment. The only " +
+      "air conditioner is in the bedroom, bolted high on the wall it shares with the living room, " +
+      "and it is running. It is keeping its own end of the bedroom cool, but the far corners are " +
+      "still warm and the living room is warmer still — the cold does not find its way through the " +
+      "doorway on its own. There is a fan standing in the bedroom corner by the door. You are " +
+      "sleeping in that bedroom tonight.",
     goal:
-      "Cool the whole flat down — the living room as well as the bedroom — without a strong " +
-      "draught blowing over the bed while you sleep. Keep changing things until you are happy " +
+      "Cool the whole apartment — the living room as well as the bedroom — without ending up with " +
+      "air blowing hard over the bed while you sleep. Keep changing things until you are happy " +
       "with the result, then press Submit.",
     youCanChange:
-      "Re-aim the air conditioner: turn it left or right and tilt it up or down. Move the fan " +
-      "anywhere in the flat and point it whichever way you like, and open or close the bedroom " +
-      "door. Run the simulation as many times as you like.",
+      "Move the fan anywhere in the apartment and point it whichever way you like, and set whether " +
+      "it sweeps. Re-aim the air conditioner too: turn it left or right and tilt it up or down. " +
+      "Open or close the bedroom door. Run the simulation as many times as you like.",
     youCannotChange:
-      "You are renting, so nothing about the flat itself moves: the air conditioner stays bolted " +
-      "where it is and you can only change the angle it blows at, and the windows, the front " +
-      "door and the furniture stay put. The AC and the fan both run at a fixed speed and cannot " +
-      "be turned up. The windows stay shut — it is 31 °C outside. The weather is fixed.",
+      "You are renting, so nothing about the apartment itself moves: the air conditioner stays " +
+      "bolted where it is and you can only change the angle it blows at, and the windows, the " +
+      "front door and the furniture stay put. The AC and the fan both run at a fixed speed and " +
+      "cannot be turned up. The windows stay shut — it is 31 °C outside. The weather is fixed.",
     tools: {
       movable: ["fan"],
       aimable: ["ac", "fan"],
@@ -1218,16 +1249,17 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     ],
     viz: { maxSeeds: 22 },
     success:
-      "Bed ≤ 0.20 m/s AND the warmest corner of EITHER room ≤ 25.2 °C. The bed starts calm and " +
-      "the flat starts hot, so the task opens with one box ticked and the obvious way to tick " +
-      "the second — stand the fan where it shifts the most air — unticks it: the coolest layout " +
-      "in the sweep and three of the next four all put too much over the bed. The answer stands " +
-      "the fan just inside the bedroom door pointing down the room, around (3.2, 4.7): 24.88 °C " +
-      "in the worst room with 0.148 m/s at the bed. The fan is required — every AC aim on its " +
-      "own leaves the worst room at 25.78 °C — and the trap is treating it as a second cooler " +
-      "rather than as the thing that carries the AC’s cold out of its corner and through the " +
-      "doorway. Re-aiming the unit is a trim here, not the main lever: from the shared wall it " +
-      "is nearly four metres from the bed and cannot reach it.",
+      "Bed ≤ 0.20 m/s AND the warmest corner of EITHER room ≤ 25.2 °C. THE FAN IS THE ANSWER, and " +
+      "the AC is not: across all 25 of its aim-and-tilt settings the unit alone leaves the worst " +
+      "room at 25.78 °C, and it moves the bed by 0.012 m/s — the bed is calm before anybody " +
+      "starts. Stand the fan just inside the bedroom door around (3.2, 4.7) pointing down the " +
+      "room, away from the shared wall: 24.88 °C in the worst room with 0.148 m/s at the bed. " +
+      "Sweep on or off both work — the same spot sweeping gives 24.92 and 0.135. Ten other " +
+      "placements clear both lines, all of them at x 2.0-3.2, i.e. on the doorway’s side of the " +
+      "room. The trap is standing the fan deep in the bedroom at x 4.5 and blowing back toward " +
+      "the doorway: that is the shortest path for the cold and gives the four coolest layouts in " +
+      "the whole sweep (down to 24.73 °C), but it runs straight over the sleeper at 0.31-0.55 " +
+      "m/s. With the fan right, every AC setting passes, so re-aiming the louvre is a trim.",
     build: buildAcFlat,
   },
 };
