@@ -624,10 +624,14 @@ function strategiesFor(
     const l = DEVICE_LABEL[t] ?? t;
     return l === l.toUpperCase() ? l : l.toLowerCase();
   };
+  /** Devices this strategy actually asks the participant to place. A device it
+   *  switches OFF is not one of them — "Move the heater and the fan" on a card
+   *  whose small print says "fan left off" describes something it is not doing. */
+  const placed = (devices: Strategy["devices"]) =>
+    Object.entries(devices)
+      .filter(([t, spec]) => (!allowed || allowed.includes(t)) && (spec as { on?: boolean }).on !== false);
   const movedNames = (devices: Strategy["devices"]): string => {
-    const names = Object.keys(devices)
-      .filter((t) => !allowed || allowed.includes(t))
-      .map(deviceWord);
+    const names = placed(devices).map(([t]) => deviceWord(t));
     if (names.length === 0) return "the openings";
     if (names.length === 1) return `the ${names[0]}`;
     return `the ${names.slice(0, -1).join(", the ")} and the ${names[names.length - 1]}`;
@@ -639,7 +643,7 @@ function strategiesFor(
    *  Devices the task will not let anyone carry are AIMED. */
   const movable = ctx?.movable;
   const actionOn = (devices: Strategy["devices"]): string => {
-    const types = Object.keys(devices).filter((t) => !allowed || allowed.includes(t));
+    const types = placed(devices).map(([t]) => t);
     if (!movable || types.length === 0) return `Move ${movedNames(devices)}`;
     const pick = (keep: boolean) =>
       types.filter((t) => movable.includes(t) === keep).map(deviceWord);

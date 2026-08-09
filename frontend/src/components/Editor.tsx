@@ -93,6 +93,7 @@ function DragController({ offset }: { offset: Vec3 }) {
   const draggingId = useSceneStore((s) => s.draggingId);
   const setPosition = useSceneStore((s) => s.setPosition);
   const setDragging = useSceneStore((s) => s.setDragging);
+  const tools = useSceneStore((s) => s.tools);
 
   useEffect(() => {
     if (!draggingId) return;
@@ -216,9 +217,17 @@ function DragController({ offset }: { offset: Vec3 }) {
       let gx = snapG(pt.x - offset[0]);
       let gz = snapG(pt.z - offset[2]);
 
-      let room = plan.rooms.find(
-        (r) => gx > r.rect.x && gx < r.rect.x + r.rect.w && gz > r.rect.z && gz < r.rect.z + r.rect.d,
-      );
+      // A TASK CAN PIN AN ITEM TO ONE ROOM — see ScenarioTools.confineToRoom.
+      // The winter heater is the case: the question is how heat gets from the
+      // room that makes it to the room that needs it, and carrying the heater
+      // next door deletes the question rather than answering it. Clamping the
+      // drag says so without a dialog: it simply will not go through the door.
+      const pinned = tools.confineToRoom?.[item.type];
+      let room = pinned
+        ? plan.rooms.find((r) => r.id === pinned)
+        : plan.rooms.find(
+            (r) => gx > r.rect.x && gx < r.rect.x + r.rect.w && gz > r.rect.z && gz < r.rect.z + r.rect.d,
+          );
       if (!room) {
         let bd = Infinity;
         for (const r of plan.rooms) {
@@ -262,7 +271,7 @@ function DragController({ offset }: { offset: Vec3 }) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [draggingId, camera, gl, offset, plan, setPosition, setDragging]);
+  }, [draggingId, camera, gl, offset, plan, setPosition, setDragging, tools]);
 
   return null;
 }

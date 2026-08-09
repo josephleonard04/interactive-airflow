@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
-import { SCENARIOS, canMove } from "../floorplan/scenarios";
+import { SCENARIOS, canMove, canTurn } from "../floorplan/scenarios";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
@@ -345,8 +345,12 @@ export function Panel() {
           {/* An EXTRACT has no aim. It pulls air in from every direction at
               once, so a dial captioned "way it blows" is both meaningless and
               actively misleading about which way the air is going — and this
-              task turns on understanding exactly that. */}
-          {selected.type !== "return" && (
+              task turns on understanding exactly that.
+
+              A WALL-MOUNTED ITEM HAS NO HEADING TO SET EITHER — see canTurn.
+              Which way it faces is the wall's business; drag it to another
+              wall and it re-faces itself. */}
+          {selected.type !== "return" && canTurn(tools, selected) && (
             <>
               <RotationDial
                 valueRad={selected.rotationY}

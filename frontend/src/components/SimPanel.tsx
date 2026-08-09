@@ -117,9 +117,21 @@ export function SimPanel() {
     const { objectives, via, reason } = await resolveObjectives(text, livePlan, sketchRegion, { outdoorTemp });
     const evals = evaluateObjectives(objectives, livePlan, { outdoorTemp });
     useSceneStore.getState().logEvent("check", {
+      what: "check-goal",
       text,
       via,
       reason,
+      // What the sentence was UNDERSTOOD as, not only what it produced. RQ2 is
+      // about how people phrase intent, and "keep the bedroom warm" reading as
+      // temperature/high@Bedroom is the interesting half of that.
+      objectives: objectives.map((o) => ({
+        scalar: o.scalar,
+        direction: o.direction,
+        region: o.regionName,
+        regionId: o.regionId,
+        source: o.sourceName ?? null,
+        fromSketchArea: !!o.regionRect,
+      })),
       results: evals.map((e) => ({ summary: e.summary, satisfied: e.satisfied, value: e.value })),
     });
     setResults(evals);
@@ -147,6 +159,22 @@ export function SimPanel() {
     let objectives, via, reason;
     try {
       ({ objectives, via, reason } = await resolveObjectives(t, livePlan, sketchRegion, { outdoorTemp }));
+      // THE UTTERANCE ITSELF, verbatim, with how it was read — logged before
+      // anything is done with it, so the record survives whichever branch the
+      // sentence takes below (understood, guessed at, or refused).
+      useSceneStore.getState().logEvent("check", {
+        what: "typed-goal",
+        text: t,
+        via,
+        reason,
+        objectives: objectives.map((o) => ({
+          scalar: o.scalar,
+          direction: o.direction,
+          region: o.regionName,
+          regionId: o.regionId,
+          fromSketchArea: !!o.regionRect,
+        })),
+      });
     } finally {
       setReading(false);
     }
@@ -170,7 +198,7 @@ export function SimPanel() {
     let objs = objectives;
     let guessed = false;
     if (!objs.length) {
-      useSceneStore.getState().logEvent("unparsed", { text: t, via, reason });
+      useSceneStore.getState().logEvent("unparsed", { what: "not-understood", text: t, via, reason });
       // NEVER A DEAD END. Falling back to the task's own goals is a defensible
       // reading of "adjust it" or "something better", and strictly better than a
       // shrug for everything else — a participant who gets nothing back stops

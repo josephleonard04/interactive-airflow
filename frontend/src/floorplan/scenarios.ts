@@ -100,6 +100,15 @@ export interface ScenarioTools {
    *  worth setting where the glazing's position is part of the question the
    *  task asks — see FindOptions.moveOpenings. */
   movableOpenings?: boolean;
+  /** Item types that may only ever stand in ONE named room, as type -> roomId.
+   *
+   *  The winter task is what needs it. Its whole question is how you get heat
+   *  from the room that makes it to the far room that needs it, and carrying
+   *  the heater into the bedroom does not answer that question — it deletes it,
+   *  and it is not how anybody lives with a single heater in a living room. The
+   *  SEARCH has always known this (ROOM_BOUND_DEVICES), but the participant
+   *  could still drag it next door and the tool said nothing. */
+  confineToRoom?: Record<string, string>;
   /** Hide the on/off + low/medium/high control. Use when the task is about
    *  WHERE a device goes: an exposed dial invites "turn it up" as a substitute
    *  for placement, and turning it up is usually the wrong lesson. */
@@ -461,11 +470,11 @@ function buildWinter(): FloorPlan {
  * where a portable fan stands and which way it points. The extract vent over
  * the kitchen runs the whole time and is not the participant's to touch.
  *
- * The tension the task is built on: a hot night wants moving air over the bed,
- * and the cheapest way to get it is to stand the fan by the kitchen and blow
- * across the room — which walks the smell straight onto the pillow. Air has to
- * arrive at the bed from the window side and leave past the kitchen into the
- * vent, which is a different arrangement from the obvious one.
+ * The tension the task is built on: the cheapest way to move air over the bed
+ * is to stand the fan by the kitchen and blow across the room — which walks the
+ * smell straight onto the pillow. Air has to arrive at the bed from the window
+ * side and leave past the kitchen into the vent, which is a different
+ * arrangement from the obvious one.
  */
 function buildStudio(): FloorPlan {
   // 6.4 × 4.8 — the same 4:3 proportions, scaled down to a studio someone would
@@ -510,14 +519,12 @@ function buildStudio(): FloorPlan {
         against(gen, studio, c(studio), "south", 0.78, "return", VENT_SIZE, {
           category: "hvac", mount: "wall", y: ventMountY(H), flow: 0.06, on: true,
         }),
-        // The flat's air conditioner, high on the right-hand wall down at the
-        // sleeping end — and OFF, which the brief explains. It is here because a
-        // rented studio has one, and because the first thing anyone reaches for
-        // on a hot night is the AC: the task is what you do when that is not an
-        // option. Not movable, not aimable, no power control.
-        against(gen, studio, c(studio), "east", 0.75, "ac", [0.85, 0.32, 0.22], {
-          category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25, on: false,
-        }),
+        // NO AIR CONDITIONER. There used to be one here, switched off, with the
+        // brief explaining that it was broken and the landlord could not come
+        // until next week — scaffolding for a task that was once about heat as
+        // well as smell. This task is about the bin. An appliance on the wall
+        // that the participant cannot use and the briefing no longer mentions
+        // is a question with no answer, so it is gone.
         // The fan, standing beside the closet in the corner behind the bed —
         // where a floor fan actually lives when it is not in use, and about as
         // far from both the bin and the windows as this room allows.
@@ -807,7 +814,20 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "and this task is about where the heat goes rather than how much of it you throw " +
       "away. The heater and the fan both run on medium and cannot be turned up. The " +
       "weather outside is fixed.",
-    tools: { movable: ["heater", "fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
+    tools: {
+      movable: ["heater", "fan"],
+      aimable: ["fan"],
+      addable: [],
+      walls: false,
+      openings: true,
+      editOpeningSet: false,
+      resize: false,
+      lockPower: true,
+      // The heater lives in the living room. See ScenarioTools.confineToRoom —
+      // the fan goes anywhere, because carrying warm air next door is exactly
+      // what a fan is for and where it stands is the participant's decision.
+      confineToRoom: { heater: "living" },
+    },
     // Bands, not floors. Living rooms sit in the ASHRAE 55 winter comfort zone
     // (~20–24 °C); a bedroom is conventionally kept cooler, so it takes the WHO
     // healthy-home minimum of 18 °C as its floor and shares the 24 °C ceiling.
@@ -882,18 +902,16 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
   },
   summer: {
     id: "summer",
-    title: "Studio · Hot night, kitchen smell · Rented",
+    title: "Studio · Kitchen smell · Rented",
     outdoorTemp: 31,
     brief:
-      "It's hot, and the food waste in the kitchen bin has started to smell. " +
-      "The bed and the kitchen share one room, and you have to sleep in there " +
-      "tonight. The air conditioner is broken and the landlord can't come until " +
-      "next week. Keep the smell away from the bed.",
+      "The food waste in the kitchen bin has started to smell. The bed and the kitchen share " +
+      "one room, and you have to sleep in there tonight. There is a fan standing by the closet, " +
+      "and two windows you can open. Keep the smell away from the bed.",
     situation:
-      "It's a hot night, and the food waste in the kitchen bin has started to smell. " +
-      "The bed and the kitchen share one room, and you have to sleep in there tonight. " +
-      "The air conditioner is broken and the landlord can't come until next week. " +
-      "There is a fan standing by the closet, and two windows you can open.",
+      "The food waste in the kitchen bin has started to smell, and the bed and the kitchen share " +
+      "one room. You have to sleep in there tonight. There is a fan standing by the closet, and " +
+      "two windows you can open.",
     goal:
       "Keep the smell away from the bed while you sleep. Keep changing things until you are " +
       "happy with the result, then press Submit.",
@@ -903,19 +921,18 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     youCannotChange:
       "You are renting, so nothing about the studio itself moves: the windows, the door and the " +
       "kitchen stay where they are. The kitchen's extract vent runs all night and cannot be " +
-      "switched off, the air conditioner is broken, the fan runs on medium and cannot be turned " +
-      "up, and the bin has to stay where it is. The weather outside is fixed.",
-    // The fan now stands in the room, so the palette is empty — see buildStudio.
+      "switched off, the fan runs on medium and cannot be turned up, and the bin has to stay " +
+      "where it is. The weather outside is fixed.",
     tools: { movable: ["fan"], aimable: ["fan"], addable: [], walls: false, openings: true, editOpeningSet: false, resize: false, lockPower: true },
-    // Two views, and only two: where the air goes, and where the smell is. A
-    // temperature tab on a task whose AC is broken is a lever that isn't there.
+    // Two views, and only two: where the air goes, and where the smell is.
+    // There is no temperature goal here and nothing in the room to change one
+    // with, so a Temp tab would be a lever that isn't there.
     views: ["airflow", "contamination"],
-    // TWO GOALS THAT PULL APART. A hot night wants air moving over the bed, and
-    // the obvious way to get it — stand the fan in the middle and sweep — walks
-    // the bin's smell across the pillow on the way. The pair can only be
-    // satisfied by air that arrives at the bed from the window and leaves past
-    // the kitchen into the extract, which is not the arrangement anyone reaches
-    // for first.
+    // ONE GOAL, AND A TRAP INSIDE IT. The obvious way to sweep a smell off a
+    // bed — stand the fan in the middle and let it oscillate — walks the bin's
+    // smell across the pillow on the way. It is only satisfied by air that
+    // arrives at the bed from the window and leaves past the kitchen into the
+    // extract, which is not the arrangement anyone reaches for first.
     //
     // Both are measured over the BED's footprint, not the room: this is a
     // single open room, so a room mean cannot tell the sleeping end from the
@@ -1300,4 +1317,23 @@ export function canMove(tools: ScenarioTools, type: string): boolean {
  *  AC). Outside a scenario (movable empty) everything is aimable. */
 export function canAim(tools: ScenarioTools, type: string): boolean {
   return canMove(tools, type) || tools.aimable.includes(type);
+}
+
+/** Whether the HEADING of a wall-mounted item is the participant's to set.
+ *
+ *  A TELEVISION DOES NOT SWIVEL, AND NEITHER DOES A GRILLE. Wall items were
+ *  rotatable like any other object in the free-play home, so the example layout
+ *  let you turn a television 40° off the plaster and leave it hanging in the
+ *  air — the drag snaps them flush, and then the dial and the R key took them
+ *  straight back off again. Which way a bracket faces is decided by the wall it
+ *  is screwed to, so the heading is not a control: drag it to another wall and
+ *  it re-faces itself.
+ *
+ *  The one exception is a device whose heading is its LOUVRE rather than its
+ *  casing, and only where a task has made that the question — the rented AC.
+ *  There `mountYaw` keeps the box flush while the vanes turn (see ItemMesh), so
+ *  aiming it never lifts it off the wall. */
+export function canTurn(tools: ScenarioTools, item: { type: string; mount?: string }): boolean {
+  if (item.mount !== "wall") return canAim(tools, item.type);
+  return tools.aimable.includes(item.type);
 }

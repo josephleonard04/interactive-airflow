@@ -10,7 +10,7 @@ import {
   rectContains,
 } from "../floorplan/geometry";
 import { generateEmpty, generateHome } from "../floorplan/home";
-import { FREE_TOOLS, SCENARIOS, type ScenarioId, type ScenarioTools } from "../floorplan/scenarios";
+import { FREE_TOOLS, SCENARIOS, canTurn, type ScenarioId, type ScenarioTools } from "../floorplan/scenarios";
 import { autoNameRooms, recomputeRooms } from "../floorplan/detectRooms";
 import {
   checkBackendHealth,
@@ -21,6 +21,7 @@ import {
 import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
+import { snapshotLayout, type LayoutSnapshot } from "./logSnapshot";
 import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
 import { isAdjustment, parseGoal, type Objective } from "../intent/objectives";
 import type {
@@ -38,6 +39,21 @@ import type {
 
 // Single source of truth: the current home, selection, and edit mode. BOTH the
 // mouse (select + drag + draw) and the programmatic api mutate this store.
+
+/** What a kind of event is, when the caller does not say. `edit` is the one
+ *  that matters: everything that reaches it came from a hand on the mouse. */
+const DEFAULT_METHOD: Record<LogEvent["kind"], LogMethod> = {
+  edit: "manual",
+  goal: "text",
+  unparsed: "text",
+  check: "text",
+  sketch: "sketch",
+  review: "solution",
+  preset: "system",
+  engine: "system",
+  goals: "system",
+  submit: "system",
+};
 
 const DEFAULT_SIZE: HomeSize = { length: 9, width: 7, height: 2.7 };
 
@@ -200,7 +216,7 @@ export interface SceneState {
   /** Study session log (§6.5 of the study protocol): every utterance, parse,
    *  review decision and plan change, timestamped, downloadable as JSON. */
   sessionLog: LogEvent[];
-  logEvent: (kind: LogEvent["kind"], data: Record<string, unknown>) => void;
+  logEvent: (kind: LogEvent["kind"], data: Record<string, unknown>, method?: LogMethod) => void;
   /** When this task was opened — every event carries its offset from here, so a
    *  session reads as a timeline rather than a pile of wall-clock stamps. */
   sessionStart: number;
@@ -219,21 +235,52 @@ export interface SceneState {
   cancelChange: () => void;
 }
 
+/** HOW the participant expressed this step — the study's primary independent
+ *  variable, and the one thing the log never recorded. RQ2 asks how people
+ *  combine typing, drawing and direct manipulation; answering it from a log
+ *  that does not label which is which means inferring the modality from the
+ *  event kind, which conflates "typed a goal" with "accepted what the search
+ *  proposed for a goal typed four steps ago". */
+export type LogMethod =
+  /** Dragged, rotated, switched or toggled something by hand. */
+  | "manual"
+  /** Typed a sentence into the goal box. */
+  | "text"
+  /** Drew on the mini-map. */
+  | "sketch"
+  /** Accepted or rejected a layout the search proposed. */
+  | "solution"
+  /** The app, not the participant: view changes, scoring, submission. */
+  | "system";
+
 export interface LogEvent {
   t: number; // ms since epoch
   /** ms since the task was opened — the timeline axis. */
   at: number;
+  /** Monotonic index. Two events can land on the same millisecond; this keeps
+   *  their order recoverable after the JSON has been through anything that
+   *  sorts. */
+  seq: number;
   // `unparsed` is a first-class event, not a missing one. A sentence the tool
   // could not read is the most useful thing a language study collects — it is
   // the coverage gap, verbatim — and it used to leave no trace at all because
   // the search simply returned false.
   kind: "goal" | "unparsed" | "check" | "preset" | "review" | "sketch" | "edit" | "engine" | "goals" | "submit";
+  method: LogMethod;
   data: Record<string, unknown>;
+  /** The whole arrangement immediately AFTER this event — see snapshotLayout.
+   *  Present on anything that changed the home, so any step can be scored or
+   *  re-simulated without replaying the ones before it. */
+  layout?: LayoutSnapshot;
 }
 
 /** What a finished session hands back: who did what, in order, and whether the
  *  task was actually met at the end. */
 export interface SessionReport {
+  /** Bump when the shape of this file changes, so a mixed folder of sessions
+   *  can still be parsed — the study runs over weeks and the schema has moved
+   *  once already. */
+  schema: number;
   scenario: string | null;
   title: string | null;
   startedAt: string;
@@ -242,6 +289,19 @@ export interface SessionReport {
   goals: Array<{ label: string; met: boolean; detail: string }>;
   allGoalsMet: boolean;
   counts: Record<string, number>;
+  /** How many steps came from each modality — the headline RQ2 number, so it
+   *  does not have to be recomputed from the event list every time. */
+  methodCounts: Record<string, number>;
+  /** The task as it was set: weather, the goals and their thresholds, and the
+   *  home as delivered. Everything needed to interpret the events without
+   *  having the app to hand. */
+  task: {
+    outdoorTemp: number;
+    goals: unknown[];
+    startingLayout: LayoutSnapshot | null;
+  };
+  /** The home as submitted. */
+  finalLayout: LayoutSnapshot;
   events: LogEvent[];
 }
 
@@ -344,7 +404,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   airflowStyle: "lines",
   sketchRegion: null,
   setSketchRegion: (sketchRegion) => {
-    get().logEvent("sketch", { region: sketchRegion });
+    get().logEvent("sketch", { what: "region", region: sketchRegion });
     set({ sketchRegion });
   },
 
@@ -354,7 +414,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   sketchTool: "warm",
   setSketchTool: (sketchTool) => set({ sketchTool }),
   addSketchMark: (m) => {
-    get().logEvent("sketch", { added: m });
+    get().logEvent("sketch", {
+      what: "draw",
+      tool: m.kind === "arrow" ? "arrow" : m.intent,
+      mark: m,
+      // Everything on the pad, not just the new stroke — a drawing is read as a
+      // whole and the search reads it as a whole.
+      allMarks: get().sketchMarks,
+    });
     set((s) => ({
       sketchMarks: [...s.sketchMarks, m],
       // The 3D view highlights one area; the newest one is the one being talked
@@ -381,19 +448,47 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   sessionLog: [],
   sessionStart: Date.now(),
   submitted: null,
-  logEvent: (kind, data) =>
+  logEvent: (kind, data, method) =>
     set((s) => ({
-      sessionLog: [...s.sessionLog, { t: Date.now(), at: Date.now() - s.sessionStart, kind, data }],
+      sessionLog: [
+        ...s.sessionLog,
+        {
+          t: Date.now(),
+          at: Date.now() - s.sessionStart,
+          seq: s.sessionLog.length,
+          kind,
+          method: method ?? DEFAULT_METHOD[kind],
+          data,
+          // Snapshot everything that can move. Cheap, and it is what makes each
+          // row stand on its own — see logSnapshot. Skipped for the pure
+          // bookkeeping kinds, where the home did not change and a copy would
+          // just be noise.
+          ...(kind === "goals" || kind === "engine" ? {} : { layout: snapshotLayout(s.plan) }),
+        },
+      ],
     })),
 
   logGoalStatus: (rows) => {
     const s = get();
-    // Only when it CHANGES. The checklist re-scores after every edit, and a line
-    // per edit saying "still 1 of 2" buries the moment it became 2 of 2.
+    // Only when it CHANGES — but on the MEASURED VALUE, not just the tick.
+    //
+    // It used to key on the met flags alone, which meant a participant could
+    // spend ten minutes moving a fan and the log would show one line, because
+    // the box stayed unticked the whole time. The reading is the interesting
+    // part: it says whether they were getting warmer or going in circles, and
+    // it is the only per-step record of what the simulator told them.
     const last = [...s.sessionLog].reverse().find((e) => e.kind === "goals");
-    const key = rows.map((r) => `${r.label}=${r.met}`).join("|");
+    const key = rows.map((r) => `${r.label}=${r.met}:${r.detail}`).join("|");
     if (last && last.data.key === key) return;
-    s.logEvent("goals", { key, met: rows.filter((r) => r.met).length, of: rows.length, rows });
+    s.logEvent("goals", {
+      key,
+      met: rows.filter((r) => r.met).length,
+      of: rows.length,
+      rows,
+      // What the participant was looking at when this reading was taken.
+      view: s.simMode,
+      layout: snapshotLayout(s.plan),
+    });
   },
 
   submitSession: () => {
@@ -412,7 +507,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       const what = e.kind === "edit" ? `edit:${String(e.data.what)}` : e.kind;
       counts[what] = (counts[what] ?? 0) + 1;
     }
+    const methodCounts: Record<string, number> = {};
+    for (const e of s.sessionLog) methodCounts[e.method] = (methodCounts[e.method] ?? 0) + 1;
     const report: SessionReport = {
+      schema: 2,
       scenario: s.scenarioId,
       title: sc?.title ?? null,
       startedAt: new Date(s.sessionStart).toISOString(),
@@ -421,9 +519,24 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       goals,
       allGoalsMet: goals.length > 0 && goals.every((g) => g.met),
       counts,
+      methodCounts,
+      task: {
+        outdoorTemp: s.outdoorTemp,
+        goals: (sc?.goals ?? []) as unknown[],
+        startingLayout: (s.sessionLog.find((e) => e.kind === "preset")?.layout as LayoutSnapshot) ?? null,
+      },
+      finalLayout: snapshotLayout(s.plan),
       events: [
         ...s.sessionLog,
-        { t: now, at: now - s.sessionStart, kind: "submit" as const, data: { goals, allGoalsMet: goals.every((g) => g.met) } },
+        {
+          t: now,
+          at: now - s.sessionStart,
+          seq: s.sessionLog.length,
+          kind: "submit" as const,
+          method: "system" as const,
+          data: { goals, allGoalsMet: goals.every((g) => g.met) },
+          layout: snapshotLayout(s.plan),
+        },
       ],
     };
     set({ submitted: report, sessionLog: report.events });
@@ -507,7 +620,6 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     if (!sol) return;
     const before = s.plan;
     const lines = [...diffPlan(before, sol.plan), ...sol.detail];
-    s.logEvent("goal", { text: s.solutionGoal, chosen: sol.id, option: index, lines });
     set({
       ...snapshot(s),
       plan: sol.plan,
@@ -519,6 +631,23 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       solutionGoal: null,
       solutionTargets: [],
     });
+    // WHICH card, out of how many, and where in the ranking — the accept/reject
+    // question RQ1 turns on. Logged after applying, so the attached layout is
+    // the one the participant now has.
+    get().logEvent(
+      "goal",
+      {
+        what: "accept-suggestion",
+        text: s.solutionGoal,
+        chosen: sol.id,
+        label: sol.label,
+        option: index,
+        outOf: s.solutionOptions.length,
+        lines,
+        before: snapshotLayout(before),
+      },
+      "solution",
+    );
   },
 
   applyBestSolution: (goalText) => {
@@ -692,14 +821,37 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // Remembered for the session, not for ever: a fresh scenario starts
         // clean (see startScenario), because there the layout genuinely is new.
         const offeredLayouts = [...s.offeredLayouts, ...ordered.map((o) => layoutKey(o.plan))].slice(-40);
-        get().logEvent("goal", {
-          text: goalText,
-          targets: targetIds,
-          found: found.length,
-          withheld: found.length - ordered.length,
-          repeated: ordered.length - fresh.length,
-          offered: ordered.map((o) => ({ id: o.id, label: o.label, score: o.score })),
-        });
+        // EVERYTHING THE SEARCH WAS ASKED AND EVERYTHING IT ANSWERED. What the
+        // sentence became, what it was allowed to touch, how many layouts were
+        // found, how many were withheld for finishing the task, and — for each
+        // card actually shown — the full arrangement and its predicted numbers.
+        // Without the arrangements, a log of "offered 3 options" cannot say
+        // whether the one the participant took was the one the search ranked
+        // first, or what the other two would have done.
+        get().logEvent(
+          "goal",
+          {
+            what: refineOnly ? "adjust-previous" : "search",
+            text: goalText,
+            objective: goal,
+            targets: targetIds,
+            region: regionName,
+            calmRequest: calm,
+            fromSketch: flow ? { from: flow.from, to: flow.to } : null,
+            found: found.length,
+            withheld: found.length - ordered.length,
+            repeated: ordered.length - fresh.length,
+            offered: ordered.map((o) => ({
+              id: o.id,
+              label: o.label,
+              detail: o.detail,
+              score: round2(o.score),
+              readout: o.readout,
+              layout: snapshotLayout(o.plan),
+            })),
+          },
+          flow ? "sketch" : "text",
+        );
         set({
           offeredLayouts,
           lastSearch: { goal, targetIds, text: goalText },
@@ -750,8 +902,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   startScenario: (id) => {
     const sc = SCENARIOS[id];
+    const fresh = sc.build();
     set({
-      plan: sc.build(),
+      plan: fresh,
       scenarioId: id,
       tools: sc.tools,
       outdoorTemp: sc.outdoorTemp, // fixed by the task; the UI locks the control
@@ -781,7 +934,19 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // A task is a session: the clock and the log both start here.
       sessionStart: Date.now(),
       submitted: null,
-      sessionLog: [{ t: Date.now(), at: 0, kind: "preset", data: { scenario: id, title: sc.title } }],
+      // The opening row is the home AS DELIVERED — the baseline every later
+      // snapshot is a change from.
+      sessionLog: [
+        {
+          t: Date.now(),
+          at: 0,
+          seq: 0,
+          kind: "preset",
+          method: "system",
+          data: { scenario: id, title: sc.title, outdoorTemp: sc.outdoorTemp, goals: sc.goals ?? [] },
+          layout: snapshotLayout(fresh),
+        },
+      ],
       past: [],
       future: [],
     });
@@ -1041,22 +1206,36 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   updateItem: (id, patch) => {
     const it = get().plan.items.find((o) => o.id === id);
-    // The device dials and the aim: exactly the changes a participant makes
-    // without dragging anything, and invisible in a before/after of positions.
-    get().logEvent("edit", { what: "adjust", item: it?.type ?? id, ...patch });
+    const before = it ? { rotationY: it.rotationY, tilt: it.tilt, on: it.on, power: it.power, oscillate: it.oscillate } : null;
     set((s) => ({
       ...snapshot(s),
       plan: mapItems(s.plan, (o) => (o.id === id ? { ...o, ...patch } : o)),
     }));
+    // The device dials and the aim: exactly the changes a participant makes
+    // without dragging anything, and invisible in a before/after of positions.
+    // Logged AFTER the change, so the layout snapshot on the event is the state
+    // the change produced rather than the one it replaced.
+    get().logEvent("edit", { what: "adjust", item: it?.type ?? id, from: before, to: patch });
   },
 
   rotateItem: (id, deltaRad) => {
     const it = get().plan.items.find((o) => o.id === id);
-    get().logEvent("edit", { what: "rotate", item: it?.type ?? id, by: round2(deltaRad) });
+    // A wall bracket does not swivel — see canTurn. This is the R key and the
+    // "90°" button; the drag already re-faces a wall item to whichever wall it
+    // lands on, and these two were the way back off it.
+    if (it && !canTurn(get().tools, it)) return;
     set((s) => ({
       ...snapshot(s),
       plan: mapItems(s.plan, (o) => (o.id === id ? { ...o, rotationY: o.rotationY + deltaRad } : o)),
     }));
+    const now = get().plan.items.find((o) => o.id === id);
+    get().logEvent("edit", {
+      what: "rotate",
+      item: it?.type ?? id,
+      by: round2(deltaRad),
+      from: it ? round2(it.rotationY) : null,
+      to: now ? round2(now.rotationY) : null,
+    });
   },
 
   addItem: (type, position) => {
@@ -1099,13 +1278,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       flow: spec.flow,
       movable: true,
     };
-    get().logEvent("edit", { what: "add", item: type, room: item.roomId });
     set((s) => ({
       ...snapshot(s),
       plan: autoNameRooms({ ...s.plan, items: [...s.plan.items, item] }),
       selectedId: id,
       selectedWallId: null,
     }));
+    get().logEvent("edit", { what: "add", item: type, room: item.roomId });
     return id;
   },
 
@@ -1120,12 +1299,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   removeItem: (id) => {
     const it = get().plan.items.find((o) => o.id === id);
-    get().logEvent("edit", { what: "remove", item: it?.type ?? id });
+    const room = it?.roomId;
     set((s) => ({
       ...snapshot(s),
       plan: { ...s.plan, items: s.plan.items.filter((o) => o.id !== id) },
       selectedId: s.selectedId === id ? null : s.selectedId,
     }));
+    get().logEvent("edit", { what: "remove", item: it?.type ?? id, room });
   },
 
   addWall: (a, b) => {
@@ -1266,11 +1446,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   toggleOpening: (id) => {
     const o0 = [...get().plan.doors, ...get().plan.windows].find((o) => o.id === id);
-    get().logEvent("edit", {
-      what: o0?.open ? "close" : "open",
-      opening: o0?.kind ?? "opening",
-      between: o0?.rooms,
-    });
+    const after = () =>
+      get().logEvent("edit", {
+        what: o0?.open ? "close" : "open",
+        opening: o0?.kind ?? "opening",
+        id,
+        between: o0?.rooms,
+      });
     set((s) => {
       const flip = (o: Opening) => (o.id === id ? { ...o, open: !o.open } : o);
       return {
@@ -1283,6 +1465,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         },
       };
     });
+    after();
   },
 
   removeSelected: () => {
