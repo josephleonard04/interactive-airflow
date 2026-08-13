@@ -222,6 +222,10 @@ function wallSideName(rect: Rect, pos: Vec3): string {
   return fx < 0.5 ? "against the left-hand wall" : "against the right-hand wall";
 }
 
+/** How hard the ACTIVE TASK's own goals pull on a search that was asked for
+ *  something else. A tiebreak, not a veto — see scoreOf. */
+const TASK_GUARD = 3;
+
 /** Air speed over a target room above which people notice a draught (m/s). */
 const DRAFT_CAP = 0.35;
 const DRAFT_PENALTY = 8;
@@ -501,11 +505,21 @@ function scoreOf(
   // useful before the task is finished. The proxy stays as the tiebreak, at a
   // weight small enough that it can only order layouts the task cannot tell
   // apart.
-  if (m.taskShortfall.length) {
-    const total = m.taskShortfall.reduce((a, b) => a + b, 0);
-    return -100 * total + 0.001 * proxyScore(goal, m, targetTemps, targetIds, drying);
-  }
-  return proxyScore(goal, m, targetTemps, targetIds, drying);
+  const base = proxyScore(goal, m, targetTemps, targetIds, drying);
+  if (!m.taskShortfall.length) return base;
+  // THE SENTENCE LEADS; THE TASK GUARDS. These were the wrong way round: the
+  // task's own tick-boxes dominated at 100x, so "cool the living room" and
+  // "cool the bedroom" produced the same answer — the search optimised the
+  // scenario rather than the request, and the participant's words changed
+  // nothing. That is the opposite of what the study is for.
+  //
+  // Now the request decides (`base` carries the goal word AND the rooms it was
+  // grounded to), and the task's lines are a penalty on top: enough that among
+  // layouts which serve the request equally the search prefers one that does
+  // not wreck a goal, never enough to answer a different question from the one
+  // asked. Off-scenario there are no task lines and this term is absent.
+  const total = m.taskShortfall.reduce((a, b) => a + b, 0);
+  return base - TASK_GUARD * total;
 }
 
 /** The original goal-word scoring: what to rank by when there is no task. */
@@ -1087,7 +1101,8 @@ function refine(
         // the polish could move an air conditioner's heading and never its
         // angle, which is the one that gets the jet off the bed.
         for (const dt of [turn, -turn]) moves.push({ dx: 0, dz: 0, dr: 0, dtilt: dt });
-        for (const dr of [turn, -turn]) {
+        // …and for a wall unit that is the ONLY half: the casing does not turn.
+        for (const dr of it.mount === "wall" ? [] : [turn, -turn]) {
           // …and the polish stays inside that arc as well, or it walks the aim
           // round into the wall one nudge at a time.
           if (here.mountYaw !== undefined) {
@@ -1292,7 +1307,12 @@ export function findSolutions(
   // 180 was the quality peak when a cooling task had two strategies; allowing the
   // fan to be left OFF doubled that to four, which halved what each one could
   // spend on placement. 260 restores it.
-  const budget = { left: opts.screenBudget ?? 260 };
+  // 260 covered the three tasks whose devices have wide candidate lists and
+  // starved the bathroom, whose single movable grille has a narrow one: it
+  // explored 35 arrangements where the others explored ~190, so asking twice
+  // there returned the same handful. The budget is spent per strategy, so what
+  // the bathroom needed was simply more of it.
+  const budget = { left: opts.screenBudget ?? 380 };
   const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds, movable: opts.movableDevices });
 
   // Split the screening budget EVENLY across strategies. A single shared
@@ -1315,18 +1335,37 @@ export function findSolutions(
     // be relative to it.
     let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones).score };
     if (opts.moveOpenings) {
-      for (const win of placed.windows) {
-        if (win.fixed || win.locked) continue;
-        for (const spot of windowPlacements(placed, win)) {
-          if (spot.a[0] === win.a[0] && spot.a[1] === win.a[1]) continue;
-          const trial = withOpeningMoved(best.plan, { ...spot, open: win.open });
-          const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones);
-          if (score > best.score) {
-            best = {
-              plan: trial,
-              changes: [...changes, `Window → ${windowSideName(trial, spot)}`],
-              score,
-            };
+      // WHERE THE GLAZING GOES AND WHERE THE GRILLE GOES ARE ONE QUESTION, not
+      // two in sequence. This used to sweep window positions against the single
+      // best device placement, so the pairs it could reach were (best vent x
+      // every window) — and on the bathroom, whose only movable thing IS the
+      // vent, that capped the whole search at ~54 distinct arrangements where
+      // the other three tasks reach 250. Sweeping the windows against the top
+      // few vent spots as well explores the combinations, which is what the
+      // task actually asks about: the two are too close together or they are
+      // not, and that is a fact about the PAIR.
+      const bases = [best.plan, ...primaryAlts.slice(1, 5).map((alt) => ({
+        ...placed,
+        items: placed.items.map((it) =>
+          it.type === primaryFor(goal, plan, opts.allowedDevices) && it.on !== false
+            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId }
+            : it,
+        ),
+      }))];
+      for (const base of bases) {
+        for (const win of base.windows) {
+          if (win.fixed || win.locked) continue;
+          for (const spot of windowPlacements(base, win)) {
+            if (spot.a[0] === win.a[0] && spot.a[1] === win.a[1]) continue;
+            const trial = withOpeningMoved(base, { ...spot, open: win.open });
+            const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones);
+            if (score > best.score) {
+              best = {
+                plan: trial,
+                changes: [...changes, `Window → ${windowSideName(trial, spot)}`],
+                score,
+              };
+            }
           }
         }
       }

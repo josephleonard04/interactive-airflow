@@ -21,6 +21,7 @@ import {
 import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
+import { doorBlocked, findFreeSpot, footHalf, wallBlocked } from "../floorplan/collision";
 import { snapshotLayout, type LayoutSnapshot } from "./logSnapshot";
 import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
 import { isAdjustment, parseGoal, type Objective } from "../intent/objectives";
@@ -1224,6 +1225,54 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     // "90°" button; the drag already re-faces a wall item to whichever wall it
     // lands on, and these two were the way back off it.
     if (it && !canTurn(get().tools, it)) return;
+    // A QUARTER-TURN CHANGES THE FOOTPRINT. A heater standing along a wall is
+    // 0.8 m by 0.18; turned, it is 0.18 by 0.8, and the extra 0.3 m has to go
+    // somewhere — which was straight through the plaster, because only the DRAG
+    // checked for that and the R key did not. Try to slide it clear; if there is
+    // nowhere for it to go, the turn simply does not happen.
+    if (it && it.mount === "floor") {
+      const plan = get().plan;
+      const room = plan.rooms.find((r) => r.id === it.roomId);
+      if (room) {
+        const turned = { ...it, rotationY: it.rotationY + deltaRad };
+        const [hx, hz] = footHalf(turned.size, turned.rotationY);
+        const walls = plan.walls;
+        const doors = plan.doors;
+        const others = plan.items.filter((o) => o.id !== it.id);
+        const free = (x: number, z: number) =>
+          !wallBlocked(x, z, hx, hz, walls) &&
+          !doorBlocked(x, z, hx, hz, doors) &&
+          !others.some((o) => {
+            if (o.mount !== "floor") return false;
+            const [ox, oz] = footHalf(o.size, o.rotationY);
+            return Math.abs(x - o.position[0]) < hx + ox - 0.02 && Math.abs(z - o.position[2]) < hz + oz - 0.02;
+          });
+        let px = it.position[0];
+        let pz = it.position[2];
+        if (!free(px, pz)) {
+          const spot = findFreeSpot(room.rect, { size: turned.size, rotationY: turned.rotationY, mount: "floor" }, others, [px, it.position[1], pz], "area", 0.05, [...doors, ...plan.windows], true);
+          if (!spot || !free(spot[0], spot[2])) return;
+          px = spot[0];
+          pz = spot[2];
+        }
+        set((s) => ({
+          ...snapshot(s),
+          plan: mapItems(s.plan, (o) =>
+            o.id === id ? { ...o, rotationY: o.rotationY + deltaRad, position: [px, o.position[1], pz] as Vec3 } : o,
+          ),
+        }));
+        const now0 = get().plan.items.find((o) => o.id === id);
+        get().logEvent("edit", {
+          what: "rotate",
+          item: it.type,
+          by: round2(deltaRad),
+          from: round2(it.rotationY),
+          to: now0 ? round2(now0.rotationY) : null,
+          nudged: px !== it.position[0] || pz !== it.position[2],
+        });
+        return;
+      }
+    }
     set((s) => ({
       ...snapshot(s),
       plan: mapItems(s.plan, (o) => (o.id === id ? { ...o, rotationY: o.rotationY + deltaRad } : o)),

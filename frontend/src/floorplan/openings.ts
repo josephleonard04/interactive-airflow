@@ -24,7 +24,11 @@ import type { FloorPlan, Opening } from "./types";
 
 /** Fractions along a wall to try. Five is enough to find the good end of a wall
  *  without turning one search into a sweep of the whole perimeter. */
-const FRACS = [0.18, 0.34, 0.5, 0.66, 0.82];
+// Seven positions per wall rather than five. Where the glazing sits relative to
+// the extract is the bathroom task's whole question, and at five the search had
+// 20 placements to choose from across four walls — coarse enough that the best
+// spot on a wall was often simply not in the list.
+const FRACS = [0.14, 0.26, 0.38, 0.5, 0.62, 0.74, 0.86];
 /** Clearance from the corners. */
 const M = 0.12;
 /** Anything at least this tall blocks glazing behind it. */

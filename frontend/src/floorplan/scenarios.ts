@@ -1334,6 +1334,14 @@ export function canAim(tools: ScenarioTools, type: string): boolean {
  *  There `mountYaw` keeps the box flush while the vanes turn (see ItemMesh), so
  *  aiming it never lifts it off the wall. */
 export function canTurn(tools: ScenarioTools, item: { type: string; mount?: string }): boolean {
-  if (item.mount !== "wall") return canAim(tools, item.type);
-  return tools.aimable.includes(item.type);
+  // NOTHING ON A WALL TURNS SIDEWAYS. Not the television, not the grille, and
+  // not the air conditioner: a split unit is screwed to the plaster and the
+  // only aim it has is its louvre, up and down. The horizontal dial on a
+  // wall-mounted item was offering a movement the hardware does not have, and
+  // the search was proposing it — so a participant could be shown "turn the AC
+  // 35° left", find no way to do it, and be right that there isn't one.
+  //
+  // Vertical aim is a separate control and a separate question (see the tilt
+  // block in Panel.tsx, gated on canAim).
+  return item.mount !== "wall" && canAim(tools, item.type);
 }

@@ -1,4 +1,4 @@
-import type { FloorPlan, Opening, PlacedItem, Rect, RoomDef, Vec3 } from "./types";
+import type { FloorPlan, Opening, PlacedItem, Rect, RoomDef, Vec3, WallSeg } from "./types";
 
 // Object collision: two objects may not occupy the same space. We treat each
 // item as its rotation-aware x-z footprint. Only items at the SAME mount level
@@ -148,4 +148,48 @@ export function resolveOverlaps(items: PlacedItem[], rooms: RoomDef[], openings:
     out.push(moved);
   }
   return out;
+}
+
+
+// Shared with the editor's drag AND the store's rotate. They were private to
+// Editor.tsx, which meant the drag knew not to push furniture through a wall
+// and the R key did not — so a heater standing against a wall could be turned
+// 90° and end up half inside it.
+
+/** Does this footprint overlap any wall? */
+export function wallBlocked(gx: number, gz: number, fhx: number, fhz: number, walls: WallSeg[]): boolean {
+  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
+  const eps = 0.02;
+  for (const w of walls) {
+    const line = w.axis === "z" ? w.a[0] : w.a[1];
+    const lo = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
+    const hi = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
+    const t = w.thickness / 2;
+    const wx0 = w.axis === "z" ? line - t : lo;
+    const wx1 = w.axis === "z" ? line + t : hi;
+    const wz0 = w.axis === "z" ? lo : line - t;
+    const wz1 = w.axis === "z" ? hi : line + t;
+    if (ix1 > wx0 + eps && ix0 < wx1 - eps && iz1 > wz0 + eps && iz0 < wz1 - eps) return true;
+  }
+  return false;
+}
+
+/** Would this footprint block a doorway — the opening plus standing room on
+ *  both sides? Keeps furniture out of the way of a door. */
+export function doorBlocked(gx: number, gz: number, fhx: number, fhz: number, doors: Opening[]): boolean {
+  const clear = 0.45;
+  const m = 0.05;
+  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
+  for (const o of doors) {
+    const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
+    const line = vertical ? o.a[0] : o.a[1];
+    const s = vertical ? Math.min(o.a[1], o.b[1]) : Math.min(o.a[0], o.b[0]);
+    const e = vertical ? Math.max(o.a[1], o.b[1]) : Math.max(o.a[0], o.b[0]);
+    const rx0 = vertical ? line - clear : s - m;
+    const rx1 = vertical ? line + clear : e + m;
+    const rz0 = vertical ? s - m : line - clear;
+    const rz1 = vertical ? e + m : line + clear;
+    if (ix1 > rx0 && ix0 < rx1 && iz1 > rz0 && iz0 < rz1) return true;
+  }
+  return false;
 }

@@ -125,17 +125,18 @@ export function candidateSpots(
     // was not previously reachable.
     const y = ventMountY(wallHeight);
     const m = 0.09;
-    const cornerIn = 0.55;
-    // midpoints
-    mk(cx, y, z + m, 0, "x");
-    mk(cx, y, z + d - m, Math.PI, "x");
-    mk(x + m, y, cz, Math.PI / 2, "z");
-    mk(x + w - m, y, cz, -Math.PI / 2, "z");
-    // corners, sitting on the long wall a little in from each end
-    mk(x + cornerIn, y, z + m, 0, "x");
-    mk(x + w - cornerIn, y, z + m, 0, "x");
-    mk(x + cornerIn, y, z + d - m, Math.PI, "x");
-    mk(x + w - cornerIn, y, z + d - m, Math.PI, "x");
+    // FIVE POSITIONS ALONG EVERY WALL, not four midpoints and four corners.
+    // Eight spots was the smallest set that contained the bathroom's answer, and
+    // it showed: the whole search explored 35 arrangements where the other three
+    // tasks explore ~190, so a participant asking twice got the same handful
+    // back. Which METRE of a wall a grille sits on changes the drying time by
+    // tens of minutes here, and only the ends and the middle were ever tried.
+    for (const f of [0.1, 0.23, 0.37, 0.5, 0.63, 0.77, 0.9]) {
+      mk(x + w * f, y, z + m, 0, "x");
+      mk(x + w * f, y, z + d - m, Math.PI, "x");
+      mk(x + m, y, z + d * f, Math.PI / 2, "z");
+      mk(x + w - m, y, z + d * f, -Math.PI / 2, "z");
+    }
   } else if (type === "supply") {
     mk(cx, wallHeight - 0.1, cz, 0, "area");
     mk(x + w * 0.3, wallHeight - 0.1, z + d * 0.3, 0, "area");

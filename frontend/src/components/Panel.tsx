@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { CATALOG, PALETTE } from "../floorplan/catalog";
-import { SCENARIOS, canMove, canTurn } from "../floorplan/scenarios";
+import { SCENARIOS, canAim, canMove, canTurn } from "../floorplan/scenarios";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
@@ -299,7 +299,7 @@ export function Panel() {
                   </button>
                 </div>
               )}
-              {(selected.type === "ac" || selected.type === "fan") && (() => {
+              {(selected.type === "ac" || selected.type === "fan") && canAim(tools, selected.type) && (() => {
                 const deg = Math.round(((selected.tilt ?? 0) * 180) / Math.PI);
                 const setDeg = (d: number) =>
                   updateItem(selected.id, { tilt: (Math.max(-60, Math.min(60, d)) * Math.PI) / 180 });

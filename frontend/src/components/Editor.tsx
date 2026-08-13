@@ -4,8 +4,9 @@ import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { ventMountY } from "../floorplan/catalog";
 import { GRID, WALL_THICKNESS } from "../floorplan/geometry";
+import { doorBlocked, footHalf, wallBlocked } from "../floorplan/collision";
 import { useSceneStore } from "../scene/store";
-import type { Opening, Rect, Vec2, Vec3, WallSeg } from "../floorplan/types";
+import type { Rect, Vec2, Vec3 } from "../floorplan/types";
 import { FloorPlanView } from "./FloorPlanView";
 import { FlowField3D } from "./FlowField3D";
 import { ItemMesh } from "./ItemMesh";
@@ -38,49 +39,10 @@ function roomEdges(rect: Rect, px: number, pz: number): RoomEdge[] {
 }
 
 // Rotation-aware footprint half-extents (a 90°/270° rotation swaps w/d).
-function footHalf(size: Vec3, rotationY: number): [number, number] {
-  const swapped = Math.abs(Math.round(rotationY / (Math.PI / 2))) % 2 === 1;
-  return swapped ? [size[2] / 2, size[0] / 2] : [size[0] / 2, size[2] / 2];
-}
 
 // Would an item footprint centred at (gx,gz) overlap ANY wall (including walls
 // the user drew)? Used to stop furniture straddling a wall.
-function wallBlocked(gx: number, gz: number, fhx: number, fhz: number, walls: WallSeg[]): boolean {
-  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
-  const eps = 0.02;
-  for (const w of walls) {
-    const line = w.axis === "z" ? w.a[0] : w.a[1];
-    const lo = w.axis === "z" ? Math.min(w.a[1], w.b[1]) : Math.min(w.a[0], w.b[0]);
-    const hi = w.axis === "z" ? Math.max(w.a[1], w.b[1]) : Math.max(w.a[0], w.b[0]);
-    const t = w.thickness / 2;
-    const wx0 = w.axis === "z" ? line - t : lo;
-    const wx1 = w.axis === "z" ? line + t : hi;
-    const wz0 = w.axis === "z" ? lo : line - t;
-    const wz1 = w.axis === "z" ? hi : line + t;
-    if (ix1 > wx0 + eps && ix0 < wx1 - eps && iz1 > wz0 + eps && iz0 < wz1 - eps) return true;
-  }
-  return false;
-}
 
-// Would an item footprint block a doorway (the opening plus a clearance in front
-// of it on both sides)? Keeps furniture out of doorways.
-function doorBlocked(gx: number, gz: number, fhx: number, fhz: number, doors: Opening[]): boolean {
-  const clear = 0.45;
-  const m = 0.05;
-  const ix0 = gx - fhx, ix1 = gx + fhx, iz0 = gz - fhz, iz1 = gz + fhz;
-  for (const o of doors) {
-    const vertical = Math.abs(o.a[0] - o.b[0]) < 1e-3;
-    const line = vertical ? o.a[0] : o.a[1];
-    const s = vertical ? Math.min(o.a[1], o.b[1]) : Math.min(o.a[0], o.b[0]);
-    const e = vertical ? Math.max(o.a[1], o.b[1]) : Math.max(o.a[0], o.b[0]);
-    const rx0 = vertical ? line - clear : s - m;
-    const rx1 = vertical ? line + clear : e + m;
-    const rz0 = vertical ? s - m : line - clear;
-    const rz1 = vertical ? e + m : line + clear;
-    if (ix1 > rx0 && ix0 < rx1 && iz1 > rz0 && iz0 < rz1) return true;
-  }
-  return false;
-}
 
 // Drag-to-move with physical constraints:
 //  - floor items snap to the grid, stay inside ONE room (no straddling walls),
