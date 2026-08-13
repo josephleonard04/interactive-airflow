@@ -44,7 +44,6 @@ export function SimPanel() {
   const pendingChange = useSceneStore((s) => s.pendingChange);
   const recheckGoal = useRef<string | null>(null);
   const acceptChange = useSceneStore((s) => s.acceptChange);
-  const cancelChange = useSceneStore((s) => s.cancelChange);
   const sketchRegion = useSceneStore((s) => s.sketchRegion);
   const intentInput = useSceneStore((s) => s.intentInput);
   const setIntentInput = useSceneStore((s) => s.setIntentInput);
@@ -243,18 +242,25 @@ export function SimPanel() {
         </p>
       )}
 
+      {/* WHAT CHANGED, NOT WHETHER TO ACCEPT IT.
+          Choosing a card used to open a second gate — Accept / Modify / Cancel —
+          on a change the participant had already chosen by clicking "Use this".
+          Two of the three buttons did the same thing, and the third undid the
+          decision they had just made; all it added was a step between wanting a
+          layout and having it. The card is applied on the click now and this
+          says what it did, with Undo as the way back. */}
       {pendingChange && (
         <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, border: "1px solid var(--accent)", background: "var(--accent-soft)" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent-ink-soft)", marginBottom: 6 }}>
-            “{pendingChange.title}” — review changes
-          </div>
-          <ul style={{ margin: "0 0 10px", paddingLeft: 16, fontSize: 12, color: "var(--text)", lineHeight: 1.6 }}>
-            {pendingChange.lines.map((l, i) => <li key={i}>{l}</li>)}
-          </ul>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="primary" style={{ flex: 1 }} onClick={acceptChange}>Accept</button>
-            <button className="tool" style={{ flex: 1 }} onClick={acceptChange} title="Keep the changes and tweak them yourself">Modify</button>
-            <button className="tool" style={{ flex: 1 }} onClick={cancelChange} title="Undo this preset">Cancel</button>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent-ink-soft)", marginBottom: 6 }}>
+                Applied — “{pendingChange.title}”
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "var(--text)", lineHeight: 1.6 }}>
+                {pendingChange.lines.map((l, i) => <li key={i}>{l}</li>)}
+              </ul>
+            </div>
+            <button className="ghost" onClick={acceptChange} title="Dismiss this note">✕</button>
           </div>
         </div>
       )}

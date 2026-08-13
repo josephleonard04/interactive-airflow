@@ -239,6 +239,10 @@ function wallSideName(rect: Rect, pos: Vec3): string {
   return fx < 0.5 ? "against the left-hand wall" : "against the right-hand wall";
 }
 
+/** The vertical aims the search tries, matching the panel's own slider range
+ *  (±60°). Wall units are swept over all of these and nothing else. */
+const TILT_STEPS = [-0.7, -0.35, 0, 0.26, 0.52, 0.79, 1.05];
+
 /** How hard the ACTIVE TASK's own goals pull on a search that was asked for
  *  something else. A tiebreak, not a veto — see scoreOf. */
 const TASK_GUARD = 3;
@@ -734,15 +738,21 @@ function strategiesFor(
     // warm a room in winter reads as broken advice however the numbers land.
     // Interior doors are still searched: those move heat between rooms.
     const doorStates = ctx && doorsMustStayOpen(goal, ctx.plan, ctx.targetIds) ? [true] : [true, false];
-    // A FAN IS A THING YOU CAN ALSO NOT USE. Every strategy switched it on, so
-    // "leave the fan off" was not in the search space at all — and on a task
-    // where the conditioner alone already cools the place, adding a fan is a
-    // change for its own sake and the participant is entitled to be shown that
-    // doing nothing with it is an option. The device dial stays locked either
-    // way: `power` is the AC's, and lockPower pins it at medium.
+    // A FAN IS A THING YOU CAN ALSO NOT USE — but only where the participant can
+    // switch it back on.
+    //
+    // `lockPower` hides the whole power block, on/off included (see Panel), so a
+    // card that switches the fan off on a locked task hands back a home whose
+    // fan cannot be revived: the sweep toggle still moves, the fan still does
+    // nothing, and there is no control anywhere that explains why. That is what
+    // happened on the winter task — a typed goal returned "fan → off", and
+    // after applying it the fan was dead for the rest of the session.
+    //
+    // So the off-variant is offered exactly where the dial is available.
+    const fanStates = lockPower ? [true] : [true, false];
     for (const power of lockPower ? [2] : [2, 3]) {
       for (const doorsOpen of doorStates) {
-        for (const fanOn of [true, false]) {
+        for (const fanOn of fanStates) {
         const devices = only({
           [dev]: { on: true, power },
           [other]: { on: false },
@@ -950,21 +960,37 @@ function placeDevices(
         // and the participant has a control for it, so the search gets one too:
         // seven headings across the wall's arc x five angles from 40° down to
         // 60° up, which is the range of the panel's own slider.
+        // A WALL UNIT HAS ONE AXIS OF AIM, NOT TWO. Its casing is bolted flat and
+        // the participant has no horizontal control for it (see canTurn), so
+        // proposing a heading change is proposing something they cannot carry
+        // out — and worse, cannot undo. For anything on a wall the sweep is TILT
+        // ALONE; a free-standing aimable device still gets the full circle
+        // crossed with tilt.
         const spots = aimOnly
-          ? [-0.35, 0, 0.35, 0.7, 1.05].flatMap((tilt) =>
-              Array.from({ length: 5 }, (_, i) => ({
+          ? it.mount === "wall"
+            ? TILT_STEPS.map((tilt) => ({
                 position: it.position,
-                rotationY:
-                  fixedAt === undefined
-                    ? -Math.PI + (i * 2 * Math.PI) / 5
-                    : fixedAt - 1.31 + (i * 2.62) / 4,
+                rotationY: it.rotationY,
                 tilt,
                 roomId: it.roomId,
                 roomName: room.name,
                 axis: "area" as const,
                 oscillate: false,
-              })),
-            )
+              }))
+            : TILT_STEPS.slice(1, 6).flatMap((tilt) =>
+                Array.from({ length: 5 }, (_, i) => ({
+                  position: it.position,
+                  rotationY:
+                    fixedAt === undefined
+                      ? -Math.PI + (i * 2 * Math.PI) / 5
+                      : fixedAt - 1.31 + (i * 2.62) / 4,
+                  tilt,
+                  roomId: it.roomId,
+                  roomName: room.name,
+                  axis: "area" as const,
+                  oscillate: false,
+                })),
+              )
           : candidateSpots(room, it.type, working.wallHeight, openings);
         // The tail of the arrow itself, aimed along it: the spot the user
         // literally pointed at, which no generic candidate list contains.

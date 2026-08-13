@@ -9,11 +9,9 @@
 #   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
 # After that the URL is https://<user>.github.io/<repo>/ and this keeps it fresh.
 #
-# The researcher's address is a repository SECRET, not a committed value — an
-# address in a public repo is an address in a scraper's list. Add it under
-# Settings -> Secrets and variables -> Actions -> New repository secret, named
-# RESEARCHER_EMAIL. Without it the app still builds; Submit just downloads the
-# session file instead of also opening a mail draft.
+# Optional: set a LOG_ENDPOINT repository secret and finished sessions are POSTed
+# there as well as downloaded. Without it Submit simply downloads the file, which
+# is the normal path — these sessions are run with a facilitator who asks for it.
 
 name: Deploy to GitHub Pages
 
@@ -49,20 +47,10 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      # The address goes into the bundle BASE64-ENCODED. A deployed bundle is
-      # public whatever the repo is, so a plaintext address here is a plaintext
-      # address on the open web, and address-harvesting bots read JS. Base64 is
-      # not a secret — anyone who wants it can decode it — it just means the
-      # page is not free food for a regex.
       - name: Build
         env:
-          RESEARCHER_EMAIL: ${{ secrets.RESEARCHER_EMAIL }}
           VITE_LOG_ENDPOINT: ${{ secrets.LOG_ENDPOINT }}
-        run: |
-          if [ -n "$RESEARCHER_EMAIL" ]; then
-            export VITE_RESEARCHER_EMAIL_B64="$(printf '%s' "$RESEARCHER_EMAIL" | base64 -w0)"
-          fi
-          npm run build
+        run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist

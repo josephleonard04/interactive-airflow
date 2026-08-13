@@ -28,20 +28,11 @@ import { useSceneStore, type SessionReport } from "../scene/store";
 // by asking them.
 
 const ENDPOINT = import.meta.env.VITE_LOG_ENDPOINT as string | undefined;
-// Base64 first: that is the form the deploy workflow sets, so the published
-// bundle never carries the address in plain text. The plain variable stays
-// supported for a local .env.local, where nothing is published.
-const EMAIL = (() => {
-  const b64 = import.meta.env.VITE_RESEARCHER_EMAIL_B64;
-  if (b64) {
-    try {
-      return atob(b64);
-    } catch {
-      /* malformed — fall through to the plain variable */
-    }
-  }
-  return import.meta.env.VITE_RESEARCHER_EMAIL;
-})();
+// NO RESEARCHER ADDRESS IN THE BUNDLE ANY MORE. It existed to fill a mailto
+// draft, and that button is gone — the participant downloads one file and hands
+// it over however they were told to. An address that is not compiled in cannot
+// be scraped off the published page, which is a nicer property than the base64
+// obfuscation it replaces.
 
 /** Where the last submitted report is kept, so a session is not lost if the
  *  participant closes the tab without sending the mail. The facilitator can
@@ -65,29 +56,6 @@ function download(report: SessionReport, name: string) {
   URL.revokeObjectURL(a.href);
 }
 
-/** A mail draft the participant only has to attach the file to and send. The
- *  report itself is far too big for a mailto body (mail clients truncate around
- *  a couple of thousand characters), so the body carries the summary and names
- *  the file sitting in their downloads folder. */
-function mailtoFor(report: SessionReport, name: string) {
-  const met = report.goals.filter((g) => g.met).length;
-  const body = [
-    "Here is my session from the airflow study.",
-    "",
-    `Task: ${report.title ?? report.scenario ?? "free play"}`,
-    `Goals met: ${met} of ${report.goals.length}`,
-    `Time taken: ${Math.round(report.durationSec / 6) / 10} minutes`,
-    "",
-    `Please attach the file that was just downloaded: ${name}`,
-    "",
-    "Anything you found confusing:",
-    "",
-  ].join("\n");
-  return `mailto:${EMAIL}?subject=${encodeURIComponent(
-    `Airflow study session — ${report.title ?? report.scenario ?? "free play"}`,
-  )}&body=${encodeURIComponent(body)}`;
-}
-
 export function SubmitTask() {
   const scenarioId = useSceneStore((s) => s.scenarioId);
   const submitSession = useSceneStore((s) => s.submitSession);
@@ -96,7 +64,6 @@ export function SubmitTask() {
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<"none" | "ok" | "failed">("none");
   const [file, setFile] = useState("");
-  const [copied, setCopied] = useState(false);
 
   if (!scenarioId) return null;
 
@@ -170,37 +137,21 @@ export function SubmitTask() {
             ? "It has also been sent to the researcher automatically — nothing else to do."
             : "Please send that file to the researcher."}
         </p>
-        <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-          <button
-            className="tool"
-            style={{ flex: 1, fontSize: 11.5 }}
-            title="If the download did not appear, or you deleted it"
-            onClick={() => download(submitted, name)}
-          >
-            ⬇ Download again
-          </button>
-          {EMAIL && (
-            <a
-              className="tool"
-              style={{ flex: 1, textAlign: "center", fontSize: 11.5, padding: "5px 8px" }}
-              href={mailtoFor(submitted, name)}
-              title="Opens your email with the message written — attach the file above"
-            >
-              📧 Email it
-            </a>
-          )}
-          <button
-            className="tool"
-            style={{ flex: 1, fontSize: 11.5 }}
-            title="Copy the report itself, if sending the file is awkward"
-            onClick={() => {
-              void navigator.clipboard?.writeText(JSON.stringify(submitted, null, 2));
-              setCopied(true);
-            }}
-          >
-            {copied ? "✓ Copied" : "Copy"}
-          </button>
-        </div>
+        {/* ONE BUTTON, BECAUSE THERE IS ONE THING TO DO. This row also carried
+            "Email it" and "Copy". The first opened a mail draft the participant
+            then had to attach the downloaded file to by hand — a two-step send
+            dressed up as one click, and the commonest way to receive an empty
+            email. The second put a multi-megabyte JSON blob on the clipboard,
+            which no recipient wants and nobody asked for. Three ways to send one
+            file is three chances to send it wrong. */}
+        <button
+          className="tool"
+          style={{ width: "100%", marginTop: 8, fontSize: 11.5 }}
+          title="If the download did not appear, or you deleted it"
+          onClick={() => download(submitted, name)}
+        >
+          ⬇ Download again
+        </button>
         {/* The way on. A session ends on this panel, and without a door out of
             it the only way to try the next task is to reload the page. */}
         <button

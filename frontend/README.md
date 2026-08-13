@@ -66,27 +66,63 @@ is a surprise, and it replaces a person's clear instruction with a guess at one.
 The report is also kept in `localStorage` under `airflow-last-session`, so a
 participant who closes the tab has not taken the session with them.
 
-Two optional build-time settings add to that. Put them in `frontend/.env.local`,
+One optional build-time setting adds to that. Put it in `frontend/.env.local`,
 which is gitignored:
 
 ```dotenv
-# Adds an "Email it" button (offered, never automatic) with the message already
-# written. The deploy workflow sets the base64 form instead — a published bundle
-# is public whatever the repo is, and a plaintext address in it is free food for
-# a harvesting regex.
-VITE_RESEARCHER_EMAIL=you@example.com
-
 # POST the same report here as well, so the participant need do nothing at all.
 VITE_LOG_ENDPOINT=https://…
 ```
 
-The report is the whole session — every manual move, rotation, device
-adjustment, door and window change, every typed goal and sketch, every
-suggestion offered and accepted, and the tick-box verdict each time it changed,
-each stamped with its offset from the start of the task — plus a final scoring
-of the goals against the plan as submitted.
+There is no longer a researcher address in the bundle. The panel used to offer
+"Email it" (a mail draft the participant then had to attach the file to by hand)
+and "Copy" (a multi-megabyte JSON blob on the clipboard); both are gone. Three
+ways to send one file is three chances to send it wrong, and an address that is
+not compiled in cannot be scraped off the published page.
 
-## Flow
+The report is built for analysis rather than for reading. Every event carries:
+
+- **`method`** — `manual`, `text`, `sketch`, `solution` or `system`. RQ2 asks how
+  people combine typing, drawing and direct manipulation; this is the field that
+  answers it, and the log used to have no such field at all.
+- **the whole layout after the event** — every item's position, heading, tilt,
+  power, on/off and sweep, plus every opening. Any step can be scored, diffed or
+  re-simulated on its own. It used to record deltas, and several events were
+  written *before* the state they described, so replaying to reconstruct step 40
+  silently diverged.
+- **simulator readings whenever the value moves**, not only when a tick-box
+  flips — otherwise ten minutes of moving a fan leaves one line in the log.
+
+Typed sentences are logged verbatim together with how they were parsed, before
+anything is done with them. A search logs what it was asked, what it was allowed
+to touch, and every card it offered with that card's full layout and predicted
+numbers — so an accepted suggestion can be compared against the ones passed over.
+A drawn mark logs the pen, the shape and the whole pad. The file itself carries a
+schema version, per-method counts, the task's goals and thresholds, and the
+starting and final layouts.
+
+## The four study tasks
+
+The setup screen leads with them. Each is a prebuilt home, a fixed set of
+controls, and one or two checkable goals chosen to pull against each other — see
+[`src/floorplan/scenarios.ts`](src/floorplan/scenarios.ts), where every threshold
+is recorded next to the sweep that produced it.
+
+| Task | Home | Movable | Goals |
+|---|---|---|---|
+| Temperature (winter) | Single-bedroom home, 2 °C out | heater (living room only), fan | both rooms 18–24 °C, and no cold pool at the glass |
+| Kitchen smell | Studio, 31 °C out | fan; either window | smell over the bed ≤ 0.17 |
+| Humidity | Bathroom, 24 °C out | extract vent; the window | dries within 66 min |
+| AC blowing on the bed | Single-bedroom apartment, 31 °C out | AC louvre (tilt only), fan, bedroom door | bed ≤ 0.20 m/s **and** worst corner of either room ≤ 25 °C |
+
+A task's `tools` decide what the participant may touch, and the placement search
+is held to exactly the same list: it will not relocate a bolted vent, turn a
+wall-mounted unit sideways, carry the winter heater out of the living room, or
+switch off a device whose power dial the task hides. That last one was a real
+bug — a card that switched the fan off on a locked task left it dead for the rest
+of the session, because the on/off control is inside the hidden power block.
+
+## Free play
 
 1. **Setup screen** — pick a start mode, then enter Length × Width × Height in
    **metres or feet**:
@@ -108,8 +144,13 @@ Everything is on a **0.25 m grid** so things line up easily.
   grid and **inside one room** (can't straddle a wall) and **can't overlap** each
   other; **wall items (TV/AC) stay on the wall** and can slide sideways *and* up/
   down — they never float in mid-air.
-- **Rotate**: the inspector has a **free 0–360° slider** (good for aiming the
-  fan), plus **R** / a 90° button for quick turns.
+- **Rotate**: floor items get a **free 0–360° dial** (good for aiming a fan)
+  plus **R** / a 90° button. A quarter-turn changes the footprint, so a turn that
+  would push an item through a wall slides it clear instead, and refuses if there
+  is nowhere to go. **Wall-mounted items do not turn at all** — a television and
+  a split AC are bolted flat, and which way they face is decided by the wall they
+  are on; drag one to another wall and it re-faces itself. An AC's *vertical*
+  louvre is a separate control and is offered where a task makes it adjustable.
 - **Add / remove**: palette to add (furniture, bathroom, heating/cooling/air);
   select + Delete / ✕ / "Remove" to remove.
 - **Walls**: "Add wall" shows the **grid as dots** — click a **start** dot, then
