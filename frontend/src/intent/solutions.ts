@@ -1,6 +1,6 @@
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
-import { REPORT_FIDELITY, buildSim3D, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
+import { REPORT_FIDELITY, buildSim3D, coldestPart, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
 import { windowZone } from "./goals";
 import { windowPlacements, windowSideName, withOpeningMoved } from "../floorplan/openings";
@@ -59,6 +59,23 @@ const SCREEN = { targetCells: 1200, iterations: 4, steps: 8 };
  *  itself a win, and landed 70 minutes off the best spot it had already tried.
  *  Roughly 4x the cost per evaluation, on the one task that needs it. */
 const SCREEN_DRY = { targetCells: 3600, iterations: 6, steps: 14 };
+/** THE MIDDLE RUNG, and the reason the answers are worth trusting.
+ *
+ *  The header's own numbers say the cheap screen ranks at rho 0.77 and this
+ *  rung at 0.99 — so the screen is good enough to say "these twelve are worth
+ *  looking at" and not good enough to say which of them is best. It was doing
+ *  the second job anyway: the top three by SCREEN score went straight to the
+ *  final pass and everything else was discarded, so a candidate the screen
+ *  mis-ranked by four places was gone before anything accurate had seen it.
+ *
+ *  At ~56 ms a shot, re-ranking a dozen costs about 0.7 s and replaces a 0.77
+ *  correlation with a 0.99 one at exactly the moment the choice is made. */
+const MID = { targetCells: 1800, iterations: 6, steps: 12 };
+/** …and the drying tasks need their own, for the same reason SCREEN_DRY exists:
+ *  drying time is a percentile of a per-cell field in one small room, and it is
+ *  quantisation noise on a coarse grid. */
+const MID_DRY = { targetCells: 4200, iterations: 8, steps: 18 };
+
 /** Finalists are re-scored at the shared reporting fidelity, so the temperature
  *  printed on a solution card is the same number the goal verdict will give
  *  after the user applies it. */
@@ -255,6 +272,11 @@ export interface TaskZone {
 export interface SolutionMetrics {
   /** Absolute °C per room. */
   roomTempC: Map<string, number>;
+  /** The WARMEST and COLDEST parts of each room (90th/10th percentile, °C).
+   *  "Cool this room" and "warm this room" are claims about the corner that is
+   *  still wrong, not about the average — see warmestPart. */
+  roomWarmestC: Map<string, number>;
+  roomColdestC: Map<string, number>;
   /** How fresh the air is per room, 0..1 (1 = swept clean). The contaminant
    *  field read the other way round, because "40% fresh" is the thing a person
    *  asking about a smell wants to know and "0.31 contaminant" is not. Free to
@@ -376,6 +398,12 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   const { temp, smell, dry: dryF } = geodesicFields(built);
   const roomTempC = new Map<string, number>();
   for (const [id, d] of roomMeans(built, temp)) roomTempC.set(id, outdoorTemp + d);
+  const roomWarmestC = new Map<string, number>();
+  const roomColdestC = new Map<string, number>();
+  for (const r of plan.rooms) {
+    roomWarmestC.set(r.id, outdoorTemp + warmestPart(built, temp, r.rect));
+    roomColdestC.set(r.id, outdoorTemp + coldestPart(built, temp, r.rect));
+  }
   const roomDryMin = new Map<string, number>();
   for (const r of plan.rooms) roomDryMin.set(r.id, slowestDry(built, dryF, r.rect));
   const roomFresh = new Map<string, number>();
@@ -473,6 +501,8 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
 
   return {
     roomTempC,
+    roomWarmestC,
+    roomColdestC,
     roomFresh,
     roomDryMin,
     taskShortfall,
@@ -542,12 +572,35 @@ function proxyScore(
     const mins = ids.map((id) => m.roomDryMin.get(id)).filter((v): v is number => v !== undefined);
     if (mins.length) return -Math.max(...mins);
   }
+  // THE CORNER THAT IS STILL WRONG, not the average of the room.
+  //
+  // "Cool the apartment" was scored on room MEANS, and a mean is happily
+  // satisfied by chilling one end hard — so the search would return a layout
+  // with a cold pool by the unit and a warm far corner and call it the answer.
+  // Brute-forcing 192 reachable layouts and ranking them by the warmest corner
+  // put the search's pick in the BOTTOM 20%: it was not searching badly, it was
+  // searching for the wrong thing. Scored on the worst corner instead, the
+  // search optimises what the words mean and what the tick-box measures.
+  // A BLEND, because the two readings answer different halves of the question.
+  // The room MEAN is what most of these tasks are graded on and what a person
+  // means by "is the room warm"; the worst CORNER is what they complain about
+  // once the mean is fine, and it is what an "everywhere" goal measures. Scored
+  // on the mean alone the search would chill one end hard and call it done;
+  // scored on the corner alone it drifts away from the number the tick-box
+  // actually reads. 60/40 toward the corner keeps both honest.
+  const worstIds = targetIds.length ? targetIds : [...m.roomWarmestC.keys()];
+  const roomMean = targetTemps.length
+    ? (goal === "cool" ? Math.max(...targetTemps) : Math.min(...targetTemps))
+    : 0;
   if (goal === "cool") {
-    const worst = targetTemps.length ? Math.max(...targetTemps) : 0; // hottest room
-    return -(worst + 0.25 * m.meanTargetC) - draft;
+    const hot = worstIds.map((id) => m.roomWarmestC.get(id)).filter((v): v is number => v !== undefined);
+    const corner = hot.length ? Math.max(...hot) : roomMean;
+    return -(0.6 * corner + 0.4 * roomMean + 0.25 * m.meanTargetC) - draft;
   }
   if (goal === "warm") {
-    const worst = targetTemps.length ? Math.min(...targetTemps) : 0; // coldest room
+    const cold = worstIds.map((id) => m.roomColdestC.get(id)).filter((v): v is number => v !== undefined);
+    const corner = cold.length ? Math.min(...cold) : roomMean;
+    const worst = 0.6 * corner + 0.4 * roomMean;
     // The cold pool at the glazing counts too, at a third of a room's weight:
     // enough to break the tie between two placements that warm the room equally,
     // not enough to trade away the room the user actually asked about. Capped at
@@ -1307,12 +1360,13 @@ export function findSolutions(
   // 180 was the quality peak when a cooling task had two strategies; allowing the
   // fan to be left OFF doubled that to four, which halved what each one could
   // spend on placement. 260 restores it.
-  // 260 covered the three tasks whose devices have wide candidate lists and
-  // starved the bathroom, whose single movable grille has a narrow one: it
-  // explored 35 arrangements where the others explored ~190, so asking twice
-  // there returned the same handful. The budget is spent per strategy, so what
-  // the bathroom needed was simply more of it.
-  const budget = { left: opts.screenBudget ?? 380 };
+  // The screen's job is to NOMINATE, not to choose — the shortlist is re-ranked
+  // at MID before anything is picked, so this only has to be wide enough that
+  // the good layouts are somewhere in its top nine. 300 keeps every task over a
+  // hundred distinct arrangements (the bathroom, whose one movable grille has
+  // the narrowest candidate list, is the binding case) without paying for
+  // precision the next rung supplies more cheaply.
+  const budget = { left: opts.screenBudget ?? 300 };
   const strategies = strategiesFor(goal, opts.lockPower === true, opts.allowedDevices, { plan, targetIds, movable: opts.movableDevices });
 
   // Split the screening budget EVENLY across strategies. A single shared
@@ -1427,21 +1481,42 @@ export function findSolutions(
   // Re-score the finalists at display fidelity, so the numbers we SHOW are the
   // numbers the Temp view will show. Screening ranks; the final pass reports.
   screened.sort((a, b) => b.score - a.score);
-  // The final pass is ~305 ms each, so carry only as many finalists as we will
-  // actually show. (The screening validation says the true winner is inside the
-  // screen's top 4, which this covers for want<=3.)
-  const finalists = screened.slice(0, Math.max(want, 3));
+  // SHORTLIST WIDE, THEN RE-RANK ACCURATELY. Taking the screen's top three
+  // straight to the final pass trusted a 0.77 correlation to make the choice;
+  // the shortlist is now twelve and they are re-scored at MID (0.99) before
+  // anything is picked. See MID.
+  const shortlist = screened.slice(0, Math.max(want * 3, 9));
+  const midFid = dryingTask ? MID_DRY : MID;
+  for (const f of shortlist) {
+    f.score = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, midFid, dryingTask, opts.taskZones).score;
+  }
+  shortlist.sort((a, b) => b.score - a.score);
+  const finalists = shortlist.slice(0, Math.max(want, 3));
   // POLISH THE ONES WE ARE ABOUT TO SHOW. Each is a grid point, and the grid is
   // a sample of a continuous space; a couple of hundred milliseconds of walking
   // downhill from it is worth more than the same time spent screening more grid.
-  const polish = { left: opts.refineBudget ?? 90 };
+  //
+  // The walk itself stays on the cheap screen — it is dozens of evaluations and
+  // running them at MID cost five seconds for a step that is usually right
+  // anyway. What it cannot be trusted about is whether it ARRIVED somewhere
+  // better, because a hill-climb on a noisy signal will happily climb the
+  // noise. So every refinement is checked once at MID against where it started,
+  // and thrown away if it does not hold up: one accurate evaluation per
+  // finalist buys back the accuracy the cheap walk gives away.
+  const polish = { left: opts.refineBudget ?? 60 };
   for (const f of finalists) {
     const { plan: better, improved } = refine(
       f.plan, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN,
       dryingTask, opts.taskZones ?? [], opts.movableDevices, opts.allowedDevices, polish,
     );
-    if (improved) f.plan = better;
+    if (!improved) continue;
+    const checked = evaluate(better, goal, targetIds, opts.outdoorTemp, midFid, dryingTask, opts.taskZones).score;
+    if (checked > f.score) {
+      f.plan = better;
+      f.score = checked;
+    }
   }
+  finalists.sort((a, b) => b.score - a.score);
   const solutions: Solution[] = finalists.map((f) => {
     const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask, opts.taskZones);
     // WHAT THIS CARD ACTUALLY DOES, read off the plan rather than inherited.

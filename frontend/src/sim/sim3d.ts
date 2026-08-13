@@ -1140,6 +1140,28 @@ export function warmestPart(s: Sim3D, temp: Float32Array, rect: Rect): number {
   return vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.9))];
 }
 
+/** The COLDEST part of a room — its 10th-percentile temperature, the mirror of
+ *  warmestPart and the measure a heating request is really about. "Warm this
+ *  room" is not a claim about its average; it is a claim about the corner you
+ *  are still cold in. */
+export function coldestPart(s: Sim3D, temp: Float32Array, rect: Rect): number {
+  const { sim, nx, ny, nz, cellCenter, inside } = s;
+  const vals: number[] = [];
+  for (let k = 0; k < nz; k++)
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const c = sim.cIdx(i, j, k);
+        if (sim.solid[c] || !inside[c]) continue;
+        const [x, y, z] = cellCenter(i, j, k);
+        if (y < 0.2 || y > 2.0) continue;
+        if (x < rect.x || x > rect.x + rect.w || z < rect.z || z > rect.z + rect.d) continue;
+        vals.push(temp[c]);
+      }
+  if (!vals.length) return 0;
+  vals.sort((a, b) => a - b);
+  return vals[Math.min(vals.length - 1, Math.floor(vals.length * 0.1))];
+}
+
 /** Mean of a per-cell field over an arbitrary ZONE — a corner, a bed, a couch —
  *  rather than a whole room.
  *
