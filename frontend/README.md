@@ -110,10 +110,13 @@ is recorded next to the sweep that produced it.
 
 | Task | Home | Movable | Goals |
 |---|---|---|---|
-| Temperature (winter) | Single-bedroom home, 2 °C out | heater (living room only), fan | both rooms 18–24 °C, and no cold pool at the glass |
-| Kitchen smell | Studio, 31 °C out | fan; either window | smell over the bed ≤ 0.17 |
-| Humidity | Bathroom, 24 °C out | extract vent; the window | dries within 66 min |
-| AC blowing on the bed | Single-bedroom apartment, 31 °C out | AC louvre (tilt only), fan, bedroom door | bed ≤ 0.20 m/s **and** worst corner of either room ≤ 25 °C |
+| Temperature (winter) | Single-bedroom home, freezing outside | heater (living room only), fan | both rooms comfortable, and no cold pool at the glass |
+| Kitchen smell | Studio, hot summer day | fan; either window | keep the kitchen smell off the bed |
+| Humidity | Bathroom, warm | extract vent; the window | dry the bathroom out fast after a shower |
+| AC blowing on the bed | Single-bedroom apartment, hot summer day | AC louvre (tilt only), fan, bedroom door | no strong draft on the bed **and** both rooms cool everywhere |
+
+Each goal is a threshold the solver checks. The participant is shown the goal;
+the number behind it, and the sweep that set it, stay in `scenarios.ts`.
 
 A task's `tools` decide what the participant may touch, and the placement search
 is held to exactly the same list: it will not relocate a bolted vent, turn a
@@ -125,7 +128,7 @@ of the session, because the on/off control is inside the hidden power block.
 ## Free play
 
 1. **Setup screen** — pick a start mode, then enter Length × Width × Height in
-   **metres or feet**:
+   **meters or feet**:
    - **Example layout** — a fully furnished living room / bedroom / kitchen /
      bathroom (with the entrance into the living room and windows on exterior
      walls), placed door- and window-aware so nothing blocks an opening.
@@ -168,13 +171,13 @@ floorplan/
   types.ts      FloorPlan, RoomDef, WallSeg, Opening, PlacedItem, OccupancyGrid, HomeSize
   home.ts       generateHome({length,width,height}) → the single 4-room home
   geometry.ts   walls from rooms, shared-edge detection, opening carving, wall render pieces
-  raster.ts     rasterise rooms → labelled cell grid (room hierarchy for the solver)
+  raster.ts     rasterize rooms → labeled cell grid (room hierarchy for the solver)
   catalog.ts    item specs + add-palette
-  palette.ts    room / item colours
+  palette.ts    room / item colors
 components/
   SetupScreen.tsx   dimension entry (m / ft)
   Editor.tsx        Canvas, OrbitControls, drag-to-move, wall-draw, delete keys
-  FloorPlanView.tsx colour-coded room floors (no on-floor labels) + walls
+  FloorPlanView.tsx color-coded room floors (no on-floor labels) + walls
   WallMesh.tsx      wall as boxes carved around doors/windows; selectable
   ItemMesh.tsx      a placed item: model + click target + selection outline
   models.tsx        composite furniture models (bed, desk, closet, couch, tv, …)

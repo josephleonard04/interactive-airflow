@@ -44,7 +44,7 @@ export const INTENT_LABEL: Record<SketchIntent, string> = {
   warm: "Warm",
   cool: "Cool",
   fresh: "Fresh air",
-  nodraft: "No draught",
+  nodraft: "No draft",
 };
 
 /** One colour per intent, used by the mini-map, the mark list and the 3D
@@ -166,7 +166,7 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
         ? `cool ${where}`
         : intent === "fresh"
           ? `fresh air in ${where}`
-          : `no draught in ${where}`;
+          : `no draft in ${where}`;
 
   return { goal, flow, targetIds, text: [head, ...arrowText].join(", "), calm: intent === "nodraft" };
 }

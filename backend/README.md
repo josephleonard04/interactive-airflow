@@ -3,7 +3,7 @@
 Local FastAPI service that runs the **accurate** simulation engine for the web
 app. It receives an exported OpenFOAM case, runs the CFD pipeline, samples the
 result onto the viewer grid, and returns it. If OpenFOAM isn't installed it
-returns a fast approximate **mock** field (clearly labelled) so the app's
+returns a fast approximate **mock** field (clearly labeled) so the app's
 two-engine UX works immediately.
 
 > Not to be confused with `bridge/` (the LFM GPU-simulator bridge, GPU-blocked).

@@ -1040,7 +1040,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "heading, including straight at the kitchen extract. Best measured 0.132; " +
       "aimed at the extract, 0.153. Both levers are needed: the window alone " +
       "reaches 0.258 and the fan alone 0.303. The right-hand window is the trap " +
-      "— two metres from the extract, the air it lets in is pulled back out " +
+      "— two meters from the extract, the air it lets in is pulled back out " +
       "before it crosses the room, so its corner and the grille's both stay " +
       "violet on screen (0.289 with the best fan). Opening BOTH is the near " +
       "miss at 0.229: barely better than no fan, and the fix is to shut the " +
@@ -1155,7 +1155,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       //     57 of 104 combinations under 66 min
       // The vent still dominates: every arrangement that leaves it on the
       // window's own wall is 113 min or worse, whatever the glazing does.
-      { label: "The bathroom dries out after a shower", metric: "drying", roomId: "bathroom", atMost: 66 },
+      { label: "The bathroom dries out fast after a shower", metric: "drying", roomId: "bathroom", atMost: 66 },
     ],
     success:
       "Everywhere in the bathroom dry within 66 minutes, measured on the slow " +
@@ -1164,7 +1164,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "nothing, and all ten vent positions read 180 minutes. And the extract " +
       "must cross to the LEFT half of the room, away from the glazing: 31 min " +
       "in the top-left corner beside the shower, 38 in the bottom-left, against " +
-      "113 min where it is built a few centimetres above the window. There the " +
+      "113 min where it is built a few centimeters above the window. There the " +
       "two short-circuit — the air comes in, goes straight back out, and the " +
       "steam between the shower and the bath never clears. The split is a cliff, " +
       "not a slope: everything on the window’s side of the room is 77 minutes " +
@@ -1197,7 +1197,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "room as well as the bedroom. Keep changing things until you are happy with the result, " +
       "then press Submit.",
     youCanChange:
-      "Re-aim the air conditioner: tilt it up or down, and turn it left or right. Move the fan " +
+      "Re-aim the air conditioner: tilt its louvre up or down. Move the fan " +
       "anywhere in the apartment, point it whichever way you like, switch it on or off, and set " +
       "whether it sweeps. Open or close the bedroom door. Run the simulation as many times as " +
       "you like.",
@@ -1263,7 +1263,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       // goes below about 0.10 with the AC running, so demanding stillness would
       // demand something the task cannot deliver. As found the bed sits at
       // 0.457, more than twice the line.
-      { label: "No strong draught on the bed while you sleep", metric: "draft", roomId: "bedroom", nearItem: "bed", atMost: 0.2 },
+      { label: "No strong draft on the bed while you sleep", metric: "draft", roomId: "bedroom", nearItem: "bed", atMost: 0.2 },
       // 25.0 °C in the warmest part of EITHER room — roomId "*" means every
       // room, graded on the one doing worst. Not a mean, which is satisfied by
       // cooling one end hard, and not a single measuring spot, which just picks

@@ -765,7 +765,7 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
           ))}
         </div>
         <p className="muted-line" style={{ marginTop: 6 }}>
-          Absolute temperature on a fixed scale, so the same colour always means the same reading.
+          Absolute temperature on a fixed scale, so the same color always means the same reading.
           The house starts at the outdoor {outdoorTemp.toFixed(0)} °C; heating and cooling are carried
           from there by the airflow, through open doors and blocked by walls.
         </p>
@@ -786,7 +786,7 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         <p className="muted-line" style={{ marginTop: 6 }}>
           {contaminant === "Humidity"
             ? "Carried by the airflow, and it only leaves where the air does — dries out near an open window or an extract, and sits where the air is still."
-            : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns green wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same colour always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
+            : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns green wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same color always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
         </p>
       </div>
     );
@@ -827,7 +827,7 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
         <span>warmest air here</span>
       </div>
       <p className="muted-line" style={{ marginTop: 6 }}>
-        The colour of a line is how warm that air is: <b>red</b> where it is carrying heat from the
+        The color of a line is how warm that air is: <b>red</b> where it is carrying heat from the
         heater, <b>blue</b> where it is cold off the glass, and blending through the middle where the
         two have mixed. The two ends are the warmest and coldest air in this home right now, so the
         scale stretches to whatever is actually going on — use the <b>Temp</b> view for real degrees.

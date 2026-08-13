@@ -1,10 +1,10 @@
-# Interactive Airflow — Intent-to-Physics Indoor Airflow Design for Non-Experts
+# Multimodal Interaction with Indoor Airflow Simulation and Optimization for Non-Expert Users
 
 Turn everyday comfort goals — *"keep my bedroom cool"*, *"keep the kitchen smell off the bed"* — into physical airflow objectives, evaluated live inside an interactive 3D home editor.
 
 **▶ Live demo: <https://josephleonard04.github.io/interactive-airflow/>** — runs entirely in the browser (WebGL). Nothing to install, no server, no account.
 
-> Research project. Author: Joseph Leonard. Advisors: Prof. Haoran Xie (JAIST), Prof. Takeo Igarashi, Prof. Bo Zhu (Georgia Tech).
+> Research project. Author: Joseph Leonard. Advisors: Prof. Haoran Xie (JAIST), Prof. Takeo Igarashi (University of Tokyo), Prof. Bo Zhu (Georgia Tech).
 
 ---
 
@@ -20,10 +20,12 @@ The app opens on a task picker. Each task is a prebuilt home, a fixed set of con
 
 | Task | Home | Weather | What you may change | Goals |
 |---|---|---|---|---|
-| ❄️ **Temperature (winter)** | Single-bedroom home | 2 °C | Move the heater (living room only) and the fan | Both rooms comfortable (18–24 °C bedroom, 20–24 °C living), and no cold pool at the glass |
-| 🗑️ **Kitchen smell** | Studio | 31 °C | Move and aim the fan; open either window | Smell over the bed ≤ 0.17 |
-| 💧 **Humidity** | Bathroom | 24 °C | Place the extract vent and the window | Bathroom dries within 66 min |
-| 🌬️ **AC blowing on the bed** | Single-bedroom apartment | 31 °C | Tilt the AC's louvre; move the fan; the bedroom door | No strong draught on the bed (≤ 0.20 m/s) **and** both rooms cool (≤ 25 °C in the worst corner) |
+| ❄️ **Temperature (winter)** | Single-bedroom home | Freezing outside | Move the heater (living room only) and the fan | Both rooms comfortable, and no cold pool at the glass |
+| 🗑️ **Kitchen smell** | Studio | Hot summer day | Move and aim the fan; open either window | Keep the kitchen smell off the bed |
+| 💧 **Humidity** | Bathroom | Warm | Place the extract vent and the window | Dry the bathroom out fast after a shower |
+| 🌬️ **AC blowing on the bed** | Single-bedroom apartment | Hot summer day | Tilt the AC's louvre; move the fan; the bedroom door | No strong draft on the bed **and** both rooms cool everywhere |
+
+Every goal is a threshold the solver checks; the exact numbers, and the sweeps that set them, live next to each goal in [`frontend/src/floorplan/scenarios.ts`](frontend/src/floorplan/scenarios.ts). Participants see the goal, not the number.
 
 Each task ends with **Submit**, which scores the goals one last time and downloads the session as JSON.
 
@@ -37,7 +39,7 @@ Typed and drawn intents both feed **✨ Find solutions**, which searches your ac
 
 ## How good are the suggestions?
 
-The search explores **116–250 distinct arrangements** per task, ranked on a three-rung fidelity ladder (a cheap screen nominates a shortlist, a middle rung re-ranks it, the finalists are re-scored at the fidelity the tick-boxes use) and then hill-climbed locally off the candidate grid.
+The search explores **116–250 distinct arrangements** per task, ranked on a three-rung fidelity ladder (a cheap screen nominates a shortlist, a middle rung re-ranks it, the finalists are re-scored at the fidelity the checkboxes use) and then hill-climbed locally off the candidate grid.
 
 Measured against brute force over the reachable space at reporting fidelity:
 
@@ -56,7 +58,7 @@ Every suggestion is also **checked against the task's own rules**: nothing is pr
 
 - every event tagged with its **method** — `manual`, `text`, `sketch`, `solution` or `system`
 - the **whole layout after every event**, so any step can be scored, diffed or re-simulated on its own without replaying the ones before it
-- simulator readings recorded whenever the **value** moves, not only when a tick-box flips
+- simulator readings recorded whenever the **value** moves, not only when a checkbox flips
 - typed sentences verbatim **with how they were parsed**; searches with everything they were asked and every card they offered, each with that card's layout and predicted numbers
 - a schema version, per-method counts, the task's goals and thresholds, and the starting and final layouts
 
@@ -90,7 +92,7 @@ pip install -r requirements.txt
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs/openfoam-engine.md). Without it the Accurate button returns a labelled "preview (no OpenFOAM)" field.
+Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs/openfoam-engine.md). Without it the Accurate button returns a labeled "preview (no OpenFOAM)" field.
 
 **Deploying:** `.github/workflows/pages.yml` rebuilds from `main` and publishes to GitHub Pages on every push. `npm run build` produces a plain static `dist/`; `npm run build:single` produces one self-contained ~1.5 MB HTML file.
 
@@ -117,7 +119,7 @@ Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs
    smell / drying
             │
             ├─► 3D views: airflow, temperature, humidity/smell
-            ├─► task tick-boxes (same solve, so they cannot disagree)
+            ├─► task checkboxes (same solve, so they cannot disagree)
             └─► session log
 ```
 
@@ -129,10 +131,10 @@ Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs
 | **Floor plan** | `floorplan/types.ts`, `home.ts`, `geometry.ts`, `catalog.ts`, `collision.ts`, `openings.ts`, `raster.ts` | Rooms/walls/openings/items; collision and doorway keep-clear rules shared by the drag, the rotate and the search |
 | **State** | `scene/store.ts`, `scene/logSnapshot.ts` | Zustand store: plan, selection, undo/redo, search actions, session log |
 | **Editor & UI** | `components/Editor.tsx`, `Panel.tsx`, `SimPanel.tsx`, `SketchCanvas.tsx`, `SubmitTask.tsx`, `models.tsx`, `ItemMesh.tsx`, `FlowField3D.tsx` | Theme lives in `styles.css` |
-| **Solver** | `sim/euler3d.ts`, `sim/sim3d.ts` | Incompressible Euler on a MAC grid with buoyancy; the home is voxelised into solids, jets, inlets and outlets, and temperature / smell / drying are carried along the converged flow by a geodesic transport |
+| **Solver** | `sim/euler3d.ts`, `sim/sim3d.ts` | Incompressible Euler on a MAC grid with buoyancy; the home is voxelized into solids, jets, inlets and outlets, and temperature / smell / drying are carried along the converged flow by a geodesic transport |
 | **Intent** | `intent/objectives.ts`, `llmGoal.ts`, `evaluate.ts`, `sketch.ts`, `fallback.ts` | Dictionary first, model second, task goals as a last resort so the box is never a dead end |
 | **Search** | `intent/solutions.ts`, `searchOptimize.ts` | Candidate generation, the fidelity ladder, the local polish, and the rules about what each task may change |
-| **Goals** | `intent/goals.ts` | Scores a task's tick-boxes on the same solve the views draw |
+| **Goals** | `intent/goals.ts` | Scores a task's checkboxes on the same solve the views draw |
 
 ## Verifying changes
 
@@ -140,7 +142,7 @@ Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs
 cd frontend && npx tsc --noEmit
 ```
 
-There is no unit-test suite. What the project relies on instead is that the simulation modules are importable headlessly, so behaviour is checked by measurement: bundle a throwaway script with `esbuild --bundle --platform=node --define:import.meta.env='{}'` and run it in Node to sweep layouts, fingerprint every scenario before and after a change, or brute-force a task's answer. Every threshold in `scenarios.ts` was set that way, and the numbers are written down next to them.
+There is no unit-test suite. What the project relies on instead is that the simulation modules are importable headlessly, so behavior is checked by measurement: bundle a throwaway script with `esbuild --bundle --platform=node --define:import.meta.env='{}'` and run it in Node to sweep layouts, fingerprint every scenario before and after a change, or brute-force a task's answer. Every threshold in `scenarios.ts` was set that way, and the numbers are written down next to them.
 
 ## Known limitations
 
@@ -150,6 +152,6 @@ There is no unit-test suite. What the project relies on instead is that the simu
 - Scalar fields beyond temperature / smell / drying (CO₂, PM2.5) are not implemented.
 - `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
 
-## Licence
+## License
 
 MIT — see [LICENSE](LICENSE).
