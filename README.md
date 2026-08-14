@@ -14,21 +14,6 @@ Airflow design tools assume you can already state the problem in physics. A pers
 
 Everything runs client-side: an in-browser Euler solver, the language layer, and the placement search. The live demo above is the whole system.
 
-## The four study tasks
-
-The app opens on a task picker. Each task is a prebuilt home, a fixed set of controls, and one or two checkable goals — deliberately in tension, so no single move finishes the job.
-
-| Task | Home | Weather | What you may change | Goals |
-|---|---|---|---|---|
-| ❄️ **Temperature (winter)** | Single-bedroom home | Freezing outside | Move the heater (living room only) and the fan | Both rooms comfortable, and no cold pool at the glass |
-| 🗑️ **Kitchen smell** | Studio | Hot summer day | Move and aim the fan; open either window | Keep the kitchen smell off the bed |
-| 💧 **Humidity** | Bathroom | Warm | Place the extract vent and the window | Dry the bathroom out fast after a shower |
-| 🌬️ **AC blowing on the bed** | Single-bedroom apartment | Hot summer day | Tilt the AC's louvre; move the fan; the bedroom door | No strong draft on the bed **and** both rooms cool everywhere |
-
-Every goal is a threshold the solver checks; the exact numbers, and the sweeps that set them, live next to each goal in [`frontend/src/floorplan/scenarios.ts`](frontend/src/floorplan/scenarios.ts). Participants see the goal, not the number.
-
-Each task ends with **Submit**, which scores the goals one last time and downloads the session as JSON.
-
 ## Three ways to say what you want
 
 1. **By hand** — drag devices, aim them, open and close doors and windows.
