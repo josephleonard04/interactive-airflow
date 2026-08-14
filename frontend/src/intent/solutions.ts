@@ -1831,7 +1831,24 @@ export function withholdComplete(
     };
   };
 
-  const keep = (list: Solution[]) => list.map((s) => ({ s, ...metCount(s.plan) })).filter((c) => c.total === 0 || c.met < c.total);
+  // WITHHOLDING MUST NOT COST THE PARTICIPANT PROGRESS. Dropping every option
+  // that finishes the task is the right instinct — the study is about watching
+  // someone arrive at the answer, not about handing it to them — but it was
+  // applied without asking what was left behind. On the apartment task it
+  // withheld the layout that satisfies both goals and offered one satisfying
+  // exactly as many as the home already did: a card that changes things and
+  // gets nowhere, presented as the best available advice.
+  //
+  // So a partial option has to be a STEP: it earns its place by meeting more of
+  // the task's lines than the current home does. When none of them manage that,
+  // there is no intermediate lesson to teach and the honest thing is the answer
+  // itself — see the fallbacks below.
+  const currentMet = metCount(current).met;
+  const all = options.map((s) => ({ s, ...metCount(s.plan) }));
+  const keep = (list: Solution[]) =>
+    list
+      .map((s) => ({ s, ...metCount(s.plan) }))
+      .filter((c) => c.total === 0 || (c.met < c.total && c.met > currentMet));
   let scored = keep(options);
   // THE ONE-DEVICE HALF-STEP IS A LAST RESORT TOO, and it was not: it was mixed
   // in with the full options and usually outscored them, so the winter task —
@@ -1848,6 +1865,23 @@ export function withholdComplete(
   // therefore all withheld — which is the case that used to return an empty
   // gallery and look like a broken button.
   if (scored.length === 0) scored = keep(options.slice(0, 1).map(openingsOnly));
+  // AND IF EVERY ROUTE STILL FINISHES THE JOB, OFFER IT ANYWAY.
+  //
+  // Withholding exists so the tool does not hand a participant a solved home
+  // before they have tried anything themselves. Returning NOTHING is not that.
+  // It is a button labelled "Find solutions" that finds nothing, on a home that
+  // is visibly still failing a goal — the apartment task with the jet on the
+  // bed reports "what you have is already doing the job" while the bed reads
+  // 0.43 m/s, because the phrase describes the OPTIONS being complete and the
+  // participant reads it as describing their home.
+  //
+  // The half-steps above are the real answer to this and they work whenever the
+  // task has more than one thing to change. When it does not — when moving the
+  // one movable device IS the whole task — every trim collapses back onto
+  // either the full solution or the current layout, both of which are dropped,
+  // and the search's own accuracy is what empties the gallery. The better the
+  // search gets, the less it will show, which is exactly backwards.
+  if (scored.length === 0) scored = all;
   if (scored.length === 0) return [];
 
   scored.sort((a, b) => b.met - a.met || b.s.score - a.s.score);
