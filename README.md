@@ -20,7 +20,7 @@ Everything runs client-side: an in-browser Euler solver, the language layer, and
 2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (`backend/goal_parser.py`) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
 3. **By drawing** — box an area and pick *warm / cool / fresh air / no wind*, or draw an arrow for "move air from here to there".
 
-Typed and drawn intents both feed **✨ Find solutions**, which searches your actual layout with the simulator and offers a gallery of complete arrangements. Clicking one applies it; there is no confirmation step, and Undo is the way back.
+Typed and drawn intents both feed **Find solutions**, which searches your actual layout with the simulator and offers a gallery of complete arrangements. Clicking one applies it; there is no confirmation step, and Undo is the way back.
 
 ## How good are the suggestions?
 
