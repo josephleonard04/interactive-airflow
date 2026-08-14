@@ -1,0 +1,679 @@
+%% ===========================================================================
+%%  Interactive Airflow — CHI 2027 submission
+%%
+%%  TARGET:   ACM CHI 2027, Papers track.
+%%            Deadline 10 September 2026, Anywhere on Earth.
+%%            Revise & Resubmit 3 December 2026. Conference Pittsburgh, May 2027.
+%%
+%%  FORMAT:   CHI 2027 requires a SINGLE-COLUMN format for review and an
+%%            ANONYMIZED submission, so the class options below are
+%%            [manuscript,review,anonymous]. The real author block is kept
+%%            below in a comment — uncomment it for the camera-ready and
+%%            switch the class options to [sigconf].
+%%
+%%  LENGTH:   5,000–8,000 words encouraged (excluding references). Over 12,000
+%%            is desk-rejected unless justified.
+%% ===========================================================================
+
+\documentclass[manuscript,review,anonymous]{acmart}
+
+%% --- CAMERA-READY: swap the line above for the line below -------------------
+% \documentclass[sigconf]{acmart}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+%% CHI is published under the ACM open-access / rights framework. These are
+%% placeholders; the real values arrive from the ACM rights form on acceptance.
+\copyrightyear{2027}
+\acmYear{2027}
+\setcopyright{acmlicensed}
+\acmConference[CHI '27]{Proceedings of the 2027 CHI Conference on Human Factors
+  in Computing Systems}{May 10--14, 2027}{Pittsburgh, PA, USA}
+\acmBooktitle{Proceedings of the 2027 CHI Conference on Human Factors in
+  Computing Systems (CHI '27), May 10--14, 2027, Pittsburgh, PA, USA}
+\acmDOI{10.1145/XXXXXXX.XXXXXXX}
+\acmISBN{978-1-4503-XXXX-X/27/05}
+
+\begin{document}
+
+\title{Saying What You Want to the Air: Turning Non-Expert Comfort Goals into
+  Physical Airflow Objectives}
+
+%% ---------------------------------------------------------------------------
+%%  CAMERA-READY AUTHOR BLOCK — commented out because CHI review is anonymous.
+%%
+%%  TODO(Joseph): confirm your own affiliation. I have used Virginia Tech,
+%%  inferred from the study contact address josephl04@vt.edu. If the work
+%%  should be credited to the University of Tokyo visit instead, change it.
+%% ---------------------------------------------------------------------------
+%
+% \author{Joseph Leonard}
+% \affiliation{%
+%   \institution{Virginia Tech}
+%   \city{Blacksburg}
+%   \state{Virginia}
+%   \country{USA}}
+% \email{josephl04@vt.edu}
+%
+% \author{Haoran Xie}
+% \affiliation{%
+%   \institution{Japan Advanced Institute of Science and Technology}
+%   \city{Nomi}
+%   \state{Ishikawa}
+%   \country{Japan}}
+%
+% \author{Takeo Igarashi}
+% \affiliation{%
+%   \institution{The University of Tokyo}
+%   \city{Tokyo}
+%   \country{Japan}}
+%
+% \author{Bo Zhu}
+% \affiliation{%
+%   \institution{Georgia Institute of Technology}
+%   \city{Atlanta}
+%   \state{Georgia}
+%   \country{USA}}
+
+\renewcommand{\shortauthors}{Anonymous et al.}
+
+%% ===========================================================================
+\begin{abstract}
+People describe indoor air in the language of comfort: a bedroom that is too
+cold, a kitchen smell that reaches the bed, a draft that wakes them. Tools that
+could answer those complaints — real-time fluid solvers and inverse-design
+methods — instead require the problem stated in physics: a target temperature in
+a named zone, a supply velocity at a diffuser, an air-change rate. Prior systems
+assume that statement already exists. This paper asks whether it can be
+\emph{produced} from what a non-expert would actually say.
+
+We present \textsc{Interactive Airflow}, a browser-based 3D home editor in which
+a comfort goal expressed by hand, in typed language, or as a drawing is grounded
+onto a small closed vocabulary of physical objectives, evaluated live by an
+in-browser Euler solver, and handed to a constrained optimizer that returns
+complete furniture-and-device arrangements. The closed vocabulary is the
+mechanism that keeps the translation checkable: every interpreted goal is a
+tuple the solver can score, so a suggestion can never be plausible-sounding and
+physically wrong. The optimizer treats placement as a constrained combinatorial
+problem over a discretized design space, solved with a three-rung multi-fidelity
+cascade and coordinate-descent refinement; against exhaustive search at
+reporting fidelity it lands in the top 0.8\% and top 1.4\% of the feasible space
+on two tasks while returning in 3--8\,s in the browser.
+
+We report a within-subjects study with 15 non-experts across four residential
+scenarios, comparing manual editing against the full tool. \textbf{[Results
+pending analysis --- see Section~\ref{sec:results}.]}
+\end{abstract}
+
+%% CCS concepts. Generate the official block at
+%% https://dl.acm.org/ccs and paste it here before submission.
+\begin{CCSXML}
+<ccs2012>
+<concept>
+<concept_id>10003120.10003121.10003122</concept_id>
+<concept_desc>Human-centered computing~HCI design and evaluation methods</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10003120.10003121.10003124.10010870</concept_id>
+<concept_desc>Human-centered computing~Natural language interfaces</concept_desc>
+<concept_significance>500</concept_significance>
+</concept>
+<concept>
+<concept_id>10010147.10010371.10010352</concept_id>
+<concept_desc>Computing methodologies~Animation</concept_desc>
+<concept_significance>300</concept_significance>
+</concept>
+</ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Human-centered computing~HCI design and evaluation methods}
+\ccsdesc[500]{Human-centered computing~Natural language interfaces}
+\ccsdesc[300]{Computing methodologies~Physical simulation}
+
+\keywords{indoor airflow, natural language interfaces, intent, physical
+  simulation, design optimization, non-experts, sketch interaction}
+
+\maketitle
+
+%% ===========================================================================
+\section{Introduction}
+
+A person who is uncomfortable at home knows exactly what is wrong and has no
+words for the fix. The bedroom is cold in winter while the living room is fine.
+The kitchen bin smells and the bed is four metres away. The air conditioner is
+aimed down the length of the room at the pillow, and it is the only thing
+keeping the flat cool. These are ordinary complaints, stated the way people
+state them.
+
+The tools that could resolve them do not accept that statement. Computational
+fluid dynamics for indoor environments is mature, and so are the methods built
+on top of it: inverse design that adjusts HVAC parameters until a numerical
+target is met~\cite{liu2017inverse}, real-time solvers fast enough to sit inside
+an interactive loop~\cite{zhu2011sketchfluid}, and learned surrogates that
+replace the solve
+entirely~\cite{thuerey2020deep}. Every one of them begins after the hard part is
+already done. Inverse design needs \emph{``hold 24\,\textdegree C in zone A,
+supply velocity 0.5\,m/s at diffuser D2, draft below 0.2\,m/s.''} Sketch-based
+systems need the user to know \emph{where} the sources and sinks belong. Even
+recent work applying large language models to air-distribution
+design~\cite{dai2025llm} takes an expert-authored prompt that already presumes
+CFD knowledge, and asks a professional to correct the output.
+
+The gap is at the input. Between \emph{``keep my bed cool at night, but I hate a
+draft on my face''} and the objective vocabulary those systems consume, there is
+a translation nobody has built, and it is not a lookup. One comfort goal maps to
+many physical configurations, so the system must select objectives rather than
+recover a unique answer. Goals conflict in ways the person stating them does not
+realize --- air speed cools and is also what a draft is made of --- so the
+translation must produce competing objectives, not a single target. Nouns like
+``the bed'' and ``the kitchen'' are references that must resolve to regions in
+\emph{this} home. And the result has to be verifiable: a language model can emit
+fluent, well-formatted, physically wrong numbers, and a system that cannot tell
+the difference is worse than no system.
+
+This paper takes that translation as the research problem. Our contributions are:
+
+\begin{enumerate}
+  \item \textbf{An intent-to-physics layer} that grounds everyday comfort goals
+    onto a closed vocabulary of evaluable objectives --- a tuple of region,
+    scalar, direction and hardness --- rather than onto free-form solver
+    parameters. Because the vocabulary is closed, every interpretation is
+    checkable against the solver that draws the user's own view, which is what
+    makes the translation trustworthy rather than merely fluent.
+  \item \textbf{Three interchangeable ways to state the same intent} --- direct
+    manipulation, typed language, and drawing --- all reducing to the same
+    objective tuples, so a study can observe which modality people reach for and
+    when without confounding modality with capability.
+  \item \textbf{A constrained optimizer} over device placement, aim and openings
+    that returns complete arrangements a participant could have reached by hand,
+    with feasibility enforced by construction and task rules treated as hard
+    constraints. We characterize it against exhaustive search.
+  \item \textbf{An empirical study} with 15 non-experts over four residential
+    scenarios, contrasting manual editing with the full tool, and an instrumented
+    session log built for behavioral analysis rather than for reading.
+\end{enumerate}
+
+The system runs entirely in a browser with no installation, no server and no
+account, which is what made a remote study of non-experts practical at all.
+
+%% ===========================================================================
+\section{Related Work}
+
+\subsection{Inverse design of indoor environments}
+
+Liu et al.~\cite{liu2017inverse} develop an adjoint method over a fast
+fluid-dynamics solver for the inverse design of indoor environments: the
+designer states a numerical target, the method computes how HVAC parameters
+influence it, and iterates. The machinery is exactly what a comfort complaint
+would need --- and it starts from a physical objective an occupant cannot write.
+Our work is deliberately the step \emph{before} this one: producing the
+objective that inverse design consumes.
+
+\subsection{Sketch-based fluid authoring}
+
+SketchFluid~\cite{zhu2011sketchfluid} lets users draw a fluid system --- pipes,
+regions, sources, sinks --- on a 2.5D canvas, with a hydraulic and 2D
+Navier--Stokes solver filling in plausible flow interactively, demonstrated on
+indoor air with multiple air conditioners. Drawing is a far lower barrier than
+numerical targets, but it still asks the user to know where the sources and
+sinks go: the answer is the input. This work is a direct descendant --- sketch
+to language, 2.5D to 3D --- and retains drawing as one modality among three
+precisely because sketch and language fail in different places.
+
+\subsection{Learned surrogates for flow}
+
+Thuerey et al.~\cite{thuerey2020deep} train a U-Net to predict RANS solutions
+for airfoil flows in a single forward pass at under 3\% mean error. Surrogates
+make simulation fast; they do not make it addressable. Speed is enabling
+technology for the interactive loop we need, not a contribution of this work.
+
+\subsection{Language models for HVAC design}
+
+Dai et al.~\cite{dai2025llm} apply GPT-4o to office air-distribution design: an
+HVAC professional writes a structured prompt, the model proposes a design, the
+professional corrects it, and one CFD run checks the result. This establishes
+that using a language model in this domain is not itself novel. The distinction
+our work draws is between \emph{accepting natural language} and \emph{accepting
+a non-expert's comfort goal}: their prompt is expert-authored and already
+physical. Table~\ref{tab:related} makes the comparison explicit; the column no
+prior system fills is the last one.
+
+\begin{table}[t]
+  \caption{Prior work by capability. Every system assumes the user can already
+    supply a physical objective, a correct sketch, or an expert prompt. The
+    empty column is the contribution.}
+  \label{tab:related}
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    & Indoor & Real-time & Optimi- & NL & Non-expert \\
+    & airflow & sim & zation & input & comfort goals \\
+    \midrule
+    Dai et al.~\cite{dai2025llm}       & \checkmark & --- & --- & \checkmark & --- \\
+    SketchFluid~\cite{zhu2011sketchfluid} & \checkmark & \checkmark & --- & --- & --- \\
+    Deep-Flow~\cite{thuerey2020deep}   & --- & \checkmark & --- & --- & --- \\
+    Inverse design~\cite{liu2017inverse} & \checkmark & $\sim$ & \checkmark & --- & --- \\
+    \textbf{This work}                 & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+%% ===========================================================================
+\section{Formative Study and Design Rationale}
+\label{sec:formative}
+
+Before building the interaction we ran a formative questionnaire with
+non-experts ($n=8$), following a story-first, opinions-last
+structure~\cite{mackay2023doit}, to learn what people would actually do about an
+uncomfortable room.
+
+\subsection{People reach for a device; openings are an afterthought}
+
+Asked to rank what they would do first to cool a room quickly, respondents
+reached for hardware and treated the building itself as inert
+(Table~\ref{tab:formative}). Not one would open a window first.
+
+\begin{table}[t]
+  \caption{``To cool a room quickly, rank what you would do first'' ($n=8$).
+    Lower is earlier.}
+  \label{tab:formative}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    Action & Mean rank & Ranked first by \\
+    \midrule
+    Turn on the AC   & 1.9 & 5 / 8 \\
+    Turn on a fan    & 1.9 & 2 / 8 \\
+    Open the door    & 3.1 & 1 / 8 \\
+    Open windows     & 3.1 & \textbf{0 / 8} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The solver disagrees. In our example home at 33\,\textdegree C outdoors with the
+air conditioner running in the living room, opening one interior door moves the
+bedroom from 33.0\,\textdegree C to 25.8\,\textdegree C while the living room is
+unchanged at 22.9 versus 22.8\,\textdegree C --- 7.2\,\textdegree C for free.
+Winter is symmetric: with a heater in the living room at 2\,\textdegree C
+outdoors, the bedroom goes from 2.0 to 7.4\,\textdegree C when the door opens.
+
+This gap between what people would do and what works is the reason the system
+exists, and it shaped every task in the study: each is constructed so that the
+device-only answer is insufficient and an opening or an aim is the real lever.
+It also yields a falsifiable form of ``is the tool useful'':
+
+\begin{quote}
+  Does the tool move non-experts off the device-first strategy and onto the
+  configuration the physics supports --- and do they believe it when it does?
+\end{quote}
+
+\subsection{Design goals}
+
+\begin{description}
+  \item[D1. Never require a physical quantity.] Every input the participant
+    gives is a comfort goal, a direct manipulation, or a drawing. Thresholds
+    exist and are never shown: a participant told ``keep it under
+    0.20\,m/s'' optimizes toward a number instead of judging whether the room
+    feels right, and the number is the thing the tool is supposed to be
+    explaining.
+  \item[D2. Every interpretation must be checkable.] Intent is grounded onto a
+    closed objective vocabulary that the solver can score, so an interpretation
+    can be right or wrong rather than merely plausible.
+  \item[D3. Suggestions must be reachable by hand.] The optimizer may only
+    propose changes the participant is permitted to make. A card that relocates
+    a bolted vent teaches the wrong lesson and cannot be undone by the person
+    holding the mouse.
+  \item[D4. One solve behind everything.] The visualization, the goal checks and
+    the optimizer's final ranking read the same solve, so what the participant
+    sees and what the system claims cannot disagree.
+\end{description}
+
+%% ===========================================================================
+\section{\textsc{Interactive Airflow}}
+
+\subsection{Walkthrough}
+
+The participant opens a prebuilt home in a 3D editor and is given a comfort goal
+in plain words. They may drag devices, aim them, open and close doors and
+windows, and run the simulation as often as they like. Flow is drawn as
+temperature-colored streamlines over a floor-level field for temperature,
+humidity or contaminant. When they are satisfied they press Submit, which scores
+the goals a final time and downloads the session as JSON.
+
+\subsection{Three ways to state the same intent}
+
+\textbf{By hand.} Direct manipulation of devices and openings on a 0.25\,m grid,
+with collision and doorway keep-clear rules enforced during the drag.
+
+\textbf{By typing.} A curated domain dictionary resolves the common vocabulary
+of comfort offline and instantly --- \emph{cool} to minimizing temperature,
+\emph{stuffy} to increasing ventilation, \emph{smell} to minimizing contaminant
+transport from a source region, \emph{drafty} to capping air speed. A language
+model is consulted only for wording the dictionary cannot match, and is
+constrained to emit \emph{only} tuples in the same vocabulary, which is what
+keeps its output verifiable. A sentence neither can read still produces a
+search, run against the active task's own goals, and says so rather than failing
+silently.
+
+\textbf{By drawing.} The participant boxes a region and marks it \emph{warm},
+\emph{cool}, \emph{fresh air} or \emph{no wind}, or draws an arrow to move air
+from one place to another. Regions resolve against the editor's scene graph.
+
+All three reduce to the same objective tuples, and downstream nothing knows
+which was used.
+
+\subsection{The objective vocabulary}
+
+Every goal becomes a tuple
+\[
+  \textit{objective} = (\textit{region},\ \textit{scalar},\ \textit{direction},\
+  \textit{hard} \mid \textit{soft})
+\]
+with \textit{scalar} drawn from a closed set --- temperature, air speed,
+ventilation, contaminant concentration, drying time --- and \textit{direction}
+one of minimize, maximize, or hold near target. Hard tuples are constraints that
+must hold; soft tuples are objectives to improve. The vocabulary is deliberately
+small. It is what allows a typed sentence, a drawn box, and a task's own
+built-in goals to be scored by exactly the same machinery, and what lets the
+system report that it did not understand rather than inventing a target.
+
+\subsection{Simulation}
+
+Flow is solved by an incompressible Euler solver on a staggered (MAC) grid with
+buoyancy, running entirely in the browser. The home is voxelized into solids,
+jets, inlets and outlets; temperature, contaminant and drying are then
+transported along the converged flow by a geodesic pass. Exterior glazing chills
+the air against it so that cold downdrafts form where they physically would.
+
+One modelling detail matters enough to state, because the task set turns on it.
+A cooling jet is roughly 8--10\,K below room temperature and therefore denser
+than the air around it, so a louvre aimed down is working with gravity and one
+aimed up is working against it. Aimed down, the jet reaches the floor and
+spreads as a gravity current into corners that direct throw never reaches; aimed
+up, it stalls within a metre and falls back over the unit that threw it --- the
+short-circuiting that is the reason no cooling louvre is aimed at a ceiling. An
+earlier symmetric treatment of tilt made these two indistinguishable and the
+apartment task had two contradictory answers.
+
+\subsection{The optimizer}
+\label{sec:optimizer}
+
+Intent becomes a constrained combinatorial optimization over device placement,
+solved against the same solver that draws the views.
+
+\textbf{Decision variables.} Per movable device: position on a 0.25\,m lattice,
+heading, and vertical aim quantized to 15\textdegree{} over $\pm$60\textdegree{}
+($\pm$30\textdegree{} for free-standing units). Per opening, a boolean. A
+wall-mounted unit contributes aim only, its heading being fixed by the wall it is
+bolted to. Feasibility is enforced by construction rather than by rejection:
+candidate positions are projected onto free space by a collision solver that
+already knows about furniture, doorway keep-clear zones and per-task room
+confinement, so infeasible points are never scored.
+
+\textbf{Objective.} A scalarization of the parsed request over the solver's
+steady fields, with the active task's thresholds entering as constraints. The
+composite is lexicographic in three tiers:
+\[
+  \textit{score} = \textit{request}(x) - 100\,|\mathcal{V}(x)| - 3\sum_i s_i(x) -
+  \sum_i m_i(x)
+\]
+where $\mathcal{V}$ is the set of violated constraints, $s_i$ the shortfall on
+goal $i$ normalized by that goal's own tolerance --- so a 0.03\,m/s draft
+overshoot and a 0.4\,\textdegree C temperature overshoot are commensurable ---
+and $m_i$ the same distance measured against a bar drawn a quarter-tolerance
+inside the real one. The last term orders solutions that all satisfy the
+constraints by how much headroom they leave, so nothing is recommended sitting
+exactly on its own limit. The tiering matters: with a purely linear penalty the
+optimizer will sell a violated constraint for a good number elsewhere, which on
+the apartment task meant trading 0.22\,m/s across a sleeper's bed for a degree in
+the living room.
+
+\textbf{Multi-fidelity cascade.} Evaluating every candidate at reporting fidelity
+is far too slow for an interactive loop, so solver cost is spent where it
+discriminates (Table~\ref{tab:cascade}). Because the final rung is the fidelity
+the goal checks themselves use, a suggestion's printed numbers and its checkmarks
+cannot disagree (D4).
+
+\begin{table}[t]
+  \caption{The three rungs of the cascade. Each is a coarser discretization of
+    the same Euler solve.}
+  \label{tab:cascade}
+  \small
+  \begin{tabular}{lrrrl}
+    \toprule
+    Rung & Cells & Iters & Steps & Role \\
+    \midrule
+    Screen & 1{,}200 & 4 & 8  & ranks all candidates, 300-eval budget \\
+    Mid    & 1{,}800 & 6 & 12 & re-ranks the shortlist \\
+    Final  & 4{,}200 & 8 & 22 & re-scores finalists at goal fidelity \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Local refinement.} Finalists are polished by coordinate descent over
+$(x, z, \textit{heading}, \textit{tilt})$ --- eight translations, two rotations
+and two tilts per step, each projected back onto the feasible set --- under a
+separate 70-evaluation budget. This is what reaches positions off the candidate
+lattice.
+
+\textbf{Constraints from the drawing.} A sketched arrow is treated as a
+directional constraint rather than an objective term: it restricts admissible
+headings to a 60\textdegree{} cone about the bearing to the arrow's head, so the
+returned layout satisfies the drawn direction by construction instead of trading
+it away against the scalar objective.
+
+%% ===========================================================================
+\section{Technical Evaluation}
+\label{sec:technical}
+
+\subsection{Optimizer quality against exhaustive search}
+
+We brute-forced two tasks over their reachable space at reporting fidelity and
+compared the result with what the optimizer returns
+(Table~\ref{tab:optimizer}).
+
+\begin{table}[t]
+  \caption{Optimizer against exhaustive search at reporting fidelity.}
+  \label{tab:optimizer}
+  \small
+  \begin{tabular}{llrrr}
+    \toprule
+    Task & Request & Start & Exhaustive & Optimizer \\
+    \midrule
+    Winter & \emph{warm the bedroom} & 13.51 & 21.49 & \textbf{20.77} \\
+    Apartment & \emph{cool the flat} & 24.89 & 24.58 & \textbf{24.66} \\
+    \bottomrule
+  \end{tabular}
+  \\[2pt]
+  \footnotesize All values \textdegree C. Winter: top 0.8\% of 384 layouts.
+  Apartment: top 1.4\% of the 148 \emph{feasible} layouts.
+\end{table}
+
+The apartment row is scored against the feasible subset deliberately. The
+unconstrained optimum over that grid is 24.47\,\textdegree C and it drives
+1.15\,m/s across the bed --- six times the task's draft limit. It is the coldest
+arrangement in the space and it is not an answer to the task; 284 of the grid's
+432 layouts are infeasible in the same way. Since the optimizer solves the
+constrained problem, the honest comparison is against the 148 layouts that also
+keep the bed calm, and there it ranks third. A search completes in roughly
+3--8\,s single-threaded in the browser.
+
+\subsection{Feasibility auditing}
+
+Design goal D3 is verified rather than assumed. On every change to the search,
+all four tasks are run and every returned layout is diffed against what its task
+permits --- no relocating a bolted vent, no turning a wall-mounted unit, no
+touching a power dial the task fixes. The audit is what caught, among others, a
+suggestion that switched off a fan on a task whose power control is hidden,
+leaving the participant unable to switch it back on.
+
+\subsection{Threshold calibration}
+
+Every task threshold was set by measurement rather than by judgement, by
+bundling the simulation modules headlessly and sweeping the reachable space. The
+humidity task's 66-minute drying line, for example, separates 57 of 104 vent and
+window combinations from the rest, and every arrangement leaving the extract on
+the window's own wall reads 113 minutes or worse whatever the glazing does. The
+sweep that produced each number is recorded beside it in the source.
+
+%% ===========================================================================
+\section{User Study}
+\label{sec:study}
+
+\subsection{Design}
+
+A within-subjects study contrasting \textbf{manual editing} with the
+\textbf{full tool} (typed and drawn intent plus the optimizer), with condition
+order counterbalanced across participants and matched scenario sets assigned so
+that neither condition is consistently paired with the same scenarios.
+
+\subsection{Participants}
+
+Fifteen non-experts (8 male, 7 female), spanning a small number of teenagers, a
+majority in their twenties, and a small number in their thirties. Anyone with
+HVAC, CFD, mechanical-engineering or architecture training was screened out, the
+claim being about non-experts. Sessions ran remotely over video with
+screen-sharing, approximately 45--50 minutes each.
+
+\textbf{[TODO(Joseph): confirm the age bands as numbers, the recruitment
+channel, the compensation, and the ethics approval reference for the ethics
+statement below.]}
+
+\subsection{Tasks}
+
+Four residential scenarios, each a prebuilt home, a fixed set of permitted
+controls, and one or two checkable goals held in tension so that no single move
+finishes the job (Table~\ref{tab:tasks}). Task wording gives the comfort goal
+only --- never a physical quantity, never a device, never a room-to-room
+mechanism (D1).
+
+\begin{table}[t]
+  \caption{The four study tasks. Every goal is a solver-checked threshold that
+    the participant is never shown.}
+  \label{tab:tasks}
+  \small
+  \begin{tabular}{p{1.7cm}p{2.2cm}p{3.4cm}}
+    \toprule
+    Task & May change & Goal \\
+    \midrule
+    Winter & heater (living room only), fan & both rooms comfortable, no cold pool at the glass \\
+    Kitchen smell & fan, either window & keep the kitchen smell off the bed \\
+    Humidity & extract vent, window & dry the bathroom fast after a shower \\
+    AC on the bed & louvre tilt, fan, bedroom door & no strong draft on the bed \emph{and} both rooms cool everywhere \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Measures}
+
+\textbf{Goal attainment.} Solver-scored constraint satisfaction on the final
+state --- binary per objective, plus the achieved margin.
+
+\textbf{Strategy shift.} Whether the final state changes at least one opening,
+and edit counts by object type, testing directly whether participants move off
+the device-first strategy of Section~\ref{sec:formative}.
+
+\textbf{Calibration and silent error.} A belief prompt (yes/no plus a five-point
+confidence rating) asked \emph{before} any verdict is shown, crossed with the
+solver's score --- the cases where a participant believes the goal held and it
+did not.
+
+\textbf{Effort.} Time to self-declared completion, number of edits, number of
+simulation runs.
+
+\textbf{Modality use.} Which of the three input routes each edit came through,
+and in what order across a session.
+
+\textbf{Subjective.} Perceived usefulness for a real room rather than for the
+task, and SUS, so that usefulness is not confounded with interface friction.
+
+\subsection{Instrumentation}
+
+Submit seals a JSON record built for analysis rather than for reading. Every
+event carries the method it came through (\texttt{manual}, \texttt{text},
+\texttt{sketch}, \texttt{solution} or \texttt{system}) and the \emph{whole
+layout after the event}, so any step can be scored, diffed or re-simulated on
+its own without replaying the ones before it. Simulator readings are recorded
+whenever the value moves rather than only when a checkbox flips. Typed sentences
+are stored verbatim together with how they were parsed, before anything is done
+with them; a search records what it was asked, what it was permitted to touch,
+and every card it offered with that card's full layout and predicted numbers, so
+an accepted suggestion can be compared against the ones passed over.
+
+\subsection{Analysis plan}
+
+At $n=15$ with one scenario per condition per participant this is a
+mixed-methods formative-summative study, not a powered confirmatory trial. We
+report medians, per-participant paired differences, effect sizes and confidence
+intervals, with Wilcoxon signed-rank tests where a paired comparison is
+meaningful, and treat every between-modality comparison as descriptive and
+qualitative.
+
+%% ===========================================================================
+\section{Results}
+\label{sec:results}
+
+\textbf{[PENDING --- the 15 session logs have not yet been analysed. Structure
+below; numbers to follow.]}
+
+\subsection{Goal attainment}
+\textbf{[Manual vs.\ full tool, per task; paired differences; margins.]}
+
+\subsection{Strategy shift}
+\textbf{[Proportion changing an opening, by condition. This is the section that
+answers the formative finding in Section~\ref{sec:formative}.]}
+
+\subsection{Calibration}
+\textbf{[Belief $\times$ solver score; silent-error rate by condition.]}
+
+\subsection{Modality use}
+\textbf{[Counts by method from the session logs; ordering within sessions;
+switching behaviour.]}
+
+\subsection{Effort and subjective response}
+\textbf{[Time, edits, simulation runs; usefulness and SUS.]}
+
+%% ===========================================================================
+\section{Discussion}
+
+\textbf{[PENDING --- to be written against the results.]}
+
+%% ===========================================================================
+\section{Limitations}
+
+The solver is a coarse real-time prototype of roughly 18{,}000 cells. It is
+calibrated for the four study tasks and has not been validated against physical
+measurement; the claims here are about a consistent interactive model, not about
+predictive accuracy for a real building.
+
+The optimizer is a budgeted local method over a discretized design space and
+carries no optimality certificate. Its guarantee is empirical, measured against
+exhaustive search on two tasks, and the cheap rung of the cascade can in
+principle discard a region the accurate rung would have preferred.
+
+Scalar fields beyond temperature, contaminant and drying --- CO\textsubscript{2}
+and particulates in particular --- are not implemented, which limits the range of
+comfort goals the vocabulary can currently ground.
+
+The study is small and remote, with four scenarios in a single prebuilt home
+each. It can show whether the tool changes strategy and belief in these
+scenarios; it cannot establish that the effect generalizes to a participant's
+own home, which is the setting the work is ultimately about.
+
+\section{Conclusion}
+
+\textbf{[PENDING --- to be written against the results.]}
+
+%% ===========================================================================
+\begin{acks}
+\textbf{[Anonymized for review. Add funding, the lab, and the pilot participants
+for the camera-ready.]}
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}
