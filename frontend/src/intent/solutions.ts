@@ -128,6 +128,10 @@ function primaryFor(goal: OptimizeGoal, plan: FloorPlan, allowed?: string[]): st
 interface PrimaryAlt {
   pos: Vec3;
   rot: number;
+  /** The vertical aim this alternative was SCORED at. Without it every
+   *  alternative card was rebuilt at the device's original tilt, so a gallery
+   *  about louvre angle showed the same louvre angle on every card. */
+  tilt?: number;
   roomId: string;
   roomName: string;
   score: number;
@@ -240,12 +244,39 @@ function wallSideName(rect: Rect, pos: Vec3): string {
 }
 
 /** The vertical aims the search tries, matching the panel's own slider range
- *  (±60°). Wall units are swept over all of these and nothing else. */
-const TILT_STEPS = [-0.7, -0.35, 0, 0.26, 0.52, 0.79, 1.05];
+ *  (±60°) — every 15°, both ways. Wall units are swept over all of these and
+ *  nothing else.
+ *
+ *  This list used to claim ±60° and deliver -40° to +60°: four aims above level
+ *  and two below it. The consequence was not a rounding error. On the apartment
+ *  task the answer is the louvre pointed ALL THE WAY DOWN, so the cold lands on
+ *  the floor and spreads instead of crossing the room at pillow height — and
+ *  the search could not put that card on the table, because the position did
+ *  not exist in its vocabulary. It offered the mirror image instead, aimed at
+ *  the ceiling, which is the move that short-circuits a cold jet. */
+const TILT_STEPS = [-1.05, -0.79, -0.52, -0.26, 0, 0.26, 0.52, 0.79, 1.05];
+
+/** The vertical aims a FREE-STANDING device is swept over — ±30°, because a
+ *  fan on a stand crossed with a full circle of headings is already a large
+ *  grid and the extreme angles of a floor fan are not where its answers live.
+ *  Written out rather than sliced from TILT_STEPS: it used to be a slice, and
+ *  the moment that list changed length the "middle five" quietly became five
+ *  downward aims with no upward one among them. */
+const FAN_TILT_STEPS = [-0.52, -0.26, 0, 0.26, 0.52];
 
 /** How hard the ACTIVE TASK's own goals pull on a search that was asked for
  *  something else. A tiebreak, not a veto — see scoreOf. */
 const TASK_GUARD = 3;
+
+/** What it costs a candidate to BREAK one of the task's lines outright, as
+ *  opposed to missing it by a little. Large enough that no proxy score can buy
+ *  its way past one — see scoreOf for why the graded penalty alone could not do
+ *  this job. */
+const TASK_UNMET = 100;
+
+/** What a layout pays for passing a goal only just. A tiebreak among layouts
+ *  that all pass — see scoreOf. */
+const TASK_MARGIN = 1;
 
 /** Air speed over a target room above which people notice a draught (m/s). */
 const DRAFT_CAP = 0.35;
@@ -296,6 +327,11 @@ export interface SolutionMetrics {
   /** Per TaskZone, how far this plan is from satisfying it: 0 = met, larger =
    *  further away, in units of the goal's own tolerance. Empty off-scenario. */
   taskShortfall: number[];
+  /** The same distance measured against a bar drawn slightly INSIDE the real
+   *  one, so a layout that only just scrapes a goal still registers as tight.
+   *  Nothing is judged pass or fail by it — see scoreOf, where it separates
+   *  layouts that all pass by how much room they left themselves. */
+  taskTight: number[];
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
   meanTargetC: number;
@@ -424,6 +460,10 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   // beyond the bar is done, not better, and rewarding overshoot would trade one
   // satisfied line against another.
   const taskShortfall: number[] = [];
+  const taskTight: number[] = [];
+  // How far inside a goal's bar the "tight" copy of it sits, as a fraction of
+  // that goal's own tolerance. 0.25 is a quarter of one tolerance step.
+  const TIGHTEN = 0.25;
   for (const g of zones) {
     // "*" is every room, graded on the worst of them — see checkGoals.
     if (g.metric === "temperature" && g.everywhere && g.roomId === "*") {
@@ -431,13 +471,21 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
       for (const r of plan.rooms) worst = Math.max(worst, warmestPart(built, temp, r.rect));
       const c = outdoorTemp + worst;
       let short = 0;
-      if (g.atMost !== undefined) short += Math.max(0, c - g.atMost);
-      if (g.atLeast !== undefined) short += Math.max(0, g.atLeast - c);
+      let tight = 0;
+      if (g.atMost !== undefined) {
+        short += Math.max(0, c - g.atMost);
+        tight += Math.max(0, c - (g.atMost - TIGHTEN));
+      }
+      if (g.atLeast !== undefined) {
+        short += Math.max(0, g.atLeast - c);
+        tight += Math.max(0, g.atLeast + TIGHTEN - c);
+      }
       taskShortfall.push(short);
+      taskTight.push(tight);
       continue;
     }
     const rect = g.zone ?? plan.rooms.find((r) => r.id === g.roomId)?.rect ?? null;
-    if (!rect) { taskShortfall.push(0); continue; }
+    if (!rect) { taskShortfall.push(0); taskTight.push(0); continue; }
     let v: number | null = null;
     let scale = 1;
     if (g.metric === "draft") { v = zoneSpeed(built, rect); scale = 0.1; }
@@ -448,11 +496,19 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     }
     else if (g.metric === "drying") { v = slowestDry(built, dryF, rect); scale = 30; }
     else { v = zoneMean(built, smell, rect); scale = 0.05; }
-    if (v === null) { taskShortfall.push(0); continue; }
+    if (v === null) { taskShortfall.push(0); taskTight.push(0); continue; }
     let short = 0;
-    if (g.atMost !== undefined) short += Math.max(0, v - g.atMost) / scale;
-    if (g.atLeast !== undefined) short += Math.max(0, g.atLeast - v) / scale;
+    let tight = 0;
+    if (g.atMost !== undefined) {
+      short += Math.max(0, v - g.atMost) / scale;
+      tight += Math.max(0, v - (g.atMost - TIGHTEN * scale)) / scale;
+    }
+    if (g.atLeast !== undefined) {
+      short += Math.max(0, g.atLeast - v) / scale;
+      tight += Math.max(0, g.atLeast + TIGHTEN * scale - v) / scale;
+    }
     taskShortfall.push(short);
+    taskTight.push(tight);
   }
 
   let heaterWindowC: number | null = null;
@@ -510,6 +566,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     roomFresh,
     roomDryMin,
     taskShortfall,
+    taskTight,
     worstTargetC: tTemps.length ? Math.max(...tTemps) : NaN, // see scoreOf: sign depends on the goal
     meanTargetC: tTemps.length ? tTemps.reduce((a, b) => a + b, 0) / tTemps.length : NaN,
     houseMeanSpeed,
@@ -552,8 +609,34 @@ function scoreOf(
   // layouts which serve the request equally the search prefers one that does
   // not wreck a goal, never enough to answer a different question from the one
   // asked. Off-scenario there are no task lines and this term is absent.
+  //
+  // MEETING A LINE AND MISSING IT NARROWLY ARE DIFFERENT KINDS OF THING, and a
+  // single graded penalty could not say so. The comment above promised that a
+  // layout satisfying both lines beats every layout satisfying one; at a linear
+  // weight of 3 that was simply not true, and on the apartment task it showed:
+  // the search offered a louvre angle that put 0.22 m/s across the bed —
+  // failing the one line the whole task is named after — because it bought the
+  // living room a degree in exchange. Nobody would make that trade.
+  //
+  // So the guard is TIERED. Breaking a line costs a flat amount no proxy can
+  // outbid, which makes "does not fail the task" a floor rather than a
+  // preference. WITHIN a tier — among layouts that meet the same lines — the
+  // request still decides the order, which is the part that must not be lost:
+  // that is what stops "cool the living room" and "cool the bedroom" collapsing
+  // into the same answer, and it is what the study is for.
   const total = m.taskShortfall.reduce((a, b) => a + b, 0);
-  return base - TASK_GUARD * total;
+  const unmet = m.taskShortfall.reduce((n, s) => n + (s > 0 ? 1 : 0), 0);
+  // AND AMONG LAYOUTS THAT ALL PASS, PREFER THE ONE WITH ROOM TO SPARE. Once a
+  // line is met the graded penalty above goes to zero and stays there, on the
+  // principle that beyond the bar is done rather than better — which is right
+  // for scoring and wrong for RECOMMENDING. It let the apartment search offer a
+  // louvre angle measuring 0.200 m/s over the bed against a 0.20 limit, when a
+  // steeper one measured 0.140 and was no warmer anywhere. A card sitting
+  // exactly on its own threshold is a card that reads as failed the next time
+  // anything moves. This term is small: it orders layouts the task cannot
+  // otherwise tell apart, and cannot outweigh the request itself.
+  const tight = m.taskTight.reduce((a, b) => a + b, 0);
+  return base - TASK_UNMET * unmet - TASK_GUARD * total - TASK_MARGIN * tight;
 }
 
 /** The original goal-word scoring: what to rank by when there is no task. */
@@ -935,7 +1018,7 @@ function placeDevices(
         : flowRoom
           ? [flowRoom]
           : roomOrder;
-      let best: { pos: Vec3; rot: number; roomId: string; roomName: string; osc?: boolean; score: number } | null = null;
+      let best: { pos: Vec3; rot: number; tilt?: number; roomId: string; roomName: string; osc?: boolean; score: number } | null = null;
       // BOLTED DOWN IS NOT THE SAME AS OFF-LIMITS. A task can let you re-aim a
       // device without letting you move it — a rented studio's air conditioner
       // is the case the distinction exists for — and the search only knew one
@@ -958,8 +1041,8 @@ function placeDevices(
         // reach the answer at all — it turned the unit left and right forever
         // while the jet stayed on the pillow. Tilt is the other half of aimVec
         // and the participant has a control for it, so the search gets one too:
-        // seven headings across the wall's arc x five angles from 40° down to
-        // 60° up, which is the range of the panel's own slider.
+        // headings across the wall's arc x the panel slider's own range of
+        // vertical angles, 60° down to 60° up.
         // A WALL UNIT HAS ONE AXIS OF AIM, NOT TWO. Its casing is bolted flat and
         // the participant has no horizontal control for it (see canTurn), so
         // proposing a heading change is proposing something they cannot carry
@@ -977,7 +1060,7 @@ function placeDevices(
                 axis: "area" as const,
                 oscillate: false,
               }))
-            : TILT_STEPS.slice(1, 6).flatMap((tilt) =>
+            : FAN_TILT_STEPS.flatMap((tilt) =>
                 Array.from({ length: 5 }, (_, i) => ({
                   position: it.position,
                   rotationY:
@@ -1050,25 +1133,45 @@ function placeDevices(
           };
           budget.left--;
           const { score } = evaluate(trial, goal, targetIds, outdoorTemp, drying ? SCREEN_DRY : SCREEN, drying, zones);
+          const candTilt = typeof (cand as { tilt?: number }).tilt === "number" ? (cand as { tilt?: number }).tilt : undefined;
           if (it.type === primary && sweep === 1) {
-            primaryAlts.push({ pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, score });
+            primaryAlts.push({ pos: placed, rot: cand.rotationY, tilt: candTilt, roomId: cand.roomId, roomName: cand.roomName, score });
           }
           if (!best || score > best.score) {
-            best = { pos: placed, rot: cand.rotationY, roomId: cand.roomId, roomName: cand.roomName, osc: cand.oscillate, score };
+            best = { pos: placed, rot: cand.rotationY, tilt: candTilt, roomId: cand.roomId, roomName: cand.roomName, osc: cand.oscillate, score };
           }
         }
       }
       if (!best) continue;
       const prev = working.items.find((o) => o.id === it.id)!;
+      // A LOUVRE THAT TILTED HAS CHANGED, even though nothing slid along the
+      // wall and nothing turned. Without the third line a tilt-only task
+      // produced cards whose change list was empty.
       const moved =
         Math.abs(best.pos[0] - prev.position[0]) > 0.05 ||
         Math.abs(best.pos[2] - prev.position[2]) > 0.05 ||
-        Math.abs(best.rot - prev.rotationY) > 0.05;
+        Math.abs(best.rot - prev.rotationY) > 0.05 ||
+        (best.tilt !== undefined && Math.abs(best.tilt - (prev.tilt ?? 0)) > 0.05);
+      // THE TILT HAS TO COME BACK WITH IT. Every candidate above was built,
+      // scored and ranked with a vertical aim on it — and then this line
+      // rebuilt the winner from position, heading and oscillation only, so the
+      // louvre silently snapped back to where it started. The search was doing
+      // the work and throwing away the answer: on the apartment task, whose
+      // whole question is which way the air conditioner points, it could
+      // measure that aiming down cools the far room and still hand back a unit
+      // aimed level, because the tilt never survived the assignment.
       working = {
         ...working,
         items: working.items.map((o) =>
           o.id === it.id
-            ? { ...o, position: best!.pos, rotationY: best!.rot, roomId: best!.roomId, ...(best!.osc !== undefined ? { oscillate: best!.osc } : {}) }
+            ? {
+                ...o,
+                position: best!.pos,
+                rotationY: best!.rot,
+                roomId: best!.roomId,
+                ...(best!.tilt !== undefined ? { tilt: best!.tilt } : {}),
+                ...(best!.osc !== undefined ? { oscillate: best!.osc } : {}),
+              }
             : o,
         ),
       };
@@ -1096,11 +1199,19 @@ function placeDevices(
     // could be carried around; for a device that is bolted down and only aimed,
     // every alternative shares one position and the whole set collapsed to a
     // single card — on the task where the aim IS the question.
+    //
+    // POINTING THE SAME WAY IS TWO ANGLES. This test knew about heading only,
+    // and a wall unit has no heading to vary — so on the apartment task all
+    // nine louvre angles matched each other on both counts and eight of them
+    // were dropped here, before anything was re-scored properly. Whatever the
+    // cheap screening rung liked was the only angle that ever reached the
+    // shortlist, and the accurate rung never got to disagree with it.
     if (
       spread.some(
         (k) =>
           Math.hypot(k.pos[0] - a.pos[0], k.pos[2] - a.pos[2]) < ALT_MIN_APART &&
-          Math.abs(Math.atan2(Math.sin(k.rot - a.rot), Math.cos(k.rot - a.rot))) < ALT_MIN_TURN,
+          Math.abs(Math.atan2(Math.sin(k.rot - a.rot), Math.cos(k.rot - a.rot))) < ALT_MIN_TURN &&
+          Math.abs((k.tilt ?? 0) - (a.tilt ?? 0)) < ALT_MIN_TURN,
       )
     )
       continue;
@@ -1428,7 +1539,7 @@ export function findSolutions(
         ...placed,
         items: placed.items.map((it) =>
           it.type === primaryFor(goal, plan, opts.allowedDevices) && it.on !== false
-            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId }
+            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId, ...(alt.tilt !== undefined ? { tilt: alt.tilt } : {}) }
             : it,
         ),
       }))];
@@ -1470,7 +1581,7 @@ export function findSolutions(
         ...bank!.base,
         items: bank!.base.items.map((it) =>
           it.type === primaryType && it.on !== false
-            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId }
+            ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId, ...(alt.tilt !== undefined ? { tilt: alt.tilt } : {}) }
             : it,
         ),
       };

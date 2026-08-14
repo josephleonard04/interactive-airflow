@@ -625,7 +625,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       ...snapshot(s),
       plan: sol.plan,
       pendingChange: {
-        title: `${sol.label} — for “${(s.solutionGoal ?? "").trim().slice(0, 40)}”`,
+        title: `${sol.label} — for “${(s.solutionGoal ?? "").trim()}”`,
         lines: lines.length ? lines : ["Already set — no change."],
       },
       solutionOptions: [],
@@ -709,8 +709,21 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         if (calm) {
           // A calm-air goal ("no draft on the bed") wants LESS air movement —
           // quiet the movers rather than searching for a stronger layout.
+          // WHAT IT MAY QUIET IS STILL THE TASK'S DECISION. This branch used to
+          // reach past every constraint in the scenario and turn the dial down
+          // on an air conditioner whose dial the task states is fixed — the one
+          // thing the participant is told they cannot do. On a lockPower task
+          // the power settings and the on/off switches are not ours to touch,
+          // so calm has to be found by aiming and moving, which is exactly the
+          // work the task is asking for.
+          const lockedPower = s.tools.lockPower === true;
+          const canQuiet = (t: string) => !lockedPower && (s.tools.movable.includes(t) || s.tools.aimable.includes(t));
           const items = before.items.map((it) =>
-            it.type === "fan" ? { ...it, on: false } : it.type === "ac" ? { ...it, power: 1 } : it,
+            it.type === "fan" && canQuiet("fan")
+              ? { ...it, on: false }
+              : it.type === "ac" && canQuiet("ac")
+                ? { ...it, power: 1 as const }
+                : it,
           );
           const after: FloorPlan = { ...before, items };
           const lines = [...diffPlan(before, after), `Quieted the air movers so ${regionName ?? "the area"} stays calm`];
@@ -718,7 +731,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           set({
             ...snapshot(s),
             plan: after,
-            pendingChange: { title: `Calm air — “${goalText.trim().slice(0, 40)}”`, lines },
+            pendingChange: { title: `Calm air — “${goalText.trim()}”`, lines },
             optimizing: false,
           });
           return;

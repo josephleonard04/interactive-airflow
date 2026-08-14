@@ -206,11 +206,11 @@ export function SimPanel() {
       objs = objectivesFromScenario(sid ? SCENARIOS[sid].goals : undefined, livePlan, t);
       guessed = objs.length > 0;
       if (!objs.length) {
-        setUnparsed({ text: t.slice(0, 60), reason });
+        setUnparsed({ text: t, reason });
         return;
       }
     }
-    setGuessedGoal(guessed ? t.slice(0, 60) : null);
+    setGuessedGoal(guessed ? t : null);
     if (applyObjectives(objs, t)) recheckGoal.current = t;
   };
 
@@ -224,7 +224,7 @@ export function SimPanel() {
   if (!active) {
     return (
       <button className="primary" style={btn} onClick={toggleSim}>
-        ▶ Simulate airflow
+        ▶ Simulation
       </button>
     );
   }
@@ -292,8 +292,8 @@ export function SimPanel() {
               onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); if (guessedGoal) setGuessedGoal(null); }}
               onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void checkGoal(); }}
               placeholder="e.g. keep my bedroom cool, and keep the kitchen smell out of it"
-              rows={3}
-              style={{ width: "100%", resize: "vertical", minHeight: 64, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
+              rows={5}
+              style={{ width: "100%", resize: "vertical", minHeight: 112, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 11px", fontSize: 13, color: "var(--text)", fontFamily: "inherit", lineHeight: 1.4 }}
             />
             {/* No example goals. Three ready-made sentences under the box are
                 three sentences a participant will pick instead of writing their
@@ -392,7 +392,7 @@ export function SimPanel() {
               fontSize: 12, lineHeight: 1.45, color: "var(--muted)",
             }}
           >
-            I searched your layout for “{(solutionGoal ?? "").trim().slice(0, 40)}” and did not find a
+            I searched your layout for “{(solutionGoal ?? "").trim()}” and did not find a
             change worth offering — what you have is already doing the job. Try moving things yourself
             and running the simulation again.
           </p>
@@ -546,7 +546,7 @@ function SolutionOptions({
     <div style={{ marginTop: 8, border: "1px solid var(--line)", borderRadius: 10, padding: 9, background: "#fff" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: 12.5, fontWeight: 700 }}>
-          {options.length} option{options.length > 1 ? "s" : ""} for “{(goal ?? "").trim().slice(0, 32)}”
+          {options.length} option{options.length > 1 ? "s" : ""} for “{(goal ?? "").trim()}”
         </span>
         <button className="ghost" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onDismiss}>
           ✕

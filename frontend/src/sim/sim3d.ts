@@ -436,7 +436,32 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       // value from running away, and this is a deliberate, task-scoped choice
       // about how far one unit throws.
       const acThrow = isAC ? (plan.acThrow ?? 1) : 1;
-      const mag = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult * acThrow;
+      // A COLD JET IS NOT SYMMETRIC IN TILT, and the model used to treat it as
+      // if it were: ±60° produced the same reach, so "louvre up" and "louvre
+      // down" were interchangeable and the task had two answers where the room
+      // has one. Supply air off an air conditioner is 8-10 K below the room and
+      // therefore heavier than it, so the louvre is either working with gravity
+      // or against it.
+      //   DOWN — buoyancy-assisted, and the jet simply does what it was thrown
+      //   to do: reach the floor, land, and spread outward as a gravity current
+      //   that creeps into corners the throw could never have reached directly.
+      //   Nothing is added for it; gravity is not a bonus, it is the baseline a
+      //   cold jet was designed around.
+      //   UP — buoyancy-opposed. The jet decelerates against its own weight
+      //   within a metre, stalls, and falls back over the unit that threw it.
+      //   The cold never leaves the wall it is bolted to; the room mean barely
+      //   moves and the far corner not at all. HVAC calls this short-circuiting,
+      //   and it is the reason nobody aims a cooling louvre at the ceiling.
+      // So the factor is a PENALTY on aiming up, never a boost for aiming down —
+      // an early version boosted the down jet symmetrically and made the honest
+      // answer wrong, throwing a stronger floor current straight down the room
+      // at the bed. Fully up keeps ~0.15 of its reach; down is untouched at 1.
+      // The depth was measured on the apartment task, where it is the difference
+      // between a louvre position that cools the far room and one that does not:
+      // aimed up the warmest corner sits at 25.6 °C, aimed down at 24.7 °C, and
+      // the task's line runs between them.
+      const tiltAssist = isAC ? clampf(1 - 1.0 * Math.sin(it.tilt ?? 0), 0.15, 1) : 1;
+      const mag = (isFan ? 1.0 : clampf((it.flow ?? 0) / 0.3, 0.4, 1.5)) * mult * acThrow * tiltAssist;
       const speed = isReturn ? -mag : mag;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);

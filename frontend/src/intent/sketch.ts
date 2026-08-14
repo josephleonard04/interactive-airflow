@@ -96,17 +96,33 @@ export interface SketchGoal {
   /** Plain-language rendering of the drawing — shown on the option cards and
    *  written to the study log, so a sketched turn reads like a typed one. */
   text: string;
-  /** True when the drawing asks for LESS air movement, which is not a placement
-   *  search at all — it is "turn the movers down", the same as typing "no
-   *  draught on the bed". */
+  /** True when the drawing asks for LESS air movement AND NOTHING ELSE, which
+   *  is not a placement search at all — it is "turn the movers down", the same
+   *  as typing "no draft on the bed".
+   *
+   *  A no-draft box next to a cool box is NOT that. "Still here, cold there" is
+   *  one coherent request — it is the apartment task written in two rectangles —
+   *  and switching the movers off answers half of it by giving up on the other
+   *  half. That case searches, with the calm box travelling as a constraint the
+   *  task's own draft goal already scores. */
   calm: boolean;
+  /** Rooms a no-draft box was drawn over, when the drawing ALSO asks for
+   *  something to be delivered. Carried for the wording and the log. */
+  calmIds: string[];
 }
 
 /** Reduce a drawing to a goal the solver already understands.
  *
  *  Areas decide WHAT is wanted (the first one drawn wins if they disagree —
  *  "warm here and cool there" is two sessions' worth of intent, not one) and
- *  WHERE. An arrow adds its destination room as somewhere that must be served,
+ *  WHERE. ONE PAIR IS EXEMPT: a no-draft box and a deliver-something box are
+ *  not a disagreement. "Keep this end still, get cold air to that end" is a
+ *  single request, and it is the one the apartment task is about — so the
+ *  deliverable leads the search and the no-draft box rides along as a
+ *  constraint. Read the other way round it produced nonsense: the first box
+ *  drawn was the no-draft one, everything after it was discarded, and the whole
+ *  drawing came back as "switch the fan off".
+ *  An arrow adds its destination room as somewhere that must be served,
  *  because "bring it from the living room to the bedroom" names the bedroom as
  *  the room in trouble. An arrow on its own, with no area, is a request to move
  *  air along it. */
@@ -115,14 +131,25 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
 
   const areas = marks.filter((m): m is SketchArea => m.kind === "area");
   const arrows = marks.filter((m): m is SketchArrow => m.kind === "arrow");
-  const intent = areas[0]?.intent ?? null;
+  // A no-draft box asks for something to STOP; the other three ask for
+  // something to ARRIVE. Split them before picking a winner, so a drawing that
+  // has one of each keeps both halves.
+  const deliver = areas.filter((a) => a.intent !== "nodraft");
+  const calmAreas = areas.filter((a) => a.intent === "nodraft");
+  const intent = (deliver[0] ?? areas[0])?.intent ?? null;
+  const leading = deliver.length ? deliver : calmAreas;
 
   const targetIds: string[] = [];
   const push = (id: string | undefined | null) => {
     if (id && !targetIds.includes(id)) targetIds.push(id);
   };
-  for (const a of areas) if (a.intent === intent) push(areaRoom(plan, a.rect)?.id);
+  for (const a of leading) if (a.intent === intent) push(areaRoom(plan, a.rect)?.id);
   for (const a of arrows) push(roomAt(plan, a.to[0], a.to[1])?.id);
+  const calmIds: string[] = [];
+  for (const a of calmAreas) {
+    const id = areaRoom(plan, a.rect)?.id;
+    if (id && !calmIds.includes(id)) calmIds.push(id);
+  }
 
   const nameOf = (id: string) => plan.rooms.find((r) => r.id === id)?.name ?? id;
   // The first arrow is the one that decides where the fan stands. Two arrows
@@ -153,6 +180,7 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
       targetIds,
       text: arrowText.join(", ") || "move air along the arrow",
       calm: false,
+      calmIds: [],
     };
   }
 
@@ -168,7 +196,19 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
           ? `fresh air in ${where}`
           : `no draft in ${where}`;
 
-  return { goal, flow, targetIds, text: [head, ...arrowText].join(", "), calm: intent === "nodraft" };
+  // The calm boxes still get said out loud even when they are not steering, so
+  // the card and the log show the whole drawing rather than the half that won.
+  const calmText = calmIds.length ? [`no draft in ${calmIds.map(nameOf).join(" and ")}`] : [];
+  return {
+    goal,
+    flow,
+    targetIds,
+    text: [head, ...calmText, ...arrowText].join(", "),
+    // Only a drawing that asks for NOTHING to arrive is a "quiet everything"
+    // request. With a cool box or an arrow on the pad there is a job to do.
+    calm: intent === "nodraft" && !arrows.length,
+    calmIds,
+  };
 }
 
 let markSeq = 0;
