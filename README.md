@@ -37,16 +37,6 @@ It beats the grid because the polish pass reaches positions the grid does not sa
 
 Every suggestion is also **checked against the task's own rules**: nothing is proposed that the participant could not do by hand — no relocating a bolted vent, no turning a wall-mounted unit sideways, no switching off a device whose power dial the task hides. That is checked by running the search on all four tasks and diffing every offered layout against what the task permits.
 
-## Session logs
-
-**Submit** seals a JSON file (also kept in `localStorage`) built for analysis rather than for reading:
-
-- every event tagged with its **method** — `manual`, `text`, `sketch`, `solution` or `system`
-- the **whole layout after every event**, so any step can be scored, diffed or re-simulated on its own without replaying the ones before it
-- simulator readings recorded whenever the **value** moves, not only when a checkbox flips
-- typed sentences verbatim **with how they were parsed**; searches with everything they were asked and every card they offered, each with that card's layout and predicted numbers
-- a schema version, per-method counts, the task's goals and thresholds, and the starting and final layouts
-
 ## Repository layout
 
 | Path | What it is |
