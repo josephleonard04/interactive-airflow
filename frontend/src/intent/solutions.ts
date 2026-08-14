@@ -112,11 +112,29 @@ const PRIMARY_PREF: Record<OptimizeGoal, string[]> = {
  *  `on: false` no longer hides a device either. The fan in that flat starts
  *  switched off, so it was not "present"; the strategy layer switches it on a
  *  moment later, which is exactly the move being proposed. */
-function primaryFor(goal: OptimizeGoal, plan: FloorPlan, allowed?: string[]): string {
+function primaryFor(goal: OptimizeGoal, plan: FloorPlan, allowed?: string[], movable?: string[]): string {
   const pref = PRIMARY_PREF[goal];
   const permitted = (t: string) => !allowed || allowed.includes(t);
   const here = new Set(plan.items.map((it) => it.type));
+  // A DEVICE THAT CANNOT BE CARRIED CANNOT CARRY A GALLERY.
+  //
+  // The primary device is the one whose alternative positions become the option
+  // cards. Choosing it by goal word alone picked the air conditioner for every
+  // cooling task — including the one where the air conditioner is bolted to a
+  // wall and the fan is the only thing anybody may move. Every card then
+  // differed only in louvre angle and shared one fan position, chosen once by
+  // the cheap screening pass and never revisited, which is how the gallery came
+  // to stand the fan at the foot of the bed and blow across it.
+  //
+  // So a device that the task will not let the participant pick up is passed
+  // over, and the thing they can actually carry becomes the primary. When
+  // nothing is movable the old preference stands.
+  const canCarry = (t: string) =>
+    !movable || movable.length === 0
+      ? true
+      : movable.includes(t) && plan.items.some((it) => it.type === t && it.mount !== "wall");
   return (
+    pref.find((t) => here.has(t) && permitted(t) && canCarry(t)) ??
     pref.find((t) => here.has(t) && permitted(t)) ??
     pref.find((t) => permitted(t)) ??
     allowed?.[0] ??
@@ -277,6 +295,10 @@ const TASK_UNMET = 100;
 /** What a layout pays for passing a goal only just. A tiebreak among layouts
  *  that all pass — see scoreOf. */
 const TASK_MARGIN = 1;
+
+/** How far off a drawn arrow a device may still be aimed (radians). 60° either
+ *  side: room to work around the furniture, not room to face the other way. */
+const ARROW_ARC = Math.PI / 3;
 
 /** Air speed over a target room above which people notice a draught (m/s). */
 const DRAFT_CAP = 0.35;
@@ -979,7 +1001,7 @@ function placeDevices(
   // with a small per-strategy budget the order decides who actually gets
   // searched, and spending it on the fan while the AC sits in the wrong room
   // is the worst possible allocation.
-  const primary = primaryFor(goal, working, allowed);
+  const primary = primaryFor(goal, working, allowed, movableDevices);
   const movable = working.items
     .filter((it) => wanted.includes(it.type) && it.on !== false)
     .sort((a, b) => (b.type === primary ? 1 : 0) - (a.type === primary ? 1 : 0));
@@ -1049,7 +1071,7 @@ function placeDevices(
         // out — and worse, cannot undo. For anything on a wall the sweep is TILT
         // ALONE; a free-standing aimable device still gets the full circle
         // crossed with tilt.
-        const spots = aimOnly
+        let spots = aimOnly
           ? it.mount === "wall"
             ? TILT_STEPS.map((tilt) => ({
                 position: it.position,
@@ -1087,6 +1109,38 @@ function placeDevices(
             axis: "area",
             oscillate: false,
           });
+        }
+        // AN ARROW IS AN INSTRUCTION ABOUT DIRECTION, and it was being treated
+        // as a hint about position. Drawing "move air from the bedroom to the
+        // living room" added the arrow's own tail to the candidate list and
+        // then let every other candidate outrank it — so the apartment task
+        // came back with the fan standing beside the doorway and blowing at the
+        // far end of the bedroom, away from the room the arrow pointed at.
+        //
+        // It scored well. It is still not an answer anybody drew, and "why is
+        // the fan facing the other way" is the only possible reaction to it.
+        // Someone who draws an arrow through a doorway has said which way the
+        // air should go; the search's job is to find the best layout that DOES
+        // that, not to decide the request was mistaken.
+        //
+        // So a flow hint narrows the aims on offer to those pointing broadly
+        // where the arrow points — a 60° arc either side of the line from the
+        // candidate's own spot to the arrow's head, which is wide enough to let
+        // the search angle around furniture and narrow enough that the fan
+        // always faces the way it was asked to. Wall units are exempt: their
+        // heading is decided by the wall. If nothing survives the filter the
+        // original list stands, because a drawing must never leave the gallery
+        // empty.
+        if (flow && !aimOnly && it.mount !== "wall") {
+          const aligned = spots.filter((c) => {
+            const dx = flow.to[0] - c.position[0];
+            const dz = flow.to[1] - c.position[2];
+            if (Math.hypot(dx, dz) < 0.3) return true;
+            const want = Math.atan2(dx, dz);
+            const off = Math.atan2(Math.sin(c.rotationY - want), Math.cos(c.rotationY - want));
+            return Math.abs(off) <= ARROW_ARC;
+          });
+          if (aligned.length) spots = aligned;
         }
         for (const cand of spots) {
           if (budget.left <= 0) break;
@@ -1367,7 +1421,7 @@ function refineOptions(
   want: number,
 ): Solution[] {
   const fid = dryingTask ? SCREEN_DRY : SCREEN;
-  const primary = primaryFor(goal, plan, opts.allowedDevices);
+  const primary = primaryFor(goal, plan, opts.allowedDevices, opts.movableDevices);
   const movable = opts.movableDevices;
   const aimable = opts.allowedDevices;
   const walks: Array<{ label: string; note: string; movable?: string[]; aimable?: string[] }> = [
@@ -1538,7 +1592,7 @@ export function findSolutions(
       const bases = [best.plan, ...primaryAlts.slice(1, 5).map((alt) => ({
         ...placed,
         items: placed.items.map((it) =>
-          it.type === primaryFor(goal, plan, opts.allowedDevices) && it.on !== false
+          it.type === primaryFor(goal, plan, opts.allowedDevices, opts.movableDevices) && it.on !== false
             ? { ...it, position: alt.pos, rotationY: alt.rot, roomId: alt.roomId, ...(alt.tilt !== undefined ? { tilt: alt.tilt } : {}) }
             : it,
         ),
@@ -1574,7 +1628,7 @@ export function findSolutions(
   if (screened.length < want) {
     const top = screened[0];
     const bank = top ? altsByStrategy.get(top.strategy.id) : undefined;
-    const primaryType = primaryFor(goal, plan, opts.allowedDevices);
+    const primaryType = primaryFor(goal, plan, opts.allowedDevices, opts.movableDevices);
     for (const alt of bank?.alts.slice(1) ?? []) {
       if (screened.length >= Math.max(want, 3)) break;
       const variant: FloorPlan = {
@@ -1686,7 +1740,7 @@ export function findSolutions(
   // goes and who is sleeping in the draught. Every alternative aim therefore
   // looked like a duplicate of the first and the gallery collapsed to one card,
   // on the one task where the gallery is a list of aims.
-  const primaryType = primaryFor(goal, plan, opts.allowedDevices);
+  const primaryType = primaryFor(goal, plan, opts.allowedDevices, opts.movableDevices);
   const aimIsTheAnswer =
     opts.movableDevices !== undefined && !opts.movableDevices.includes(primaryType);
   const aimOf = (p: FloorPlan) => p.items.find((i) => i.type === primaryType)?.rotationY ?? 0;
