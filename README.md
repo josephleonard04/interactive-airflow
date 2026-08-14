@@ -22,20 +22,48 @@ Everything runs client-side: an in-browser Euler solver, the language layer, and
 
 Typed and drawn intents both feed **Find solutions**, which searches your actual layout with the simulator and offers a gallery of complete arrangements. Clicking one applies it; there is no confirmation step, and Undo is the way back.
 
-## How good are the suggestions?
+## The optimizer
 
-The search explores **116–250 distinct arrangements** per task, ranked on a three-rung fidelity ladder (a cheap screen nominates a shortlist, a middle rung re-ranks it, the finalists are re-scored at the fidelity the checkboxes use) and then hill-climbed locally off the candidate grid.
+Intent becomes a **constrained combinatorial optimization** over device placement, solved against the same fluid solver that draws the views. Nothing is sampled at random and nothing is tuned by hand at runtime.
 
-Measured against brute force over the reachable space at reporting fidelity:
+**Decision variables.** Per movable device: position on a 0.25 m lattice, heading, and vertical aim quantized to 15° over ±60° (±30° for free-standing units, whose heading is already continuous). Per opening: a boolean. Wall-mounted units contribute aim only — their heading is fixed by the wall they are bolted to. Feasibility is enforced by construction rather than by rejection: candidate positions are projected onto the free space by a collision solver that already knows about furniture, doorway keep-clear zones and per-task room confinement, so infeasible points are never scored.
 
-| Task | Sentence | As found | Best in a brute-force grid | What the search finds |
+**Objective.** A scalarization of the parsed request over the solver's steady fields, with the active task's own thresholds entering as constraints. The composite is lexicographic in three tiers, which is what stops a good number in one place buying a violation somewhere else:
+
+```
+score = request(x) − 100·|violated constraints| − 3·Σ shortfallᵢ − 1·Σ marginᵢ
+```
+
+Each shortfall is normalized by its own goal's tolerance, so a 0.03 m/s draft overshoot and a 0.4 °C temperature overshoot are commensurable. The margin term is the same distance measured against a bar drawn a quarter-tolerance inside the real one — it orders solutions that all satisfy the constraints by how much headroom they leave, so nothing is recommended sitting exactly on its own limit.
+
+**Multi-fidelity cascade.** Evaluating every candidate at reporting fidelity is far too slow for an interactive loop, so the solver's cost is spent where it discriminates. Three rungs, each a coarser discretization of the same Euler solve:
+
+| Rung | Cells | Pressure iterations | Steps | Role |
 |---|---|---|---|---|
-| Winter | *"make the bedroom warm"* | 13.5 °C | 21.09 °C | **21.38 °C** (top 0.7%) |
-| Apartment | *"cool the whole apartment"* | 24.89 °C | 24.49 °C | **24.48 °C** (top 0.5%) |
+| Screen | 1 200 | 4 | 8 | ranks the full candidate set under a 300-evaluation budget |
+| Mid | 1 800 | 6 | 12 | re-ranks the shortlist |
+| Final | 4 200 | 8 | 22 | re-scores finalists at the fidelity the goal checks use |
 
-It beats the grid because the polish pass reaches positions the grid does not sample. Searches take roughly 3–8 s.
+Because the last rung is the one the checkboxes are scored on, a card's printed numbers and its checkboxes cannot disagree.
 
-Every suggestion is also **checked against the task's own rules**: nothing is proposed that the participant could not do by hand — no relocating a bolted vent, no turning a wall-mounted unit sideways, no switching off a device whose power dial the task hides. That is checked by running the search on all four tasks and diffing every offered layout against what the task permits.
+**Local refinement.** Finalists are polished by coordinate descent over (x, z, heading, tilt) — eight translations, two rotations, two tilts per step, projected back onto the feasible set each move, under a separate 70-evaluation budget. This is what reaches positions strictly off the candidate lattice.
+
+**Constraint handling from the drawing.** A sketched arrow is a directional constraint, not an objective term: it restricts admissible headings to a 60° cone about the bearing to the arrow's head, so the returned layout satisfies the drawn direction by construction instead of trading it away.
+
+### Measured against exhaustive search
+
+Both tasks brute-forced over their reachable space at reporting fidelity, and compared against what the optimizer returns:
+
+| Task | Request | As delivered | Exhaustive best | Optimizer | Rank |
+|---|---|---|---|---|---|
+| Winter | *"make the bedroom warm"* | 13.51 °C | 21.49 °C | **20.77 °C** | top 0.8% of 384 |
+| Apartment | *"cool the whole apartment"* | 24.89 °C | 24.58 °C | **24.66 °C** | top 1.4% of 148 feasible |
+
+The apartment row is scored against the **feasible** subset for a reason. The unconstrained optimum over that grid is 24.47 °C and it puts **1.15 m/s across the bed** — six times the task's draft limit. It is the coldest arrangement and it is not an answer; 284 of the grid's 432 layouts are infeasible the same way. The optimizer is solving the constrained problem, so the honest comparison is against the 148 layouts that also keep the bed calm, and there it lands third.
+
+A search completes in roughly 3–8 s in the browser, single-threaded.
+
+**Feasibility is verified, not assumed.** Every returned layout is diffed against what its task permits — no relocating a bolted vent, no turning a wall-mounted unit, no touching a power dial the task fixes — across all four tasks on every change to the search.
 
 ## Repository layout
 
@@ -123,7 +151,7 @@ There is no unit-test suite. What the project relies on instead is that the simu
 
 - The solver is a coarse real-time prototype (~18k cells). It is calibrated for the four study tasks, not validated against measurements.
 - The OpenFOAM path is generated but has not been run against a live install.
-- The placement search is greedy and budgeted. It is measurably close to optimal on the tasks above, not provably optimal.
+- The optimizer is a budgeted local method over a discretized design space. It carries no optimality certificate — the guarantee is empirical, measured against exhaustive search on two tasks, and the cascade's cheap rung can in principle discard a region the accurate rung would have preferred.
 - Scalar fields beyond temperature / smell / drying (CO₂, PM2.5) are not implemented.
 - `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
 
