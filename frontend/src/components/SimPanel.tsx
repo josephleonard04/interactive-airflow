@@ -224,7 +224,7 @@ export function SimPanel() {
   if (!active) {
     return (
       <button className="primary" style={btn} onClick={toggleSim}>
-        ▶ Simulation
+        ▶ Simulate
       </button>
     );
   }
