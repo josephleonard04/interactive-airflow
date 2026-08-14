@@ -149,7 +149,7 @@ There is no unit-test suite. What the project relies on instead is that the simu
 
 ## Known limitations
 
-- The solver is a coarse real-time prototype (~18k cells). It is calibrated for the four study tasks, not validated against measurements.
+- The solver is a coarse real-time prototype — 3,024–4,256 cells at reporting fidelity across the four homes, at a cell size of 0.24–0.40 m, inviscid with no turbulence model. It is calibrated so the study tasks order layouts the way the physics does, not validated against measurement or a reference CFD solve.
 - The OpenFOAM path is generated but has not been run against a live install.
 - The optimizer is a budgeted local method over a discretized design space. It carries no optimality certificate — the guarantee is empirical, measured against exhaustive search on two tasks, and the cascade's cheap rung can in principle discard a region the accurate rung would have preferred.
 - Scalar fields beyond temperature / smell / drying (CO₂, PM2.5) are not implemented.

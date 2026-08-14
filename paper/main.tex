@@ -44,9 +44,10 @@
 %% ---------------------------------------------------------------------------
 %%  CAMERA-READY AUTHOR BLOCK — commented out because CHI review is anonymous.
 %%
-%%  TODO(Joseph): confirm your own affiliation. I have used Virginia Tech,
-%%  inferred from the study contact address josephl04@vt.edu. If the work
-%%  should be credited to the University of Tokyo visit instead, change it.
+%%  Affiliation confirmed by the author: Virginia Tech. "Virginia Tech" is the
+%%  form ACM indexes and the one used across the DL; the legal name, Virginia
+%%  Polytechnic Institute and State University, is correct but is rarely used in
+%%  a CHI author block and costs a line of space.
 %% ---------------------------------------------------------------------------
 %
 % \author{Joseph Leonard}
@@ -381,22 +382,64 @@ built-in goals to be scored by exactly the same machinery, and what lets the
 system report that it did not understand rather than inventing a target.
 
 \subsection{Simulation}
+\label{sec:sim}
 
-Flow is solved by an incompressible Euler solver on a staggered (MAC) grid with
-buoyancy, running entirely in the browser. The home is voxelized into solids,
-jets, inlets and outlets; temperature, contaminant and drying are then
-transported along the converged flow by a geodesic pass. Exterior glazing chills
-the air against it so that cold downdrafts form where they physically would.
+Flow is computed by an incompressible Euler solver written in TypeScript and
+running entirely in the browser. The scheme is the standard \emph{Stable Fluids}
+formulation~\cite{stam1999stable}: unconditionally stable semi-Lagrangian
+advection followed by a pressure projection~\cite{chorin1968projection}, on a
+staggered marker-and-cell grid~\cite{harlow1965mac} with velocity components on
+cell faces and pressure and scalars at cell centres. We adopt it for the reason
+it was introduced --- stability at large time steps, independent of the CFL
+condition --- because the interaction loop needs a steady field in well under a
+second and cannot afford sub-stepping. Buoyancy is added as a temperature-driven
+body force in the manner of Fedkiw et al.~\cite{fedkiw2001visual}, which is what
+makes the third dimension necessary: a top-down slice cannot represent warm air
+rising or cold air pooling, and both are the whole subject of the tasks.
 
-One modelling detail matters enough to state, because the task set turns on it.
-A cooling jet is roughly 8--10\,K below room temperature and therefore denser
-than the air around it, so a louvre aimed down is working with gravity and one
-aimed up is working against it. Aimed down, the jet reaches the floor and
-spreads as a gravity current into corners that direct throw never reaches; aimed
-up, it stalls within a metre and falls back over the unit that threw it --- the
-short-circuiting that is the reason no cooling louvre is aimed at a ceiling. An
-earlier symmetric treatment of tilt made these two indistinguishable and the
-apartment task had two contradictory answers.
+\textbf{Discretization of the home.} The plan is voxelized into cells labelled
+solid (walls, furniture), open (an exterior opening, treated as a free boundary
+through which air may leave the domain), or fluid. At reporting fidelity the
+four study homes resolve to $18{\times}8{\times}21$ to $19{\times}14{\times}16$
+cells --- 3{,}024 to 4{,}256 in total, at a cell size of 0.24--0.40\,m. This is
+a coarse grid by any CFD standard and is a deliberate consequence of the
+interaction budget, not an oversight; Section~\ref{sec:technical} reports what
+it is and is not calibrated for.
+
+\textbf{Devices as boundary conditions.} A step advances as: apply body forces
+and buoyancy, advect velocity semi-Lagrangian by backtracing each face and
+interpolating trilinearly, project to a divergence-free field by Gauss--Seidel
+relaxation with over-relaxation, then advect the scalars. Devices enter this
+loop in two physically distinct ways, and the distinction turned out to matter
+for how participants reason about them. A vent or an air conditioner
+\emph{prescribes} a velocity on its outgoing faces: it supplies air at a set
+speed regardless of what the room does. A fan instead applies a \emph{body
+force} to the air already in front of it, and is therefore subject to the same
+pressure projection as everything else --- so it weakens when it pushes into a
+flow that resists, and it cannot manufacture air where there is none. A fan
+aimed at a closed door does very little, which is the correct answer and the one
+a prescribed-velocity model would get wrong.
+
+\textbf{Transported scalars.} Temperature, contaminant concentration and drying
+are carried along the converged velocity field by a geodesic transport pass,
+rather than being advected to convergence themselves. Exterior glazing chills
+the air against it, so the cold downdraft that pools under a window in winter
+forms for the reason it does in a real room.
+
+\textbf{Asymmetry of a cooling jet.} One modelling detail deserves its own
+statement because the apartment task turns on it entirely. Supply air from an
+air conditioner is roughly 8--10\,K below room temperature and therefore denser
+than the air around it, so the louvre is either working with gravity or against
+it. Aimed down, the jet keeps its momentum to the floor, lands, and spreads
+outward as a gravity current that reaches corners direct throw never would.
+Aimed up, it decelerates against its own weight within a metre, stalls, and
+falls back over the unit that threw it --- the short-circuiting that is the
+reason no cooling louvre is aimed at a ceiling. An earlier version of the model
+scaled the jet symmetrically in tilt, which made the two indistinguishable and
+gave the task two contradictory answers; the current model penalizes only the
+upward case, and the difference between a louvre that cools the far room and one
+that does not is 24.7\,\textdegree C against 25.6\,\textdegree C in the warmest
+corner.
 
 \subsection{The optimizer}
 \label{sec:optimizer}
@@ -433,25 +476,34 @@ the living room.
 
 \textbf{Multi-fidelity cascade.} Evaluating every candidate at reporting fidelity
 is far too slow for an interactive loop, so solver cost is spent where it
-discriminates (Table~\ref{tab:cascade}). Because the final rung is the fidelity
-the goal checks themselves use, a suggestion's printed numbers and its checkmarks
-cannot disagree (D4).
+discriminates (Table~\ref{tab:cascade}). Each rung requests a target cell count
+and a number of relaxation iterations and time steps; the target is realized as
+whichever grid best fits the home, so the delivered resolution varies by task.
+Because the final rung is the fidelity the goal checks themselves use, a
+suggestion's printed numbers and its checkmarks cannot disagree (D4).
 
 \begin{table}[t]
-  \caption{The three rungs of the cascade. Each is a coarser discretization of
-    the same Euler solve.}
+  \caption{The three rungs of the cascade, with the grids they resolve to across
+    the four study homes.}
   \label{tab:cascade}
   \small
-  \begin{tabular}{lrrrl}
+  \begin{tabular}{lrrrr}
     \toprule
-    Rung & Cells & Iters & Steps & Role \\
+    Rung & Target & Iters & Steps & Delivered cells \\
     \midrule
-    Screen & 1{,}200 & 4 & 8  & ranks all candidates, 300-eval budget \\
-    Mid    & 1{,}800 & 6 & 12 & re-ranks the shortlist \\
-    Final  & 4{,}200 & 8 & 22 & re-scores finalists at goal fidelity \\
+    Screen & 1{,}200 & 4 & 8  & 960--1{,}260 \\
+    Mid    & 1{,}800 & 6 & 12 & 1{,}155--1{,}890 \\
+    Final  & 4{,}200 & 8 & 22 & 3{,}024--4{,}256 \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+The middle rung is not always a distinct rung. On two of the four homes the
+screen and mid targets round to the same grid, so the re-rank there differs from
+the screen only in iteration and step count; the cascade is genuinely three-level
+on the other two. We report this rather than describing a uniform ladder,
+because it bounds how much of the accuracy in Section~\ref{sec:technical} can be
+attributed to the middle stage.
 
 \textbf{Local refinement.} Finalists are polished by coordinate descent over
 $(x, z, \textit{heading}, \textit{tilt})$ --- eight translations, two rotations
@@ -644,10 +696,16 @@ switching behaviour.]}
 %% ===========================================================================
 \section{Limitations}
 
-The solver is a coarse real-time prototype of roughly 18{,}000 cells. It is
-calibrated for the four study tasks and has not been validated against physical
-measurement; the claims here are about a consistent interactive model, not about
-predictive accuracy for a real building.
+The solver is a coarse real-time prototype: 3{,}024--4{,}256 cells at reporting
+fidelity, a cell size of 0.24--0.40\,m, and an inviscid Euler formulation with
+no turbulence model. At that resolution a bed, a doorway and a louvre are a
+handful of cells each. The model is calibrated so that the four study tasks
+order layouts the way the physics does, and it has not been validated against
+physical measurement or against a reference CFD solve; the claims here are about
+a consistent interactive model that participants can reason with, not about
+predictive accuracy for a real building. Establishing the latter would require a
+convergence study against a fine-grid RANS or LES reference, which we have not
+run.
 
 The optimizer is a budgeted local method over a discretized design space and
 carries no optimality certificate. Its guarantee is empirical, measured against
