@@ -42,41 +42,21 @@
   Physical Airflow Objectives}
 
 %% ---------------------------------------------------------------------------
-%%  CAMERA-READY AUTHOR BLOCK — commented out because CHI review is anonymous.
+%%  AUTHORS.
 %%
-%%  Affiliation confirmed by the author: Virginia Tech. "Virginia Tech" is the
-%%  form ACM indexes and the one used across the DL; the legal name, Virginia
-%%  Polytechnic Institute and State University, is correct but is rarely used in
-%%  a CHI author block and costs a line of space.
+%%  The real author block lives in authors.tex, which is NOT part of the
+%%  submission. CHI has authors upload the LaTeX SOURCE to PCS alongside the
+%%  PDF, so names left in a comment here would travel with the submission even
+%%  though they never appear in the typeset document. Keeping them in a separate
+%%  file means the anonymized build cannot leak them by accident.
+%%
+%%  SUBMISSION  : leave the \input commented, as below. acmart's `anonymous`
+%%                option prints "ANONYMOUS AUTHOR(S)".
+%%  CAMERA-READY: switch the class to [sigconf], uncomment the \input, and ship
+%%                authors.tex with the source.
 %% ---------------------------------------------------------------------------
-%
-% \author{Joseph Leonard}
-% \affiliation{%
-%   \institution{Virginia Tech}
-%   \city{Blacksburg}
-%   \state{Virginia}
-%   \country{USA}}
-% \email{josephl04@vt.edu}
-%
-% \author{Haoran Xie}
-% \affiliation{%
-%   \institution{Japan Advanced Institute of Science and Technology}
-%   \city{Nomi}
-%   \state{Ishikawa}
-%   \country{Japan}}
-%
-% \author{Takeo Igarashi}
-% \affiliation{%
-%   \institution{The University of Tokyo}
-%   \city{Tokyo}
-%   \country{Japan}}
-%
-% \author{Bo Zhu}
-% \affiliation{%
-%   \institution{Georgia Institute of Technology}
-%   \city{Atlanta}
-%   \state{Georgia}
-%   \country{USA}}
+
+% \input{authors}
 
 \renewcommand{\shortauthors}{Anonymous et al.}
 
@@ -334,6 +314,38 @@ It also yields a falsifiable form of ``is the tool useful'':
 
 %% ===========================================================================
 \section{\textsc{Interactive Airflow}}
+
+%% ---------------------------------------------------------------------------
+%%  FIGURES — none are placed yet. Three are needed before submission:
+%%
+%%   1. TEASER (page-width, top of page 1): the three input modalities side by
+%%      side on the same home — a drag, a typed sentence, a drawn box+arrow —
+%%      each with the layout it produced.
+%%   2. SYSTEM PIPELINE (column-width): intent -> objective tuple -> solver ->
+%%      optimizer -> gallery.
+%%   3. BEFORE/AFTER FIELD (page-width): the apartment task with the louvre
+%%      level vs aimed down, streamlines coloured by temperature.
+%%
+%%  CHI RULES THAT APPLY TO ALL OF THEM:
+%%   - \Description{} is REQUIRED on every figure (SIGCHI accessibility guide).
+%%     It is not the caption: it must carry the information a sighted reader
+%%     gets from the image and that the caption does not already state. It does
+%%     not appear in the PDF; TAPS puts it in the HTML5 version.
+%%   - Size figures at their FINAL 2-column size. A column-wide figure should
+%%     appear half-page-width in this 1-column submission, leaving white space
+%%     to its right. Do not scale images — export at the exact size.
+%%   - Do not encode meaning in colour alone; add shape or pattern.
+%%
+%%  Template:
+%%
+%%  \begin{figure}[t]
+%%    \centering
+%%    \includegraphics[width=0.5\textwidth]{figs/teaser}
+%%    \caption{Short, states what the reader should take from it.}
+%%    \Description{Full description for a reader who cannot see the image.}
+%%    \label{fig:teaser}
+%%  \end{figure}
+%% ---------------------------------------------------------------------------
 
 \subsection{Walkthrough}
 
@@ -720,6 +732,13 @@ The study is small and remote, with four scenarios in a single prebuilt home
 each. It can show whether the tool changes strategy and belief in these
 scenarios; it cannot establish that the effect generalizes to a participant's
 own home, which is the setting the work is ultimately about.
+
+The visualization encodes temperature as a diverging colour ramp, which is
+information carried by colour alone. The airflow view offers two encodings ---
+moving particles or streamlines --- so motion and shape are available there, but
+a reader with a colour-vision deficiency has no non-colour route to the
+temperature field. A redundant encoding (contour banding, or hatching at the
+comfort boundaries) is the obvious fix and is not yet implemented.
 
 \section{Conclusion}
 
