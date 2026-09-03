@@ -13,5 +13,15 @@ compatibility_date = "2026-01-15"
 # binding = "BUDGET"
 # id = "paste-the-id-here"
 
+# Which model reads the sentence. "anthropic" (default) uses the model named in
+# ../shared/goal-contract.json — Claude Haiku 4.5 — with an ANTHROPIC_API_KEY
+# secret. "openai" uses OPENAI_MODEL with an OPENAI_API_KEY secret; note that an
+# OpenAI API key is billed separately from any ChatGPT subscription.
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put OPENAI_API_KEY
+[vars]
+LLM_PROVIDER = "anthropic"
+# OPENAI_MODEL = "gpt-4.1-mini"
+
 [observability]
 enabled = true

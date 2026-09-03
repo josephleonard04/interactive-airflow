@@ -17,7 +17,7 @@ Everything runs client-side: an in-browser Euler solver, the language layer, and
 ## Three ways to say what you want
 
 1. **By hand** — drag devices, aim them, open and close doors and windows.
-2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (`backend/goal_parser.py`) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
+2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (Claude Haiku 4.5, via `backend/goal_parser.py` locally or `worker/` in public) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
 3. **By drawing** — box an area and pick *warm / cool / fresh air / no wind*, or draw an arrow for "move air from here to there".
 
 The third one also combines with the second: **box an area, then type what you want there.** The drawn box answers "where" and the sentence answers "what", so "keep this area out of the draught" needs no room name — the box supplies it. The drawing travels with the sentence into both parsers, and the log records, per step, whether a drawing was on the pad and whether the parse actually used it.
@@ -74,7 +74,7 @@ A search completes in roughly 3–8 s in the browser, single-threaded.
 | **[`frontend/`](frontend/)** | **The app.** Home editor, real-time solver, intent layer, placement search, study tasks, session logging. All current work is here. |
 | [`backend/`](backend/) | Optional FastAPI server: the LLM goal parser (hosted or a local model), and an OpenFOAM "accurate engine" pass. The app runs fully without it. |
 | [`worker/`](worker/) | The goal parser as a public endpoint, so the model half works for anyone with the link. See [worker/README.md](worker/README.md). |
-| [`shared/`](shared/) | `goal-contract.json` — the prompt, schema and objective vocabulary, read by both the backend and the worker so the two routes cannot drift. |
+| [`shared/`](shared/) | `goal-contract.json` — the model, prompt, schema and objective vocabulary, read by both the backend and the worker so the routes cannot drift. |
 | [`bridge/`](bridge/), [`intent/`](intent/) | Earlier LFM (GPU solver) bridge and notes. Parked. |
 | [`docs/`](docs/) | [Study protocol](docs/user-study-protocol.md), [positioning](docs/contribution-positioning.md), [related work](docs/related-work.md), [optimizer notes](docs/optimizer-research.md), [two-engine design](docs/openfoam-engine.md). |
 

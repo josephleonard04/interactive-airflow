@@ -40,6 +40,17 @@ const MAX_BODY_BYTES = 16 * 1024;
 const PER_IP_PER_HOUR = 40;
 const GLOBAL_PER_DAY = 4000;
 
+// WHICH MODEL READS THE SENTENCE, as a deploy-time choice rather than a code
+// change: set LLM_PROVIDER to "anthropic" (default) or "openai" in wrangler.toml
+// and put the matching key in as a secret. Both are asked for the same schema
+// and both go through the same id validation, so the objective vocabulary is
+// identical either way and the page cannot tell them apart.
+//
+// Note for anyone reaching for a ChatGPT subscription: that is not this. The
+// OpenAI API is billed separately from ChatGPT Plus, at platform.openai.com,
+// and needs its own prepaid credit.
+const OPENAI_MODEL_DEFAULT = "gpt-4.1-mini";
+
 const ALLOWED_ORIGINS = [
   "https://josephleonard04.github.io",
   "http://localhost:5173",
@@ -67,10 +78,12 @@ export default {
       return json({ error: "Not found." }, 404, cors);
     }
 
-    if (!env.ANTHROPIC_API_KEY) {
+    const provider = (env.LLM_PROVIDER ?? "anthropic").toLowerCase();
+    const keyName = provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+    if (!env[keyName]) {
       // Named exactly as the Python backend names it, because the frontend
       // matches on this string to tell a missing key from a rejected one.
-      return json({ error: "ANTHROPIC_API_KEY is not set on the backend." }, 200, cors);
+      return json({ error: `${keyName} is not set on the backend.` }, 200, cors);
     }
 
     const raw = await request.text();
@@ -99,44 +112,13 @@ export default {
     const outdoorTemp = typeof body.outdoor_temp === "number" ? body.outdoor_temp : null;
     const sketch = body.sketch_region && typeof body.sketch_region === "object" ? body.sketch_region : null;
 
-    let data;
-    try {
-      const upstream = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: CONTRACT.model,
-          max_tokens: 2048,
-          system: CONTRACT.system,
-          output_config: { format: { type: "json_schema", schema: CONTRACT.schema } },
-          messages: [{ role: "user", content: buildPrompt(text, rooms, items, outdoorTemp, sketch) }],
-        }),
-      });
-      data = await upstream.json();
-      if (!upstream.ok) {
-        // 401 reaches the frontend as "bad-key" and 429 as a plain error; both
-        // degrade to the dictionary, which is why this is a 200 with a message
-        // rather than a status the fetch treats as a network failure.
-        return json({ error: data?.error?.message ?? `Upstream HTTP ${upstream.status}` }, 200, cors);
-      }
-    } catch (err) {
-      return json({ error: `Upstream request failed: ${err}` }, 200, cors);
-    }
-
-    if (data.stop_reason === "refusal") {
-      return json({ error: "The model declined to answer this request." }, 200, cors);
-    }
-
-    const payload = (data.content ?? []).find((b) => b.type === "text")?.text;
-    if (!payload) return json({ error: "Empty response from the model." }, 200, cors);
+    const prompt = buildPrompt(text, rooms, items, outdoorTemp, sketch);
+    const result = provider === "openai" ? await callOpenAI(env, prompt) : await callAnthropic(env, prompt);
+    if (result.error) return json({ error: result.error }, 200, cors);
 
     let parsed;
     try {
-      parsed = JSON.parse(payload);
+      parsed = JSON.parse(result.text);
     } catch {
       return json({ error: "The model's reply was not valid JSON." }, 200, cors);
     }
@@ -161,6 +143,83 @@ export default {
     return json({ objectives }, 200, cors);
   },
 };
+
+/** Anthropic. Returns {text} or {error}; never throws. */
+async function callAnthropic(env, prompt) {
+  let data;
+  try {
+    const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: CONTRACT.model,
+        max_tokens: 2048,
+        system: CONTRACT.system,
+        output_config: { format: { type: "json_schema", schema: CONTRACT.schema } },
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    data = await upstream.json();
+    // A 401 reaches the frontend as "bad-key" and a 429 as a rate limit; both
+    // degrade to the dictionary, which is why these come back as 200s with a
+    // message rather than a status the browser's fetch treats as a dead network.
+    if (!upstream.ok) return { error: data?.error?.message ?? `Upstream HTTP ${upstream.status}` };
+  } catch (err) {
+    return { error: `Upstream request failed: ${err}` };
+  }
+
+  if (data.stop_reason === "refusal") return { error: "The model declined to answer this request." };
+  const text = (data.content ?? []).find((b) => b.type === "text")?.text;
+  return text ? { text } : { error: "Empty response from the model." };
+}
+
+/** OpenAI, via chat completions with a strict JSON schema.
+ *
+ *  The same schema object serves both providers: strict mode requires every
+ *  object to set additionalProperties false and to list every property in
+ *  required, which the contract already does — it was written that way for
+ *  Anthropic and happens to be exactly what OpenAI enforces.
+ *
+ *  NOT A CHATGPT SUBSCRIPTION. This wants an API key from platform.openai.com
+ *  with credit on it; ChatGPT Free and Plus grant no API access.
+ */
+async function callOpenAI(env, prompt) {
+  let data;
+  try {
+    const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT,
+        messages: [
+          { role: "system", content: CONTRACT.system },
+          { role: "user", content: prompt },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "objectives", strict: true, schema: CONTRACT.schema },
+        },
+      }),
+    });
+    data = await upstream.json();
+    if (!upstream.ok) return { error: data?.error?.message ?? `Upstream HTTP ${upstream.status}` };
+  } catch (err) {
+    return { error: `Upstream request failed: ${err}` };
+  }
+
+  const choice = data.choices?.[0];
+  // A strict-schema refusal is its own field, not an empty message.
+  if (choice?.message?.refusal) return { error: "The model declined to answer this request." };
+  const text = choice?.message?.content;
+  return text ? { text } : { error: "Empty response from the model." };
+}
 
 function buildPrompt(text, rooms, items, outdoorTemp, sketch) {
   const roomLines = rooms

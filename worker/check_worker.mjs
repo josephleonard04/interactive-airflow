@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import worker from "./src/index.js";
+import CONTRACT from "../shared/goal-contract.json" with { type: "json" };
 
 const ORIGIN = "https://josephleonard04.github.io";
 const ROOMS = [
@@ -196,6 +197,105 @@ const env = () => ({ ANTHROPIC_API_KEY: "sk-test", BUDGET: kv() });
   const res = await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), env());
   assert.match((await res.json()).error, /declined/);
   console.log("ok  a refusal says so rather than reporting 'no goal'");
+}
+
+// --- the Anthropic request shape -------------------------------------------
+
+{
+  stubAnthropic(OK_REPLY);
+  await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), env());
+
+  // Exact id, no date suffix — a suffixed variant is a 404 at request time and
+  // there is no way to notice that from here except by asserting it.
+  assert.equal(lastUpstream.model, "claude-haiku-4-5");
+  assert.equal(lastUpstream.model, CONTRACT.model, "the worker sends what the contract says");
+
+  // Haiku 4.5 predates adaptive thinking and `effort`, and rejects both. It is
+  // the right model for mapping one sentence onto three scalars, but only if we
+  // do not send it the newer models' parameters.
+  assert.equal(lastUpstream.thinking, undefined, "no thinking param on a pre-4.6 model");
+  assert.equal(lastUpstream.output_config?.effort, undefined, "no effort param on a pre-4.6 model");
+
+  // Structured outputs live under output_config.format; `output_format` is the
+  // deprecated spelling.
+  assert.equal(lastUpstream.output_config.format.type, "json_schema");
+  assert.equal(lastUpstream.output_format, undefined, "the deprecated parameter is not used");
+  console.log("ok  the Anthropic request matches what Haiku 4.5 accepts");
+}
+
+// --- the OpenAI provider ---------------------------------------------------
+
+{
+  // Same objective vocabulary, different wire shape: chat completions puts the
+  // JSON in choices[0].message.content rather than in a content block.
+  let seen = null;
+  globalThis.fetch = async (url, init) => {
+    seen = { url: String(url), body: JSON.parse(init.body), headers: init.headers };
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                objectives: [
+                  { scalar: "draft", direction: "low", regionId: "living", nearItem: null, sourceId: null, usedSketch: false },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const e = { OPENAI_API_KEY: "sk-openai-test", LLM_PROVIDER: "openai", BUDGET: kv() };
+  const res = await worker.fetch(post({ text: "no wind on me please", rooms: ROOMS }), e);
+  const body = await res.json();
+
+  assert.equal(seen.url, "https://api.openai.com/v1/chat/completions");
+  assert.match(seen.headers.authorization, /^Bearer sk-openai-test$/);
+  assert.equal(seen.body.model, "gpt-4.1-mini", "a sensible default model");
+  assert.equal(seen.body.response_format.type, "json_schema");
+  assert.equal(seen.body.response_format.json_schema.strict, true);
+  assert.equal(seen.body.messages[0].role, "system");
+  assert.deepEqual(body.objectives[0], {
+    scalar: "draft", direction: "low", regionId: "living", nearItem: null, sourceId: null, usedSketch: false,
+  });
+  console.log("ok  the OpenAI route answers in the same objective vocabulary");
+}
+
+{
+  // Strict mode requires this of every object in the schema, and OpenAI rejects
+  // the request outright if it is missing — so assert it rather than discover it
+  // on the first live call.
+  const items = CONTRACT.schema.properties.objectives.items;
+  assert.equal(CONTRACT.schema.additionalProperties, false);
+  assert.equal(items.additionalProperties, false);
+  assert.deepEqual(
+    [...items.required].sort(),
+    Object.keys(items.properties).sort(),
+    "strict mode needs every property listed in required",
+  );
+  console.log("ok  the shared schema satisfies OpenAI strict mode");
+}
+
+{
+  const e = { LLM_PROVIDER: "openai", BUDGET: kv() };
+  const res = await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), e);
+  assert.match((await res.json()).error, /OPENAI_API_KEY is not set/, "names the key the deploy is missing");
+  console.log("ok  a missing OpenAI key names OPENAI_API_KEY, not the Anthropic one");
+}
+
+{
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ choices: [{ message: { refusal: "no" } }] }), {
+      status: 200, headers: { "content-type": "application/json" },
+    });
+  const e = { OPENAI_API_KEY: "sk-test", LLM_PROVIDER: "openai", BUDGET: kv() };
+  const res = await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), e);
+  assert.match((await res.json()).error, /declined/, "a strict-schema refusal is its own field");
+  console.log("ok  an OpenAI refusal is read from message.refusal");
 }
 
 // --- budgets ---------------------------------------------------------------

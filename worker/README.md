@@ -48,7 +48,7 @@ Check it before wiring it up:
 
 ```sh
 curl https://interactive-airflow-goal-parser.<you>.workers.dev/api/health
-# {"ok":true,"goalParser":true,"model":"claude-opus-5"}
+# {"ok":true,"goalParser":true,"model":"claude-haiku-4-5"}
 ```
 
 Finally, tell the published page where it lives — a repository **variable**, not
@@ -81,7 +81,14 @@ anyone who reads the page source. So:
 
 The caps are in `src/index.js` as `PER_IP_PER_HOUR` and `GLOBAL_PER_DAY`; raise
 them once you know what a session actually uses. Cloudflare's free tier covers
-100,000 Worker requests a day, so the Anthropic bill is the only real cost.
+100,000 Worker requests a day, so the model is the only real cost.
+
+**The model is Claude Haiku 4.5** ($1 / $5 per million tokens in / out), set in
+`../shared/goal-contract.json`. Mapping one sentence onto three scalars against
+a strict schema is not work that repays a frontier model, and every request here
+is spent on a stranger. A parse is a few hundred tokens in and a few dozen out,
+so the 4,000-a-day cap bounds the day at small change rather than at a number
+worth worrying about.
 
 **A throttled visitor is not a broken app.** They get the offline dictionary and
 a message saying the shared reader is busy — which is why the caps can be tight
@@ -92,6 +99,17 @@ page, and not visible to anyone opening the link. What a determined visitor
 *can* do is spend your quota through the endpoint; that is what the budgets
 bound. If you would rather it not be open at all, the alternative is running the
 local backend during sessions — see the root README.
+
+### Using OpenAI instead
+
+`LLM_PROVIDER = "openai"` in `wrangler.toml` plus an `OPENAI_API_KEY` secret
+switches routes; `OPENAI_MODEL` picks the model (default `gpt-4.1-mini`). The
+same schema serves both — it was written strict-mode-clean for Anthropic and is
+exactly what OpenAI's strict mode requires.
+
+**This is not a ChatGPT subscription.** ChatGPT Free and Plus grant no API
+access at all; the OpenAI API is billed separately at platform.openai.com and
+needs its own prepaid credit. There is no free API tier.
 
 ## Keeping the two routes honest
 

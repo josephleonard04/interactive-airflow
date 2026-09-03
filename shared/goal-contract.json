@@ -1,6 +1,6 @@
 {
-  "_comment": "Single source of truth for the goal parser, read by backend/goal_parser.py and worker/src/index.js. Editing the prompt in one runtime only is how the two routes drift apart.",
-  "model": "claude-opus-5",
+  "_comment": "Single source of truth for the goal parser, read by backend/goal_parser.py and worker/src/index.js. Editing the prompt in one runtime only is how the two routes drift apart. `model` is the Anthropic model; the OpenAI route picks its own via OPENAI_MODEL. Haiku 4.5 rather than an Opus: this maps one sentence onto three scalars against a strict schema, which is not work that repays a frontier model, and the endpoint is public so every request is spent on a stranger.",
+  "model": "claude-haiku-4-5",
   "scalars": [
     "temperature",
     "contaminant",
