@@ -183,19 +183,57 @@ travels on every event and on the file name.
 | What the system understood | the objectives it produced — scalar, direction, region, and `fromSketchArea` when the drawn box was what grounded it |
 | Whether it understood at all | dictionary / model / task-goal fallback, and which of those failed |
 | What was done with the answer | candidates offered, and accepted, refined or dismissed |
-| The end | submit time, the final layout, and the goals scored against it |
+| Where the task's own quantity stood | measured each time it moved, so the file shows whether they converged or went in circles |
+| The end | submit time, the final layout, and what actually changed — see below |
 
 Exported two ways: **Study log** downloads the events mid-task (for a session
 that has to be abandoned), and **Submit** downloads the full report. Both carry
 the participant header; the report adds `multimodalSteps` and
 `sketchGroundedSteps` so the headline RQ2 numbers need no recomputing.
 
+### What each task measures
+
+**There is no hidden goal and no pass mark.** A scored threshold answers "did
+they pass?", which is a question about a number somebody chose — move it and the
+same session flips from failure to success — and it flattens the cases worth
+looking at: a participant who takes a bedroom from 9 °C to 17 °C and one who
+leaves it at 9 °C both fail an 18 °C box.
+
+Instead the task's own quantity is measured on the home **as delivered** and
+again on the home **as submitted**, at the same fidelity the on-screen views are
+drawn at. `improvement` is signed so positive always means better, whichever
+direction the quantity runs in.
+
+| Task (id) | Measured | Better |
+|---|---|---|
+| Winter home (`winter`) | Living room and bedroom temperature | warmer |
+| Studio, kitchen bin (`summer`) | Odour concentration over the bed | lower |
+| Bathroom (`humidity`) | Minutes for the slowest corner to dry | fewer |
+| Apartment, AC over the bed (`smell`) | Both room temperatures **and** air speed over the bed | cooler, and calmer at the bed |
+
+Three details that decide whether the numbers mean anything:
+
+- **No percentages on temperature.** °C is an interval scale with an arbitrary
+  zero, so "40 % warmer" is not a statement about the world. Odour, air speed
+  and minutes are ratio scales, and those do carry a percentage.
+- **The apartment gets no single summary.** Averaging °C with m/s is arithmetic
+  on unlike units, and averaging away the draft averages away the task.
+- **The bathroom's baseline is censored.** Shut, its slowest corner never dries,
+  so the reading is clamped to the longest finite drying time and flagged —
+  every figure derived from it is a *lower bound*, and the summary label says so.
+
+The scenario ids do not match their subjects and never have (`summer` is the
+studio-odour task, `smell` is the apartment draft task). Renaming them would
+invalidate the sessions already collected, so the mapping lives in
+[`intent/outcomes.ts`](frontend/src/intent/outcomes.ts).
+
 ## Verifying changes
 
 ```sh
 cd frontend && npx tsc --noEmit
-python backend/check_goal_parser.py     # local-model route, no model needed
-node worker/check_worker.mjs            # public endpoint: caps, budgets, CORS
+npm --prefix frontend run check:outcomes  # each task's outcome responds, and in the right direction
+python backend/check_goal_parser.py       # local-model route, no model needed
+node worker/check_worker.mjs              # public endpoint: caps, budgets, CORS
 ```
 
 There is no unit-test suite. What the project relies on instead is that the simulation modules are importable headlessly, so behavior is checked by measurement: bundle a throwaway script with `esbuild --bundle --platform=node --define:import.meta.env='{}'` and run it in Node to sweep layouts, fingerprint every scenario before and after a change, or brute-force a task's answer. Every threshold in `scenarios.ts` was set that way, and the numbers are written down next to them.

@@ -6,7 +6,7 @@ import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
 import { sceneApi } from "../scene/sceneApi";
 import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
-import { GoalLogger } from "./GoalLogger";
+import { OutcomeLogger } from "./OutcomeLogger";
 import { SubmitTask } from "./SubmitTask";
 
 /** One-per-home appliances in a study task — the Add button caps at this. */
@@ -208,7 +208,7 @@ export function Panel() {
 
       {/* Scores the task's goals silently into the session log. Renders nothing:
           the participant decides when they are done, not a tick-box. */}
-      <GoalLogger />
+      <OutcomeLogger />
 
       {/* …and the way out of it. Directly under the tick-list, because "am I
           done?" and "I'm done" are the same thought. */}

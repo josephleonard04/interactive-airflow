@@ -21,6 +21,13 @@ import {
 import { type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
+import {
+  compareOutcomes,
+  measureOutcomes,
+  summarizeOutcomes,
+  type OutcomeDelta,
+  type OutcomeReading,
+} from "../intent/outcomes";
 import { doorBlocked, findFreeSpot, footHalf, wallBlocked } from "../floorplan/collision";
 import { snapshotLayout, type LayoutSnapshot } from "./logSnapshot";
 import { sketchToGoal, type FlowHint, type SketchMark, type SketchTool } from "../intent/sketch";
@@ -52,7 +59,7 @@ const DEFAULT_METHOD: Record<LogEvent["kind"], LogMethod> = {
   review: "solution",
   preset: "system",
   engine: "system",
-  goals: "system",
+  outcome: "system",
   submit: "system",
   select: "manual",
 };
@@ -215,6 +222,16 @@ export interface SceneState {
    *  searched — no sentence required. */
   applySketchSolution: () => boolean;
 
+  /** Record where the task's own quantities stand right now — the trajectory,
+   *  not a verdict. See OutcomeLogger. */
+  logOutcomeReading: (readings: OutcomeReading[]) => void;
+
+  /** The home exactly as the task delivered it. Kept so the outcome can be
+   *  measured against it at submit — a delta needs a before, and reconstructing
+   *  one from the event log means replaying every edit and hoping none of them
+   *  was lossy. It is never mutated: every edit produces a new plan. */
+  initialPlan: FloorPlan | null;
+
   /** Who is sitting at the machine, and which run this is — typed by the
    *  researcher before the task starts. The log recorded the scenario but never
    *  the participant, so a folder of exported sessions could not be told apart
@@ -229,10 +246,7 @@ export interface SceneState {
   /** When this task was opened — every event carries its offset from here, so a
    *  session reads as a timeline rather than a pile of wall-clock stamps. */
   sessionStart: number;
-  /** Record the goal verdict whenever it CHANGES, so the timeline shows when
-   *  each tick-box went green and what the participant had just done. */
-  logGoalStatus: (rows: Array<{ label: string; met: boolean; detail: string }>) => void;
-  /** The participant says they are done. Scores the goals one last time, seals
+  /** The participant says they are done. Measures the outcome, seals
    *  the log and returns the report; null if there was nothing to submit. */
   submitSession: () => SessionReport | null;
   /** Set once submitted, so the panel can stop offering it twice. */
@@ -283,7 +297,7 @@ export interface LogEvent {
     | "sketch"
     | "edit"
     | "engine"
-    | "goals"
+    | "outcome"
     | "submit"
     | "select";
   method: LogMethod;
@@ -321,8 +335,14 @@ export interface SessionReport {
   startedAt: string;
   submittedAt: string;
   durationSec: number;
-  goals: Array<{ label: string; met: boolean; detail: string }>;
-  allGoalsMet: boolean;
+  /** The task's own quantities, measured on the home as delivered and again on
+   *  the home as submitted. No thresholds and no verdict: `improvement` is
+   *  positive when the participant moved the quantity the right way, and how
+   *  much counted as enough is a decision for the analysis, not for the app. */
+  outcomes: OutcomeDelta[];
+  /** One line for a spreadsheet column, where the task has an honest single
+   *  number. Null where averaging would mix unlike units — see summarizeOutcomes. */
+  outcomeSummary: { label: string; value: number; unit: string } | null;
   counts: Record<string, number>;
   /** How many steps came from each modality — the headline RQ2 number, so it
    *  does not have to be recomputed from the event list every time. */
@@ -425,6 +445,9 @@ function diffPlan(before: FloorPlan, after: FloorPlan): string[] {
 
 export const useSceneStore = create<SceneState>((set, get) => ({
   plan: generateHome(DEFAULT_SIZE),
+  // Only a scenario has a delivered state worth measuring against; free play
+  // has no task, so there is nothing for an improvement to be relative to.
+  initialPlan: null,
   started: false,
   selectedId: null,
   selectedWallId: null,
@@ -518,29 +541,30 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             // row stand on its own — see logSnapshot. Skipped for the pure
             // bookkeeping kinds, where the home did not change and a copy would
             // just be noise.
-            ...(kind === "goals" || kind === "engine" || kind === "select" ? {} : { layout: snapshotLayout(s.plan) }),
+            ...(kind === "outcome" || kind === "engine" || kind === "select" ? {} : { layout: snapshotLayout(s.plan) }),
           },
         ],
       };
     }),
 
-  logGoalStatus: (rows) => {
+  logOutcomeReading: (readings) => {
     const s = get();
-    // Only when it CHANGES — but on the MEASURED VALUE, not just the tick.
+    // WHERE THE TASK'S QUANTITY STANDS, each time it moves. Not whether a
+    // threshold is met — that was the hidden tick-list, and a threshold turns a
+    // continuum into a verdict somebody chose: move it and the same session
+    // flips from success to failure.
     //
-    // It used to key on the met flags alone, which meant a participant could
-    // spend ten minutes moving a fan and the log would show one line, because
-    // the box stayed unticked the whole time. The reading is the interesting
-    // part: it says whether they were getting warmer or going in circles, and
-    // it is the only per-step record of what the simulator told them.
-    const last = [...s.sessionLog].reverse().find((e) => e.kind === "goals");
-    const key = rows.map((r) => `${r.label}=${r.met}:${r.detail}`).join("|");
+    // Keyed on the VALUES, so one line per real change. Keying on a met/unmet
+    // flag meant a participant could spend ten minutes moving a fan and leave a
+    // single line in the log, because the box stayed unticked the whole time —
+    // and whether they were converging or going in circles is the trajectory
+    // this is here to record.
+    const last = [...s.sessionLog].reverse().find((e) => e.kind === "outcome");
+    const key = readings.map((r) => `${r.id}=${r.value ?? "-"}`).join("|");
     if (last && last.data.key === key) return;
-    s.logEvent("goals", {
+    s.logEvent("outcome", {
       key,
-      met: rows.filter((r) => r.met).length,
-      of: rows.length,
-      rows,
+      readings,
       // What the participant was looking at when this reading was taken.
       view: s.simMode,
       layout: snapshotLayout(s.plan),
@@ -551,12 +575,22 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const s = get();
     if (s.submitted) return s.submitted;
     const sc = s.scenarioId ? SCENARIOS[s.scenarioId] : null;
-    // Score the goals one final time against the plan as submitted, rather than
-    // trusting whatever the checklist last happened to show: the participant may
-    // have moved something after the last solve.
-    const goals = (sc?.goals ?? []).length
-      ? checkGoals(sc!.goals!, s.plan, s.outdoorTemp).map((r) => ({ label: r.label, met: r.met, detail: r.detail }))
-      : [];
+
+    // WHAT CHANGED, measured twice: the home as the task delivered it, and the
+    // home as submitted. Both passes run here rather than at the start, so the
+    // two readings come from the same code on the same day — a baseline taken
+    // at task start and a final taken at submit could drift apart if anything
+    // about the solver changed in between, and the task start is also the worst
+    // moment to spend half a second solving.
+    //
+    // Measured against the plan as SUBMITTED, not against whatever the last
+    // trace happened to show: the participant may have moved something after it.
+    const initialReadings =
+      s.scenarioId && s.initialPlan ? measureOutcomes(s.scenarioId, s.initialPlan, s.outdoorTemp) : [];
+    const finalReadings = s.scenarioId ? measureOutcomes(s.scenarioId, s.plan, s.outdoorTemp) : [];
+    const outcomes = compareOutcomes(initialReadings, finalReadings);
+    const outcomeSummary = s.scenarioId ? summarizeOutcomes(s.scenarioId, outcomes) : null;
+
     const now = Date.now();
     const counts: Record<string, number> = {};
     for (const e of s.sessionLog) {
@@ -566,15 +600,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const methodCounts: Record<string, number> = {};
     for (const e of s.sessionLog) methodCounts[e.method] = (methodCounts[e.method] ?? 0) + 1;
     const report: SessionReport = {
-      schema: 3,
+      schema: 4,
       participant: s.participantId || null,
       scenario: s.scenarioId,
       title: sc?.title ?? null,
       startedAt: new Date(s.sessionStart).toISOString(),
       submittedAt: new Date(now).toISOString(),
       durationSec: Math.round((now - s.sessionStart) / 1000),
-      goals,
-      allGoalsMet: goals.length > 0 && goals.every((g) => g.met),
+      outcomes,
+      outcomeSummary,
       counts,
       methodCounts,
       // How often typing and drawing were live at the same moment, and how often
@@ -600,7 +634,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           seq: s.sessionLog.length,
           kind: "submit" as const,
           method: "system" as const,
-          data: { goals, allGoalsMet: goals.every((g) => g.met) },
+          data: { outcomes, outcomeSummary },
           sketchActive: s.sketchMarks.length > 0 || s.sketchRegion !== null,
           multimodal: false,
           layout: snapshotLayout(s.plan),
@@ -1046,6 +1080,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       pendingChange: null,
       // A task is a session: the clock and the log both start here.
       sessionStart: Date.now(),
+      // The home as delivered, held for the outcome measurement at submit.
+      // Plans are replaced rather than mutated on every edit, so keeping the
+      // reference is enough — this one stays the state the task handed over.
+      initialPlan: fresh,
       submitted: null,
       // The opening row is the home AS DELIVERED — the baseline every later
       // snapshot is a change from.

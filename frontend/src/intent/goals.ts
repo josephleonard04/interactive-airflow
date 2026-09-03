@@ -78,8 +78,10 @@ export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
   };
 }
 
-/** Footprint of an item, rotation-aware, as a floor rect to measure over. */
-function itemZone(plan: FloorPlan, type: string): Rect | null {
+/** Footprint of an item, rotation-aware, as a floor rect to measure over.
+ *  Exported because the outcome measures read the same zones — "the smell at
+ *  the bed" has to mean the identical patch of floor in both files. */
+export function itemZone(plan: FloorPlan, type: string): Rect | null {
   const it = plan.items.find((i) => i.type === type);
   if (!it) return null;
   const swapped = Math.abs(Math.round(it.rotationY / (Math.PI / 2))) % 2 === 1;

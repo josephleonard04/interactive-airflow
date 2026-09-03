@@ -618,7 +618,11 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
  *  Reported in minutes because that is the unit a person owns: "the corner is
  *  still wet two hours later" is a sentence about a bathroom, and 0.27 on a
  *  contaminant scale is not. */
-const DRY_UNVENTILATED = 180;
+/** The longest FINITE drying time the model produces: the asymptote a corner
+ *  approaches when the air barely reaches it. Exported as the ceiling the
+ *  outcome measures censor at — a reading pinned here means "at least this
+ *  slow", which is a bound you can subtract, unlike the DRY_NEVER sentinel. */
+export const DRY_UNVENTILATED = 180;
 /** The transport cost at which a spot is drying at roughly half the sealed-room
  *  rate. Its OWN constant, not FRESH_TAU: that one is tuned to 5 s for the
  *  moisture level in the studio task, and at 5 s the drying term saturates —
@@ -630,7 +634,11 @@ const DRY_TAU = 25;
 /** Minutes reported when the cell has NO opening anywhere in reach — a sealed
  *  room never dries, and the checklist needs a finite number to print rather
  *  than an infinity. */
-const DRY_NEVER = 999;
+/** Sentinel minutes for a cell fresh air never reaches. NOT a duration — it
+ *  means "does not dry", and anything averaging or differencing it has to say
+ *  so. Exported so the outcome measures can recognise a censored reading
+ *  instead of reporting 999 minutes as though somebody timed it. */
+export const DRY_NEVER = 999;
 
 export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Array; dry: Float32Array } {
   const { sim, nx, ny, nz, dx, ambient, ventDilute } = s;

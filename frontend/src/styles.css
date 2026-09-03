@@ -738,3 +738,55 @@ button.setup-go:active {
   color: var(--muted);
   font-weight: 500;
 }
+
+
+/* --- Sketch pad ---------------------------------------------------------- */
+
+/* An even grid rather than a wrapping row. As flex-wrap the six pens broke
+   wherever their labels happened to fit: three lines for one, one for another,
+   and the last pen alone on a full-width row. Fixed columns make every cell the
+   same target, which also makes the row read as one set of choices. */
+.sketch-tools {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 9px;
+}
+
+.sketch-tools .tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 48px;
+  padding: 6px 4px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+}
+
+.sketch-tool-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.sketch-tool-label {
+  font-size: 11px;
+  font-weight: 650;
+  /* Two-word labels stay on one line where they fit, and centre where they
+     don't — a hyphenated break in "Fresh air" reads as a typo. */
+  overflow-wrap: break-word;
+}
+
+/* The plan sits between the pens and the sentence box, so it needs air on both
+   sides rather than butting straight up against them. */
+.sketch-canvas-frame {
+  display: block;
+  margin: 0 auto;
+}
+
+.sketch-hint {
+  margin: 8px 0 0;
+  line-height: 1.45;
+}

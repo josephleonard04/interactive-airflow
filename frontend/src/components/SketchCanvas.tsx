@@ -26,15 +26,23 @@ import {
 const MAX_W = 258;
 const MAX_H = 190;
 
-const TOOLS: Array<{ id: SketchTool; label: string; hint: string }> = [
+// Icon and label kept apart so the toolbar can stack them and every cell comes
+// out the same size. As one string they wrapped wherever the text happened to
+// break — "Just an area" took three lines while "Cool" took one, and the arrow
+// pen fell onto a row of its own.
+const TOOLS: Array<{ id: SketchTool; icon: string; label: string; hint: string }> = [
   // First, because it is the one that needs no decision: box the place you mean
-  // and say the rest in words. The four wishes below are the shortcuts.
-  { id: "plain", label: "▢ Just an area", hint: "Box an area, then type what you want there" },
-  { id: "warm", label: "🔥 Warm", hint: "Box the area you want warmer" },
-  { id: "cool", label: "❄️ Cool", hint: "Box the area you want cooler" },
-  { id: "fresh", label: "🌬️ Fresh air", hint: "Box the area you want aired out" },
-  { id: "nodraft", label: "🚫 No wind", hint: "Box the area where you do not want air blowing on you" },
-  { id: "arrow", label: "➜ Air flow", hint: "Drag an arrow: move air from here to there" },
+  // and say the rest in words. The four wishes after it are the shortcuts.
+  //
+  // "Region", not "Just an area": it is the word the rest of the system already
+  // uses for this (regionId, regionRect, SketchRegionBinding), and "just" tells
+  // a participant the option is the lesser one when it is the general one.
+  { id: "plain", icon: "▢", label: "Region", hint: "Box a region, then type what you want there" },
+  { id: "warm", icon: "🔥", label: "Warm", hint: "Box the area you want warmer" },
+  { id: "cool", icon: "❄️", label: "Cool", hint: "Box the area you want cooler" },
+  { id: "fresh", icon: "🌬️", label: "Fresh air", hint: "Box the area you want aired out" },
+  { id: "nodraft", icon: "🚫", label: "No wind", hint: "Box the area where you do not want air blowing on you" },
+  { id: "arrow", icon: "➜", label: "Air flow", hint: "Drag an arrow: move air from here to there" },
 ];
 
 export function SketchCanvas() {
@@ -128,31 +136,32 @@ export function SketchCanvas() {
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+      <div className="sketch-tools">
         {TOOLS.map((t) => (
           <button
             key={t.id}
             className={tool === t.id ? "tool active" : "tool"}
             style={{
-              fontSize: 11,
-              padding: "3px 8px",
               borderColor: tool === t.id ? TOOL_COLOR(t.id) : undefined,
               color: tool === t.id ? TOOL_COLOR(t.id) : undefined,
             }}
             title={t.hint}
             onClick={() => setTool(t.id)}
           >
-            {t.label}
+            <span className="sketch-tool-icon" aria-hidden="true">
+              {t.icon}
+            </span>
+            <span className="sketch-tool-label">{t.label}</span>
           </button>
         ))}
       </div>
 
       <svg
+        className="sketch-canvas-frame"
         ref={svgRef}
         width={W}
         height={H}
         style={{
-          display: "block",
           border: "1px solid var(--line)",
           borderRadius: 8,
           background: "#fff",
@@ -268,9 +277,9 @@ export function SketchCanvas() {
           </div>
         </div>
       ) : (
-        <p className="muted-line" style={{ marginTop: 5 }}>
-          Drag a box over the area you mean, then type what you want there — or pick one of the
-          four wishes instead, or drag an arrow from one room to another.
+        <p className="muted-line sketch-hint">
+          Drag a box over the area you mean, then say what you want there. Or pick a wish and
+          box it, or drag an arrow from one room to another.
         </p>
       )}
     </div>
