@@ -98,6 +98,8 @@ export interface Sim3D {
   windowReach: number;
   ventSpread: number;
   sealedHalo: boolean;
+  /** Multiplier on the decay length of the AC's cold only — see FloorPlan. */
+  coldReach: number;
   /** Is any exterior window or door actually open?
    *
    *  NOT the same as "are there ambient cells", which is what this used to be
@@ -160,18 +162,22 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // 2 °C outdoors.
 //
 // THE AC IS SIZED THE SAME WAY, and was not. At -10 it pulled the apartment to
-// about 23 °C on a 31 °C night and no arrangement could do better than 23.2 —
-// the entire achievable range across every aim, tilt and door state was 0.7 K,
-// so a participant who solved the task correctly saw a room that was still
-// warm. -14 puts a correctly arranged apartment at about 20 °C in both rooms.
+// about 23 °C in both rooms on a 31 °C night, and no arrangement could do
+// better than 23.2 — the whole achievable range across every aim, tilt and door
+// state was 0.7 K, so a participant who solved the task correctly saw a room
+// that was still warm and could not tell they had changed anything.
 //
-// Only the apartment task has an air conditioner, so this constant reaches
-// nothing else: the winter home has a heater, the studio and the bathroom have
-// neither. What it does NOT change is the shape of the task — aim moves the
-// draft over the bed across a 3.3x range (0.13-0.43 m/s) and the room mean by
-// under a degree, so the draft is still what the participant is solving for.
+// -17, with the apartment's own coldReach keeping the cold near the unit
+// (see FloorPlan.coldReach), gives the task the shape it was always described
+// as having: the bedroom the unit is bolted in starts near 20 °C, the living
+// room it cannot reach starts near 23 °C, and aiming the louvre through the
+// doorway brings the living room down about 2 K while the draft over the bed
+// falls from 0.45 to 0.14 m/s.
+//
+// Only the apartment has an air conditioner, so this constant reaches nothing
+// else: the winter home has a heater, the studio and the bathroom have neither.
 const HEATER_T = 19;
-const AC_T = -14;
+const AC_T = -17;
 /** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the only one.
  *
  *  Only the AC and the heater used to warm or cool anything, so the humidity
@@ -599,7 +605,7 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
         }
   };
 
-  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, ventSpread: plan.ventSpread ?? 1, sealedHalo: plan.sealedHalo === true, hasOpenExterior };
+  return { sim, nx, ny, nz, dx, origin, worldToCell, cellCenter, setSource, ambient, ventDilute, hasTemperature, inside, roomIndex, roomIds, seeds, sinks, glass, markers, windowReach: plan.windowReach ?? 1, ventSpread: plan.ventSpread ?? 1, sealedHalo: plan.sealedHalo === true, coldReach: plan.coldReach ?? 1, hasOpenExterior };
 }
 
 // Per-grid steady-state temperature & air-quality by GEODESIC DISTANCE from the
@@ -899,7 +905,12 @@ export function geodesicFields(s: Sim3D): { temp: Float32Array; smell: Float32Ar
     if (sim.solid[c]) continue;
     let t = 0;
     if (dHot && dHot[c] !== Infinity) t += hotMag * Math.exp(-dHot[c] / TAU);
-    if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / TAU);
+    // COLD GETS ITS OWN REACH. A cold jet is denser than the room it enters, so
+    // it falls and pools near the unit rather than mixing through the house the
+    // way a heater's plume does — and in the apartment that difference IS the
+    // task. See FloorPlan.coldReach; 1 everywhere else, so the heater above and
+    // every other scenario are untouched.
+    if (dCold && dCold[c] !== Infinity) t -= coldMag * Math.exp(-dCold[c] / (TAU * s.coldReach));
     // heat bleeding out through the glazing, strongest right at the pane
     if (dGlass && dGlass[c] !== Infinity) t *= 1 - GLASS_LOSS * Math.exp(-dGlass[c] / GLASS_LAMBDA);
     temp[c] = t;

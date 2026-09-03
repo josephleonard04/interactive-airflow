@@ -172,6 +172,27 @@ export interface FloorPlan {
    *  lever. Raising the clamp globally would change every other scenario's
    *  air conditioner; this changes one plan's. */
   acThrow?: number;
+  /** How far the AC's cold carries before it fades, as a multiplier on the
+   *  temperature field's decay length (1 = unchanged, below 1 = it stays local
+   *  to the unit). Default 1.
+   *
+   *  Per-task for the same reason acThrow is, and it is the apartment that
+   *  needs it. The air conditioner is bolted in the BEDROOM, and the task is
+   *  that its cold is dumped on the sleeper instead of reaching the living
+   *  room. At the shared decay length the cold filled both rooms almost
+   *  equally — 20.9 and 19.8, a gap of one degree — so the room the unit is not
+   *  in was already as cool as the room it is in, and the participant had
+   *  nothing to fix and no way to see they had fixed it.
+   *
+   *  Lowering it keeps the cold near the unit, which is what a cold jet
+   *  actually does: it is denser than the room air, so it falls and pools
+   *  rather than mixing through the house the way a heater's plume does.
+   *  Aiming the unit through the doorway is then what carries it next door,
+   *  which is the lever the task is about.
+   *
+   *  Only the cold half. The heater's warmth is untouched, so the winter home
+   *  is unaffected — see TAU in sim3d.ts. */
+  coldReach?: number;
   name: string;
   size: HomeSize;
   bounds: Rect;

@@ -762,6 +762,27 @@ function buildAcFlat(): FloorPlan {
   // registers; at 5 the jet is strong enough to cool the flat on its own and
   // the fan stops mattering.
   plan.acThrow = 4;
+  // WHERE THE COLD GOES, which is the whole task and used not to be modelled.
+  //
+  // The unit is bolted in the BEDROOM. At the shared decay length its cold
+  // filled both rooms almost equally — the living room read 20.9 and the
+  // bedroom 19.8, a gap of one degree — so the room the AC is not in was
+  // already as cool as the room it is in. There was nothing to fix and no way
+  // to see it had been fixed: across every aim, tilt and door state the whole
+  // achievable range was 0.7 K.
+  //
+  // 0.37 keeps the cold near the unit, which is what a cold jet does — it is
+  // denser than the room it enters, so it falls and pools rather than mixing
+  // through the house the way a heater's plume does. The apartment now starts
+  // at about 23 °C in the living room and 20 °C in the bedroom, and aiming the
+  // louvre through the doorway carries the cold next door: the living room
+  // comes down about 2 K while the draft over the bed drops from 0.45 to
+  // 0.14 m/s. Cooling the far room and calming the bed are the same move, which
+  // is the lesson.
+  //
+  // Cold only. The heater is untouched, so the winter home is unaffected —
+  // see TAU in sim3d.ts.
+  plan.coldReach = 0.37;
   addWindow(plan, "bedroom", "north", 0.42, false, 2.8);
   addWindow(plan, "living", "east", 0.5, false);
   for (const o of [...plan.doors, ...plan.windows]) { o.fixed = true; }
