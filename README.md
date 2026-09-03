@@ -71,7 +71,6 @@ A search completes in roughly 3–8 s in the browser, single-threaded.
 |---|---|
 | **[`frontend/`](frontend/)** | **The app.** Home editor, real-time solver, intent layer, placement search, study tasks, session logging. All current work is here. |
 | [`backend/`](backend/) | Optional FastAPI server: the LLM goal parser, and an OpenFOAM "accurate engine" pass. The app runs fully without it. |
-| [`app/`](app/) | Prof. Xie's original single-room handoff, kept as reference. |
 | [`bridge/`](bridge/), [`intent/`](intent/) | Earlier LFM (GPU solver) bridge and notes. Parked. |
 | [`docs/`](docs/) | [Study protocol](docs/user-study-protocol.md), [positioning](docs/contribution-positioning.md), [related work](docs/related-work.md), [optimizer notes](docs/optimizer-research.md), [two-engine design](docs/openfoam-engine.md). |
 
@@ -153,7 +152,6 @@ There is no unit-test suite. What the project relies on instead is that the simu
 - The OpenFOAM path is generated but has not been run against a live install.
 - The optimizer is a budgeted local method over a discretized design space. It carries no optimality certificate — the guarantee is empirical, measured against exhaustive search on two tasks, and the cascade's cheap rung can in principle discard a region the accurate rung would have preferred.
 - Scalar fields beyond temperature / smell / drying (CO₂, PM2.5) are not implemented.
-- `app/` (the original handoff) still runs independently: `cd app && npm install && npm run dev`.
 
 ## License
 
