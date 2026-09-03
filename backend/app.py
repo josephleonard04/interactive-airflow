@@ -59,6 +59,10 @@ class ParseGoalRequest(BaseModel):
     rooms: list[dict[str, Any]] = []
     items: list[str] = []
     outdoor_temp: float | None = None
+    # The box the participant drew on the plan, when they drew one: the "where"
+    # of a sentence that only carries the "what" ("make this a bit warmer").
+    # {"roomId", "roomName", "x", "z", "w", "d"} in metres, or null.
+    sketch_region: dict[str, Any] | None = None
 
 
 @app.get("/api/health")
@@ -82,7 +86,7 @@ def parse_goal_route(req: ParseGoalRequest) -> dict[str, Any]:
     has the same remedy (tell the participant, keep going). The body carries
     either `objectives` or `error`.
     """
-    return parse_goal(req.text, req.rooms, req.items, req.outdoor_temp)
+    return parse_goal(req.text, req.rooms, req.items, req.outdoor_temp, req.sketch_region)
 
 
 @app.post("/api/run")

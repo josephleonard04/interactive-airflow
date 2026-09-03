@@ -20,6 +20,8 @@ Everything runs client-side: an in-browser Euler solver, the language layer, and
 2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (`backend/goal_parser.py`) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
 3. **By drawing** — box an area and pick *warm / cool / fresh air / no wind*, or draw an arrow for "move air from here to there".
 
+The third one also combines with the second: **box an area, then type what you want there.** The drawn box answers "where" and the sentence answers "what", so "keep this area out of the draught" needs no room name — the box supplies it. The drawing travels with the sentence into both parsers, and the log records, per step, whether a drawing was on the pad and whether the parse actually used it.
+
 Typed and drawn intents both feed **Find solutions**, which searches your actual layout with the simulator and offers a gallery of complete arrangements. Clicking one applies it; there is no confirmation step, and Undo is the way back.
 
 ## The optimizer
@@ -70,7 +72,7 @@ A search completes in roughly 3–8 s in the browser, single-threaded.
 | Path | What it is |
 |---|---|
 | **[`frontend/`](frontend/)** | **The app.** Home editor, real-time solver, intent layer, placement search, study tasks, session logging. All current work is here. |
-| [`backend/`](backend/) | Optional FastAPI server: the LLM goal parser, and an OpenFOAM "accurate engine" pass. The app runs fully without it. |
+| [`backend/`](backend/) | Optional FastAPI server: the LLM goal parser (hosted or a local model), and an OpenFOAM "accurate engine" pass. The app runs fully without it. |
 | [`bridge/`](bridge/), [`intent/`](intent/) | Earlier LFM (GPU solver) bridge and notes. Parked. |
 | [`docs/`](docs/) | [Study protocol](docs/user-study-protocol.md), [positioning](docs/contribution-positioning.md), [related work](docs/related-work.md), [optimizer notes](docs/optimizer-research.md), [two-engine design](docs/openfoam-engine.md). |
 
@@ -91,7 +93,23 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate         # Windows;  source .venv/bin/activate elsewhere
 pip install -r requirements.txt
+export ANTHROPIC_API_KEY=...          # or use a local model, below
 uvicorn app:app --host 127.0.0.1 --port 8000
+```
+
+**The goal parser can run on this machine instead of a hosted API** — which matters when the study room has no usable network, and when a participant's verbatim wording should not leave the laptop. Any OpenAI-compatible server works (Ollama, LM Studio, llama.cpp, vLLM):
+
+```sh
+ollama serve && ollama pull llama3.1
+export GOAL_PARSER_PROVIDER=local
+export GOAL_PARSER_BASE_URL=http://localhost:11434/v1   # the default
+export GOAL_PARSER_MODEL=llama3.1                       # the default
+```
+
+Both routes answer in the same objective vocabulary and go through the same id validation, so nothing downstream can tell which read the sentence. Check the local route without a model running:
+
+```sh
+python backend/check_goal_parser.py
 ```
 
 Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs/openfoam-engine.md). Without it the Accurate button returns a labeled "preview (no OpenFOAM)" field.
@@ -138,10 +156,35 @@ Real CFD needs OpenFOAM (WSL recommended) — see [docs/openfoam-engine.md](docs
 | **Search** | `intent/solutions.ts`, `searchOptimize.ts` | Candidate generation, the fidelity ladder, the local polish, and the rules about what each task may change |
 | **Goals** | `intent/goals.ts` | Scores a task's checkboxes on the same solve the views draw |
 
+### What the session log records
+
+One row per action, each self-contained (the whole layout is attached, so any
+step can be re-scored without replaying the ones before it). A run is identified
+by a **Participant ID**, typed on the start screen before the task begins, which
+travels on every event and on the file name.
+
+| | |
+|---|---|
+| Who and what | participant id, scenario, task brief and thresholds as set |
+| When | task start and submit, plus `t` (epoch), `at` (ms into the task) and `seq` on every row |
+| What kind of action | `goal` `check` `unparsed` `sketch` `edit` `select` `engine` `review` `goals` `preset` `submit`, each also tagged `method`: manual / text / sketch / solution / system |
+| The utterance | the sentence verbatim, including the ones nothing could read — those are logged as `unparsed` with the reason, because a coverage gap is a finding |
+| Was a drawing live | `sketchActive` on every row, and `multimodal` when typing and a drawing were in play together |
+| What the system understood | the objectives it produced — scalar, direction, region, and `fromSketchArea` when the drawn box was what grounded it |
+| Whether it understood at all | dictionary / model / task-goal fallback, and which of those failed |
+| What was done with the answer | candidates offered, and accepted, refined or dismissed |
+| The end | submit time, the final layout, and the goals scored against it |
+
+Exported two ways: **Study log** downloads the events mid-task (for a session
+that has to be abandoned), and **Submit** downloads the full report. Both carry
+the participant header; the report adds `multimodalSteps` and
+`sketchGroundedSteps` so the headline RQ2 numbers need no recomputing.
+
 ## Verifying changes
 
 ```sh
 cd frontend && npx tsc --noEmit
+python backend/check_goal_parser.py     # local-model route, no model needed
 ```
 
 There is no unit-test suite. What the project relies on instead is that the simulation modules are importable headlessly, so behavior is checked by measurement: bundle a throwaway script with `esbuild --bundle --platform=node --define:import.meta.env='{}'` and run it in Node to sweep layouts, fingerprint every scenario before and after a change, or brute-force a task's answer. Every threshold in `scenarios.ts` was set that way, and the numbers are written down next to them.

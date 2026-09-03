@@ -506,11 +506,27 @@ export function SimPanel() {
         style={{ marginTop: 10, fontSize: 11, width: "100%" }}
         title="Download the session log (every goal, parse, review decision & change) as JSON — for the user study"
         onClick={() => {
-          const log = useSceneStore.getState().sessionLog;
-          const blob = new Blob([JSON.stringify({ exported: new Date().toISOString(), events: log }, null, 2)], { type: "application/json" });
+          // THE SAME HEADER THE SUBMITTED REPORT CARRIES. This mid-task export
+          // is what gets pulled when a session is abandoned or a laptop has to
+          // be handed over, and it used to be a bare array of events — the one
+          // file most likely to arrive without a session attached to it was
+          // also the only one that could not say whose it was.
+          const s = useSceneStore.getState();
+          const payload = {
+            kind: "study-log-interim",
+            exported: new Date().toISOString(),
+            participant: s.participantId || null,
+            scenario: s.scenarioId,
+            startedAt: new Date(s.sessionStart).toISOString(),
+            elapsedSec: Math.round((Date.now() - s.sessionStart) / 1000),
+            multimodalSteps: s.sessionLog.filter((e) => e.multimodal).length,
+            events: s.sessionLog,
+          };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
           const a = document.createElement("a");
+          const who = s.participantId ? `${s.participantId.replace(/[^\w.-]+/g, "_")}-` : "";
           a.href = URL.createObjectURL(blob);
-          a.download = `airflow-session-${Date.now()}.json`;
+          a.download = `airflow-session-${who}${s.scenarioId ?? "free"}-interim.json`;
           a.click();
           URL.revokeObjectURL(a.href);
         }}

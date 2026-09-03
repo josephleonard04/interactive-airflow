@@ -27,7 +27,32 @@ import json
 import os
 from typing import Any
 
+# WHICH MODEL READS THE SENTENCE.
+#
+# Anthropic by default. The alternative is a model on the machine itself, which
+# matters for two reasons the hosted one cannot answer: a study session in a room
+# with no usable network still has its fallback parser, and a participant's
+# verbatim wording never leaves the laptop — which is the thing an ethics
+# application has to promise about free-text input.
+#
+#   GOAL_PARSER_PROVIDER=anthropic   (default)
+#   GOAL_PARSER_PROVIDER=local       any OpenAI-compatible server:
+#                                    Ollama, LM Studio, llama.cpp, vLLM
+#   GOAL_PARSER_BASE_URL=http://localhost:11434/v1
+#   GOAL_PARSER_MODEL=llama3.1
+#
+# Both routes answer in the SAME objective vocabulary and go through the same
+# id validation below, so nothing downstream — the solver, the panel, the log —
+# can tell which one read the sentence. The log records which did, because a
+# coverage gap found by a 7B local model is not the same finding as one found by
+# Opus.
 MODEL = "claude-opus-5"
+LOCAL_MODEL_DEFAULT = "llama3.1"
+LOCAL_BASE_URL_DEFAULT = "http://localhost:11434/v1"
+
+
+def _provider() -> str:
+    return (os.environ.get("GOAL_PARSER_PROVIDER") or "anthropic").strip().lower()
 
 # The objective vocabulary, kept in lockstep with frontend/src/intent/objectives.ts.
 SCALARS = ["temperature", "contaminant", "draft"]
@@ -88,8 +113,20 @@ OBJECTIVE_SCHEMA: dict[str, Any] = {
                             "comes FROM, if the sentence says. Otherwise null."
                         ),
                     },
+                    "usedSketch": {
+                        "type": "boolean",
+                        "description": (
+                            "True when this objective is about the box the person "
+                            "drew on the plan rather than a whole room — set it "
+                            "whenever a drawn area was given and the sentence "
+                            "points at it ('this area', 'here', 'that corner') or "
+                            "names no place at all. False when the sentence names "
+                            "its own room or item, and false when nothing was "
+                            "drawn."
+                        ),
+                    },
                 },
-                "required": ["scalar", "direction", "regionId", "nearItem", "sourceId"],
+                "required": ["scalar", "direction", "regionId", "nearItem", "sourceId", "usedSketch"],
                 "additionalProperties": False,
             },
         }
@@ -122,7 +159,8 @@ the smell comes from, when the sentence says.
 greeting, small talk, an instruction about something else — return an empty \
 list. Do not guess a goal to be helpful. An empty list is a useful answer; an \
 invented one is not.
-6. Words about comfort with no quantity named ("make the bed area nice to \
+6. A DRAWN AREA IS THE ANSWER TO "WHERE". When the person has boxed a spot on the plan, a sentence that points at it ("warm this corner", "less draught here") or names no place at all is about that box: set usedSketch true and set regionId to the room the box sits in. A sentence that names its own room or item is not about the box, however recently it was drawn — set usedSketch false.
+7. Words about comfort with no quantity named ("make the bed area nice to \
 sleep", "I want it bearable in here") do name a goal. Use the outdoor \
 temperature you are given to decide which: hot outside means they want it \
 cooler, cold outside means warmer, and otherwise they want fresher air."""
@@ -140,6 +178,11 @@ def parser_configured() -> bool:
     looks configured right up until every parse comes back 401, which is why the
     frontend keeps 'no credential' and 'credential rejected' apart.
     """
+    # A local model needs no credential at all — it is configured as soon as it
+    # is pointed at, and whether it is actually RUNNING is a different question,
+    # the same one a missing Anthropic key cannot answer either.
+    if _provider() == "local":
+        return True
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         return True
     config = os.environ.get("ANTHROPIC_CONFIG_DIR") or os.path.join(
@@ -148,36 +191,12 @@ def parser_configured() -> bool:
     return os.path.isdir(os.path.join(config, "credentials"))
 
 
-def parse_goal(
-    text: str,
-    rooms: list[dict[str, Any]],
-    items: list[str],
-    outdoor_temp: float | None,
-) -> dict[str, Any]:
-    """Map one sentence onto the objective vocabulary.
-
-    Returns {"objectives": [...]} or {"error": "..."} — never raises, because the
-    caller is a live study session and the fallback for every failure is the same
-    (say so, and carry on with what the dictionary understood).
-    """
-    if not text.strip():
-        return {"objectives": []}
-
+def _call_anthropic(prompt: str) -> dict[str, Any]:
+    """The hosted route. Returns {"text": ...} or {"error": ...}, never raises."""
     try:
         import anthropic
     except ImportError:
         return {"error": "The anthropic package is not installed (pip install -r requirements.txt)."}
-
-    room_lines = "\n".join(f"  - id={r['id']!r} name={r['name']!r} type={r['type']!r}" for r in rooms)
-    weather = (
-        f"It is {outdoor_temp:.0f} °C outside." if outdoor_temp is not None else "The outdoor temperature is unknown."
-    )
-    prompt = (
-        f"Rooms in this home:\n{room_lines}\n\n"
-        f"Item types standing in it: {', '.join(sorted(set(items))) or '(none)'}\n\n"
-        f"{weather}\n\n"
-        f"The person typed:\n{text.strip()!r}"
-    )
 
     try:
         # Zero-arg: let the SDK resolve whichever credential is actually present
@@ -211,11 +230,138 @@ def parse_goal(
     if response.stop_reason == "refusal":
         return {"error": "The model declined to answer this request."}
 
-    payload = next((b.text for b in response.content if b.type == "text"), None)
-    if not payload:
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if not text:
         return {"error": f"Empty response (stop_reason={response.stop_reason})."}
+    return {"text": text}
+
+
+def _call_local(prompt: str) -> dict[str, Any]:
+    """A model on this machine, over the OpenAI-compatible chat API.
+
+    Ollama, LM Studio, llama.cpp and vLLM all speak it, so one client covers the
+    lot. Schema enforcement is weaker than the hosted route's — a small model
+    will wrap its JSON in prose or a code fence however firmly it is asked not
+    to — so the reply is unwrapped here rather than trusted. Everything it
+    returns still goes through the same id validation as the hosted route, which
+    is what actually keeps a hallucinated room out of the solver.
+    """
+    import urllib.error
+    import urllib.request
+
+    base = (os.environ.get("GOAL_PARSER_BASE_URL") or LOCAL_BASE_URL_DEFAULT).rstrip("/")
+    model = os.environ.get("GOAL_PARSER_MODEL") or LOCAL_MODEL_DEFAULT
+    body = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                # The schema goes in the prompt, not in a parameter: json_schema
+                # support is inconsistent across local servers, and one that
+                # ignores an unknown field silently is worse than not asking.
+                {"role": "system", "content": SYSTEM + "\n\n" + _LOCAL_FORMAT_RULE},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+        }
+    ).encode()
+
+    request = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=body,
+        headers={"content-type": "application/json"},
+    )
+    key = os.environ.get("GOAL_PARSER_API_KEY")
+    if key:
+        request.add_header("authorization", f"Bearer {key}")
+
     try:
-        parsed = json.loads(payload)
+        with urllib.request.urlopen(request, timeout=60) as response:
+            data = json.loads(response.read())
+    except urllib.error.URLError as exc:
+        # Named explicitly, because "start Ollama" and "fix your key" are the two
+        # different things a researcher might have to do and the frontend shows
+        # different words for each.
+        return {"error": f"Local model at {base} is unreachable ({exc.reason}). Is it running?"}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        text = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return {"error": "The local model returned no message content."}
+    return {"text": _unwrap_json(text)}
+
+
+_LOCAL_FORMAT_RULE = (
+    "Reply with ONE JSON object and nothing else — no prose, no code fence. "
+    'Shape: {"objectives": [{"scalar": "temperature"|"contaminant"|"draft", '
+    '"direction": "low"|"high", "regionId": <room id or null>, '
+    '"nearItem": <item type or null>, "sourceId": <room id or null>, '
+    '"usedSketch": true|false}]}. '
+    'An empty list is written {"objectives": []}.'
+)
+
+
+def _unwrap_json(text: str) -> str:
+    """Pull the JSON object out of a reply that may be fenced or prefaced."""
+    body = text.strip()
+    if body.startswith("```"):
+        body = body.split("```")[1] if "```" in body[3:] else body[3:]
+        if body.lstrip().lower().startswith("json"):
+            body = body.lstrip()[4:]
+    start, end = body.find("{"), body.rfind("}")
+    return body[start : end + 1] if start != -1 and end > start else body.strip()
+
+
+def parse_goal(
+    text: str,
+    rooms: list[dict[str, Any]],
+    items: list[str],
+    outdoor_temp: float | None,
+    sketch_region: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Map one sentence onto the objective vocabulary.
+
+    Returns {"objectives": [...]} or {"error": "..."} — never raises, because the
+    caller is a live study session and the fallback for every failure is the same
+    (say so, and carry on with what the dictionary understood).
+    """
+    if not text.strip():
+        return {"objectives": []}
+
+    room_lines = "\n".join(f"  - id={r['id']!r} name={r['name']!r} type={r['type']!r}" for r in rooms)
+    weather = (
+        f"It is {outdoor_temp:.0f} °C outside." if outdoor_temp is not None else "The outdoor temperature is unknown."
+    )
+    # The drawing is context for the sentence, not a second request. Described
+    # in metres and by the room it lands in, because "a 1.2 x 0.9 m box in the
+    # Bedroom" is groundable and a pair of raw corners is not.
+    if sketch_region:
+        where = sketch_region.get("roomName") or sketch_region.get("roomId") or "the home"
+        drawn = (
+            "The person has ALSO drawn a box on the floor plan, "
+            f"{float(sketch_region.get('w', 0)):.1f} x {float(sketch_region.get('d', 0)):.1f} m, "
+            f"inside {where} (room id {sketch_region.get('roomId')!r}). "
+            "See rule 6.\n\n"
+        )
+    else:
+        drawn = "The person has not drawn anything on the plan.\n\n"
+
+    prompt = (
+        f"Rooms in this home:\n{room_lines}\n\n"
+        f"Item types standing in it: {', '.join(sorted(set(items))) or '(none)'}\n\n"
+        f"{weather}\n\n"
+        f"{drawn}"
+        f"The person typed:\n{text.strip()!r}"
+    )
+
+    payload = _call_local(prompt) if _provider() == "local" else _call_anthropic(prompt)
+    if "error" in payload:
+        return payload
+    try:
+        parsed = json.loads(payload["text"])
     except json.JSONDecodeError:
         return {"error": "The model's reply was not valid JSON."}
 
@@ -235,6 +381,10 @@ def parse_goal(
                 "regionId": o["regionId"] if o.get("regionId") in room_ids else None,
                 "nearItem": o["nearItem"] if o.get("nearItem") in item_types else None,
                 "sourceId": o["sourceId"] if o.get("sourceId") in room_ids else None,
+                # Only meaningful if something was actually drawn: a model that
+                # claims the box when there is no box would ground the goal on
+                # a rectangle that does not exist.
+                "usedSketch": bool(o.get("usedSketch")) and sketch_region is not None,
             }
         )
     return {"objectives": clean}

@@ -47,6 +47,20 @@ interface WireObjective {
   regionId: string | null;
   nearItem: string | null;
   sourceId: string | null;
+  /** The model's answer to "is this about the box they drew?" — see rule 6 of
+   *  the system prompt in backend/goal_parser.py. */
+  usedSketch?: boolean;
+}
+
+/** The room a drawn box sits in, by its centre — the model is given the room so
+ *  it can ground the drawing in the same vocabulary as everything else. */
+function sketchRoom(plan: FloorPlan, rect: Rect) {
+  const cx = rect.x + rect.w / 2;
+  const cz = rect.z + rect.d / 2;
+  return (
+    plan.rooms.find((r) => cx >= r.rect.x && cx <= r.rect.x + r.rect.w && cz >= r.rect.z && cz <= r.rect.z + r.rect.d) ??
+    null
+  );
 }
 
 /** Footprint of an item type, with the margin objectives.ts uses for the same
@@ -82,6 +96,20 @@ export async function parseGoalWithLLM(
         rooms: plan.rooms.map((r) => ({ id: r.id, name: r.name, type: r.type })),
         items: Array.from(new Set(plan.items.map((i) => i.type))),
         outdoor_temp: opts.outdoorTemp ?? null,
+        // THE DRAWING TRAVELS WITH THE SENTENCE. Without it the model was asked
+        // to read "make this corner warmer" with no idea which corner, and the
+        // box could only be applied afterwards as a blind fallback — used when
+        // the sentence named no room, ignored when it named the wrong one.
+        sketch_region: sketch
+          ? {
+              roomId: sketchRoom(plan, sketch)?.id ?? null,
+              roomName: sketchRoom(plan, sketch)?.name ?? null,
+              x: sketch.x,
+              z: sketch.z,
+              w: sketch.w,
+              d: sketch.d,
+            }
+          : null,
       }),
     });
     if (!res.ok) return { objectives: [], reason: "error", detail: `HTTP ${res.status}` };
@@ -114,17 +142,26 @@ export async function parseGoalWithLLM(
       const obj = o.nearItem ? itemRegion(plan, o.nearItem) : null;
       const room = roomOf(o.regionId);
       const source = roomOf(o.sourceId);
+      // The model said this one is about the drawn box. An item still beats it
+      // — "no draught on the bed" is about the bed even with a box on screen.
+      const drawn = !obj && sketch && o.usedSketch ? sketch : null;
       return {
         raw: text,
         scalar: o.scalar,
         direction: o.direction,
-        regionId: obj ? obj.roomId : room?.id ?? null,
-        regionName: obj ? obj.name : room?.name ?? null,
+        regionId: obj ? obj.roomId : drawn ? sketchRoom(plan, drawn)?.id ?? room?.id ?? null : room?.id ?? null,
+        regionName: obj
+          ? obj.name
+          : drawn
+            ? `the area you marked${sketchRoom(plan, drawn) ? ` (${sketchRoom(plan, drawn)!.name})` : ""}`
+            : room?.name ?? null,
         sourceId: source?.id ?? null,
         sourceName: source?.name ?? null,
-        // A sketched area still stands in as the region when the sentence named
-        // no room and no item — again, as the dictionary does.
-        regionRect: obj ? obj.rect : !room && sketch ? sketch : null,
+        // The drawn box, when the model claimed it; otherwise the old rule —
+        // a sketch still stands in when the sentence named no room and no item,
+        // which is what happens when the backend is an older build that does
+        // not know about usedSketch.
+        regionRect: obj ? obj.rect : (drawn ?? (!room && sketch ? sketch : null)),
       };
     })
     // AN OBJECTIVE NOBODY CAN MEASURE IS NOT AN OBJECTIVE. The model is handed

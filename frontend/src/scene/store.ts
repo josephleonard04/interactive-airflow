@@ -54,6 +54,7 @@ const DEFAULT_METHOD: Record<LogEvent["kind"], LogMethod> = {
   engine: "system",
   goals: "system",
   submit: "system",
+  select: "manual",
 };
 
 const DEFAULT_SIZE: HomeSize = { length: 9, width: 7, height: 2.7 };
@@ -214,6 +215,13 @@ export interface SceneState {
    *  searched — no sentence required. */
   applySketchSolution: () => boolean;
 
+  /** Who is sitting at the machine, and which run this is — typed by the
+   *  researcher before the task starts. The log recorded the scenario but never
+   *  the participant, so a folder of exported sessions could not be told apart
+   *  except by their timestamps. */
+  participantId: string;
+  setParticipantId: (id: string) => void;
+
   /** Study session log (§6.5 of the study protocol): every utterance, parse,
    *  review decision and plan change, timestamped, downloadable as JSON. */
   sessionLog: LogEvent[];
@@ -266,13 +274,36 @@ export interface LogEvent {
   // could not read is the most useful thing a language study collects — it is
   // the coverage gap, verbatim — and it used to leave no trace at all because
   // the search simply returned false.
-  kind: "goal" | "unparsed" | "check" | "preset" | "review" | "sketch" | "edit" | "engine" | "goals" | "submit";
+  kind:
+    | "goal"
+    | "unparsed"
+    | "check"
+    | "preset"
+    | "review"
+    | "sketch"
+    | "edit"
+    | "engine"
+    | "goals"
+    | "submit"
+    | "select";
   method: LogMethod;
   data: Record<string, unknown>;
   /** The whole arrangement immediately AFTER this event — see snapshotLayout.
    *  Present on anything that changed the home, so any step can be scored or
    *  re-simulated without replaying the ones before it. */
   layout?: LayoutSnapshot;
+  /** Whether anything was on the sketch pad when this happened, and whether the
+   *  step used typing and drawing TOGETHER.
+   *
+   *  `method` records the one modality a step came through, which cannot answer
+   *  RQ2's actual question. "Typed a sentence" and "typed a sentence about a box
+   *  they had just drawn" are both method:"text", and they are the multimodal
+   *  case and the unimodal one — the distinction the study exists to measure.
+   *  Recorded on every event, so the pad's state is known at each step rather
+   *  than reconstructed by scanning backwards for the last sketch event. */
+  sketchActive: boolean;
+  /** True when typing and an existing drawing combined into one step. */
+  multimodal: boolean;
 }
 
 /** What a finished session hands back: who did what, in order, and whether the
@@ -282,6 +313,9 @@ export interface SessionReport {
    *  can still be parsed — the study runs over weeks and the schema has moved
    *  once already. */
   schema: number;
+  /** Who was sitting at the machine — typed in before the task. Null when the
+   *  researcher did not set one (free play, or a pilot run). */
+  participant: string | null;
   scenario: string | null;
   title: string | null;
   startedAt: string;
@@ -293,6 +327,10 @@ export interface SessionReport {
   /** How many steps came from each modality — the headline RQ2 number, so it
    *  does not have to be recomputed from the event list every time. */
   methodCounts: Record<string, number>;
+  /** Steps where typing and a live drawing were both in play. */
+  multimodalSteps: number;
+  /** Steps where the parse actually grounded a goal on the drawn box. */
+  sketchGroundedSteps: number;
   /** The task as it was set: weather, the goals and their thresholds, and the
    *  home as delivered. Everything needed to interpret the events without
    *  having the app to hand. */
@@ -446,28 +484,45 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     return s.runSearch(sk.goal, sk.targetIds, sk.text, sk.calm, sk.calm ? "the area you drew" : null, sk.flow);
   },
 
+  participantId: "",
+  setParticipantId: (participantId) => set({ participantId }),
+
   sessionLog: [],
   sessionStart: Date.now(),
   submitted: null,
   logEvent: (kind, data, method) =>
-    set((s) => ({
-      sessionLog: [
-        ...s.sessionLog,
-        {
-          t: Date.now(),
-          at: Date.now() - s.sessionStart,
-          seq: s.sessionLog.length,
-          kind,
-          method: method ?? DEFAULT_METHOD[kind],
-          data,
-          // Snapshot everything that can move. Cheap, and it is what makes each
-          // row stand on its own — see logSnapshot. Skipped for the pure
-          // bookkeeping kinds, where the home did not change and a copy would
-          // just be noise.
-          ...(kind === "goals" || kind === "engine" ? {} : { layout: snapshotLayout(s.plan) }),
-        },
-      ],
-    })),
+    set((s) => {
+      const m = method ?? DEFAULT_METHOD[kind];
+      // The pad as it stood WHEN THIS HAPPENED. A "sketch" event is itself the
+      // moment a mark appears, so it counts as active even though the mark is
+      // only landing in state on this same tick.
+      const sketchActive = kind === "sketch" || s.sketchMarks.length > 0 || s.sketchRegion !== null;
+      return {
+        sessionLog: [
+          ...s.sessionLog,
+          {
+            t: Date.now(),
+            at: Date.now() - s.sessionStart,
+            seq: s.sessionLog.length,
+            kind,
+            method: m,
+            data,
+            sketchActive,
+            // Typing while a drawing is on the pad. Not every such step USES the
+            // drawing — the parse decides that, and records it per objective as
+            // fromSketchArea — but this is the one flag that says the two inputs
+            // were available at once, which is what "did they combine them?"
+            // needs as its denominator.
+            multimodal: sketchActive && (m === "text" || kind === "goal" || kind === "check" || kind === "unparsed"),
+            // Snapshot everything that can move. Cheap, and it is what makes each
+            // row stand on its own — see logSnapshot. Skipped for the pure
+            // bookkeeping kinds, where the home did not change and a copy would
+            // just be noise.
+            ...(kind === "goals" || kind === "engine" || kind === "select" ? {} : { layout: snapshotLayout(s.plan) }),
+          },
+        ],
+      };
+    }),
 
   logGoalStatus: (rows) => {
     const s = get();
@@ -511,7 +566,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const methodCounts: Record<string, number> = {};
     for (const e of s.sessionLog) methodCounts[e.method] = (methodCounts[e.method] ?? 0) + 1;
     const report: SessionReport = {
-      schema: 2,
+      schema: 3,
+      participant: s.participantId || null,
       scenario: s.scenarioId,
       title: sc?.title ?? null,
       startedAt: new Date(s.sessionStart).toISOString(),
@@ -521,6 +577,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       allGoalsMet: goals.length > 0 && goals.every((g) => g.met),
       counts,
       methodCounts,
+      // How often typing and drawing were live at the same moment, and how often
+      // a parse actually reached for the drawing. The gap between the two is
+      // "had both available" versus "used both", which is the RQ2 number.
+      multimodalSteps: s.sessionLog.filter((e) => e.multimodal).length,
+      sketchGroundedSteps: s.sessionLog.filter((e) =>
+        Array.isArray(e.data.objectives)
+          ? (e.data.objectives as Array<{ fromSketchArea?: boolean }>).some((o) => o.fromSketchArea)
+          : false,
+      ).length,
       task: {
         outdoorTemp: s.outdoorTemp,
         goals: (sc?.goals ?? []) as unknown[],
@@ -536,6 +601,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           kind: "submit" as const,
           method: "system" as const,
           data: { goals, allGoalsMet: goals.every((g) => g.met) },
+          sketchActive: s.sketchMarks.length > 0 || s.sketchRegion !== null,
+          multimodal: false,
           layout: snapshotLayout(s.plan),
         },
       ],
@@ -544,7 +611,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     return report;
   },
 
-  toggleSim: () => set((s) => ({ simActive: !s.simActive, simReady: false })),
+  toggleSim: () => {
+    // WATCHING THE SIMULATION IS AN ACTION. `engine` was declared as an event
+    // kind and never once written, so a session log could not answer "did they
+    // run it before deciding?" — which is the question every calibration claim
+    // in the study rests on.
+    const next = !get().simActive;
+    get().logEvent("engine", { what: next ? "sim-start" : "sim-stop", mode: get().simMode }, "system");
+    set((s) => ({ simActive: !s.simActive, simReady: false }));
+  },
   // Switching view does NOT re-solve — one converged field feeds every mode —
   // so a mode only counts as "simulated" once it has been LOOKED AT while the
   // solve is ready. Recording it solely in setSimReady would credit whichever
@@ -562,6 +637,12 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       // parser behaves.)
       const allowed = s.scenarioId ? SCENARIOS[s.scenarioId].views : undefined;
       const mode = allowed && !allowed.includes(m) ? s.simMode : m;
+      // Which field they chose to look at, and when. A participant who never
+      // opens the temperature view and still says the room is warm enough is a
+      // finding; without this the log cannot tell that from one who checked.
+      if (mode !== s.simMode) {
+        queueMicrotask(() => get().logEvent("engine", { what: "view", mode, from: s.simMode }, "system"));
+      }
       return {
         simMode: mode,
         simulatedModes:
@@ -590,7 +671,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   accurate: null,
   accurateRunning: false,
   accurateHealth: null,
-  setEngine: (engine) => set({ engine }),
+  setEngine: (engine) => {
+    get().logEvent("engine", { what: "engine", engine }, "system");
+    set({ engine });
+  },
   refreshAccurateHealth: async () => {
     const accurateHealth = await checkBackendHealth();
     set({ accurateHealth });
@@ -598,11 +682,26 @@ export const useSceneStore = create<SceneState>((set, get) => ({
   runAccurate: async () => {
     if (get().accurateRunning) return;
     set({ accurateRunning: true, engine: "openfoam" });
+    const startedAt = Date.now();
+    get().logEvent("engine", { what: "accurate-start" }, "system");
     try {
       const accurateHealth = await checkBackendHealth();
       set({ accurateHealth });
       const accurate = await runAccurateEngine(get().plan);
       set({ accurate });
+      get().logEvent(
+        "engine",
+        {
+          what: "accurate-done",
+          // "mock" means OpenFOAM was not installed and the field is the
+          // approximate one — a result read from the wrong engine would be a
+          // silent confound, so the log says which it was every time.
+          status: accurate.status,
+          message: accurate.message ?? null,
+          seconds: accurate.seconds ?? Math.round((Date.now() - startedAt) / 1000),
+        },
+        "system",
+      );
     } finally {
       set({ accurateRunning: false });
     }
@@ -958,6 +1057,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           kind: "preset",
           method: "system",
           data: { scenario: id, title: sc.title, outdoorTemp: sc.outdoorTemp, goals: sc.goals ?? [] },
+          // A fresh task starts with an empty pad.
+          sketchActive: false,
+          multimodal: false,
           layout: snapshotLayout(fresh),
         },
       ],
@@ -1000,7 +1102,15 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   setMode: (mode) => set({ mode, selectedId: null, selectedWallId: null, selectedOpeningId: null }),
 
-  selectItem: (id) => set({ selectedId: id, selectedWallId: null, selectedOpeningId: null }),
+  selectItem: (id) => {
+    // What they reached for, including the things they picked up, looked at and
+    // put back down unchanged — invisible in an edit-only log.
+    if (id !== get().selectedId) {
+      const it = get().plan.items.find((x) => x.id === id);
+      get().logEvent("select", { what: "item", id, item: it?.type ?? null, room: it?.roomId ?? null }, "manual");
+    }
+    set({ selectedId: id, selectedWallId: null, selectedOpeningId: null });
+  },
   selectWall: (id) => set({ selectedWallId: id, selectedId: null, selectedOpeningId: null }),
   selectOpening: (id) => set({ selectedOpeningId: id, selectedId: null, selectedWallId: null }),
   clearSelection: () => set({ selectedId: null, selectedWallId: null, selectedOpeningId: null }),

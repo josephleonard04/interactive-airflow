@@ -41,7 +41,12 @@ const ENDPOINT = import.meta.env.VITE_LOG_ENDPOINT as string | undefined;
 const LAST_SESSION_KEY = "airflow-last-session";
 
 function fileNameFor(report: SessionReport) {
-  return `airflow-session-${report.scenario ?? "free"}-${new Date(report.submittedAt)
+  // Participant first, because that is how the files get sorted when a folder of
+  // them arrives — and a name that leads with the scenario buries the one thing
+  // the researcher is looking for. Omitted entirely when there is no id, rather
+  // than left as an empty segment.
+  const who = report.participant ? `${report.participant.replace(/[^\w.-]+/g, "_")}-` : "";
+  return `airflow-session-${who}${report.scenario ?? "free"}-${new Date(report.submittedAt)
     .toISOString()
     .slice(0, 19)
     .replace(/[:T]/g, "-")}.json`;

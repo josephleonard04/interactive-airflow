@@ -64,6 +64,8 @@ function Field({
 export function SetupScreen() {
   const generate = useSceneStore((s) => s.generate);
   const startScenario = useSceneStore((s) => s.startScenario);
+  const participantId = useSceneStore((s) => s.participantId);
+  const setParticipantId = useSceneStore((s) => s.setParticipantId);
   const [mode, setMode] = useState<StartMode>("example");
   const [unit, setUnit] = useState<Unit>("m");
   const [l, setL] = useState(DEFAULTS.m.l);
@@ -130,6 +132,22 @@ export function SetupScreen() {
             the home leads, the rest sits under it as the qualifier it is. */}
         <div className="setup-scenarios">
           <div className="setup-scenarios-label">Study scenarios</div>
+          {/* THE ONE THING THE LOG COULD NOT SAY. A folder of exported sessions
+              was distinguishable only by its timestamps: the file recorded which
+              scenario was run and never who ran it, so pairing a session with
+              its questionnaire meant reading the clock. The researcher types the
+              id here, before the task, and it travels on every event and on the
+              file name. Left blank it stays null — free play and pilot runs are
+              not study sessions and should not be labelled as one. */}
+          <label className="setup-participant">
+            <span>Participant ID</span>
+            <input
+              value={participantId}
+              onChange={(e) => setParticipantId(e.target.value)}
+              placeholder="P01 — researcher use, optional"
+              spellCheck={false}
+            />
+          </label>
           <div className="setup-scenario-grid">
             {SCENARIO_ORDER.map((id) => {
               const [home, ...rest] = SCENARIOS[id].title.split(" · ");
