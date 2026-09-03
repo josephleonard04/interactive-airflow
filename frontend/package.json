@@ -10,7 +10,8 @@
     "build:single": "tsc -b && node scripts/build-single.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "check:outcomes": "node scripts/check-outcomes.mjs"
+    "check:outcomes": "node scripts/check-outcomes.mjs",
+    "check:apartment": "node scripts/check-apartment-ac.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

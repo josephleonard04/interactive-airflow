@@ -156,10 +156,22 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // heating task literally unwinnable — with the heater at maximum the living
 // room only reached 12.5 °C and the far bedroom 8.4 °C against a "≥ 18 °C"
 // goal, because ±10 is the delta AT THE SOURCE and the room mean is well under
-// it. The heater is sized so a room containing it settles around 20–22 °C at
-// 2 °C outdoors; the AC is unchanged, since it was already landing correctly.
+// it. The heater is sized so a room containing it settles around 20-22 °C at
+// 2 °C outdoors.
+//
+// THE AC IS SIZED THE SAME WAY, and was not. At -10 it pulled the apartment to
+// about 23 °C on a 31 °C night and no arrangement could do better than 23.2 —
+// the entire achievable range across every aim, tilt and door state was 0.7 K,
+// so a participant who solved the task correctly saw a room that was still
+// warm. -14 puts a correctly arranged apartment at about 20 °C in both rooms.
+//
+// Only the apartment task has an air conditioner, so this constant reaches
+// nothing else: the winter home has a heater, the studio and the bathroom have
+// neither. What it does NOT change is the shape of the task — aim moves the
+// draft over the bed across a 3.3x range (0.13-0.43 m/s) and the room mean by
+// under a degree, so the draft is still what the participant is solving for.
 const HEATER_T = 19;
-const AC_T = -10;
+const AC_T = -14;
 /** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the only one.
  *
  *  Only the AC and the heater used to warm or cool anything, so the humidity

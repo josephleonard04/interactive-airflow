@@ -855,12 +855,27 @@ function strategiesFor(
     //
     // So the off-variant is offered exactly where the dial is available.
     const fanStates = lockPower ? [true] : [true, false];
+    // THE SAME RULE FOR THE OPPOSITE DEVICE, which it did not used to get.
+    //
+    // A cooling strategy switches the heater off and a warming one switches the
+    // AC off, which is right when the participant can switch it back. On a
+    // locked-power task they cannot: the apartment brief says the air
+    // conditioner runs on medium and the dial is fixed, and the panel hides the
+    // whole power block. A "warm" reading of a sentence — which that task can
+    // reach, since any goal the language produces is searched against the home
+    // in front of it — therefore handed back an apartment on a 31 °C night with
+    // its ONLY cooling dead and no control anywhere to revive it.
+    //
+    // Left unmentioned instead of off: withDevices skips devices a strategy does
+    // not name, so the AC keeps running and the strategy competes on placement,
+    // which is all a locked task can change anyway.
+    const otherDevice = lockPower ? {} : { [other]: { on: false } };
     for (const power of lockPower ? [2] : [2, 3]) {
       for (const doorsOpen of doorStates) {
         for (const fanOn of fanStates) {
         const devices = only({
           [dev]: { on: true, power },
-          [other]: { on: false },
+          ...otherDevice,
           // Locked tasks keep the fan on medium too — it is a device dial like
           // any other, and dropping it to low is a change the user cannot make.
           fan: { on: fanOn, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
