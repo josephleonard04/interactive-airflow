@@ -371,15 +371,46 @@ export function SimPanel() {
         ) : (
           <>
             <SketchCanvas />
+            {/* SAY IT IN WORDS, ABOUT THE BOX YOU JUST DREW.
+                The four pens cover the four wishes the search was built around,
+                and nothing else — "dry this corner out", "stop it being stuffy
+                just here" have no pen. Drawing a plain box and typing the rest
+                is the general case, and it reads exactly the way the typed box
+                does: the parsers already ground a sentence on the drawn region,
+                so this is the same path with the region guaranteed to be set. */}
+            <textarea
+              value={goal}
+              onChange={(e) => { setGoal(e.target.value); if (unparsed) setUnparsed(null); if (guessedGoal) setGuessedGoal(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void findSolutionsFor(goal); }}
+              placeholder={
+                sketchRegion
+                  ? "…and what do you want there? e.g. keep it out of the draught"
+                  : "Box an area above, then say what you want there"
+              }
+              rows={2}
+              style={{
+                width: "100%", resize: "vertical", minHeight: 46, marginTop: 8,
+                background: "#fff", border: "1px solid var(--line)", borderRadius: 10,
+                padding: "8px 10px", fontSize: 13, color: "var(--text)",
+                fontFamily: "inherit", lineHeight: 1.4,
+              }}
+            />
             <div style={{ display: "flex", gap: 6, marginTop: 7 }}>
               <button
                 className="primary"
                 style={{ marginLeft: "auto" }}
-                disabled={optimizing || sketchMarks.length === 0}
-                onClick={() => { applySketchSolution(); }}
+                // Either half is enough on its own: a sentence about the drawn
+                // box, or a drawing whose pens already say what it wants.
+                disabled={optimizing || reading || (sketchMarks.length === 0 && !goal.trim())}
+                onClick={() => {
+                  // A typed sentence leads when there is one — it is the more
+                  // specific of the two, and the pens cannot express it.
+                  if (goal.trim()) void findSolutionsFor(goal);
+                  else applySketchSolution();
+                }}
                 title="Search your layout for setups that match what you drew"
               >
-                {optimizing ? "⏳ Searching…" : "✨ Find solutions"}
+                {optimizing || reading ? "⏳ Searching…" : "✨ Find solutions"}
               </button>
             </div>
           </>
@@ -440,7 +471,7 @@ export function SimPanel() {
       <div className="tools">
         {views.map((m) => (
           <button key={m} className={mode === m ? "tool active" : "tool"} onClick={() => setSimMode(m)}>
-            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temp" : m === "contamination" ? contaminantLabel : "Noise"}
+            {m === "airflow" ? "Airflow" : m === "temperature" ? "Temperature" : m === "contamination" ? contaminantLabel : "Noise"}
           </button>
         ))}
       </div>

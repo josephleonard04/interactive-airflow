@@ -21,7 +21,13 @@ import type { OptimizeGoal } from "./optimize";
 // downstream — which is the point: this is a second way to say the same thing,
 // not a second system.
 
-export type SketchIntent = "warm" | "cool" | "fresh" | "nodraft";
+// "plain" is the odd one out: an area with NO wish attached to it. It answers
+// only "where", and the sentence typed under the pad answers "what" — which is
+// the natural order for anything the four pens do not cover ("dry this corner
+// out", "stop it being stuffy just here"). It contributes a region and never a
+// goal, so a drawing made only of plain boxes is not something the search can
+// run on its own.
+export type SketchIntent = "warm" | "cool" | "fresh" | "nodraft" | "plain";
 export type SketchTool = SketchIntent | "arrow";
 
 export interface SketchArea {
@@ -45,6 +51,7 @@ export const INTENT_LABEL: Record<SketchIntent, string> = {
   cool: "Cool",
   fresh: "Fresh air",
   nodraft: "No draft",
+  plain: "This area",
 };
 
 /** One colour per intent, used by the mini-map, the mark list and the 3D
@@ -54,6 +61,8 @@ export const INTENT_COLOR: Record<SketchIntent, string> = {
   cool: "#3f86e0",
   fresh: "#2a9d8f",
   nodraft: "#8a6fd0",
+  // Deliberately colourless: it means "here", not "here, warmer".
+  plain: "#6b7a75",
 };
 
 export const TOOL_COLOR = (t: SketchTool): string => (t === "arrow" ? "#5b6470" : INTENT_COLOR[t]);
@@ -131,12 +140,16 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
 
   const areas = marks.filter((m): m is SketchArea => m.kind === "area");
   const arrows = marks.filter((m): m is SketchArrow => m.kind === "arrow");
+  // A plain box states no wish, so it never wins the intent and never counts as
+  // a calm request. It has already done its job by setting the region the typed
+  // sentence will be read against.
+  const wishes = areas.filter((a) => a.intent !== "plain");
   // A no-draft box asks for something to STOP; the other three ask for
   // something to ARRIVE. Split them before picking a winner, so a drawing that
   // has one of each keeps both halves.
-  const deliver = areas.filter((a) => a.intent !== "nodraft");
-  const calmAreas = areas.filter((a) => a.intent === "nodraft");
-  const intent = (deliver[0] ?? areas[0])?.intent ?? null;
+  const deliver = wishes.filter((a) => a.intent !== "nodraft");
+  const calmAreas = wishes.filter((a) => a.intent === "nodraft");
+  const intent = (deliver[0] ?? calmAreas[0])?.intent ?? null;
   const leading = deliver.length ? deliver : calmAreas;
 
   const targetIds: string[] = [];
@@ -173,6 +186,10 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
     .filter((t, i, all) => all.indexOf(t) === i);
 
   if (!intent) {
+    // Nothing was asked for. A pad with only plain boxes on it is a "where"
+    // waiting for a "what" — the typed sentence supplies it — so there is no
+    // goal to hand the search yet.
+    if (!arrows.length) return null;
     // arrows only
     return {
       goal: "circulate",
@@ -198,7 +215,11 @@ export function sketchToGoal(marks: SketchMark[], plan: FloorPlan): SketchGoal |
 
   // The calm boxes still get said out loud even when they are not steering, so
   // the card and the log show the whole drawing rather than the half that won.
-  const calmText = calmIds.length ? [`no draft in ${calmIds.map(nameOf).join(" and ")}`] : [];
+  // …unless the calm boxes ARE the request, in which case `head` has already
+  // said it and appending it again reads as a stutter: "no draft in Living
+  // room, no draft in Living room".
+  const calmText =
+    calmIds.length && intent !== "nodraft" ? [`no draft in ${calmIds.map(nameOf).join(" and ")}`] : [];
   return {
     goal,
     flow,

@@ -31,7 +31,20 @@ const DOT_RGB = (() => {
 const MAX_HAZE = 16000;
 const NUM_PARTICLES = 850;
 const TARGET_STEPS = 180;
-const BATCH = 6;
+
+// HOW MUCH SOLVING ONE FRAME MAY DO, in milliseconds.
+//
+// This was a fixed batch of 6 steps. On the apartment's 30x14x35 grid a single
+// step measures ~43 ms, so a "batch" was ~260 ms of blocking work inside one
+// animation frame — about four frames per second, for the seven seconds a solve
+// takes. Editing anything while the simulation ran restarted that solve, which
+// is what made dragging a fan feel like the app had hung.
+//
+// A budget instead of a count: keep stepping while there is time left in the
+// frame, and always do at least one step so a machine slower than the budget
+// still converges rather than stalling. The solve takes the same number of
+// steps; it just stops monopolising the frame it started in.
+const STEP_BUDGET_MS = 10;
 
 function makeSoftTexture(): THREE.Texture {
   const s = 64;
@@ -64,8 +77,23 @@ export function FlowField3D() {
     | "humidity"
     | "smell";
   const setRoomTemps = useSceneStore((s) => s.setRoomTemps);
+  // A drag publishes a new plan on every pointer move. Rebuilding and
+  // re-solving on each of those is hopeless — the solve never gets near
+  // convergence, and the frames it does run are the slow ones — so the solver
+  // holds the plan as it stood when the drag began and picks the new one up on
+  // release. What is on screen during the drag is the last settled field, which
+  // is stale for as long as the mouse is down and correct again a moment later.
+  const draggingId = useSceneStore((s) => s.draggingId);
+  const draggingOpeningId = useSceneStore((s) => s.draggingOpeningId);
+  const dragging = draggingId !== null || draggingOpeningId !== null;
 
-  const built = useMemo(() => buildSim3D(plan), [plan]);
+  const [simPlan, setSimPlan] = useState(plan);
+  useEffect(() => {
+    if (dragging || simPlan === plan) return;
+    setSimPlan(plan);
+  }, [plan, dragging, simPlan]);
+
+  const built = useMemo(() => buildSim3D(simPlan), [simPlan]);
   const soft = useMemo(makeSoftTexture, []);
 
   const hazePos = useMemo(() => new Float32Array(MAX_HAZE * 3), []);
@@ -89,14 +117,14 @@ export function FlowField3D() {
   const dashRef = useRef<React.ComponentRef<typeof Line> | null>(null);
 
   useEffect(() => {
-    const room = plan.rooms.find((r) => r.id === sourceRoomId) ?? null;
+    const room = simPlan.rooms.find((r) => r.id === sourceRoomId) ?? null;
     built.setSource(room ? room.rect : null);
     steps.current = 0;
     converged.current = false;
     setReady(false);
     setPaths(null);
     setSimReady(false);
-  }, [built, sourceRoomId, plan.rooms, setSimReady, engine, accurate]);
+  }, [built, sourceRoomId, simPlan.rooms, setSimReady, engine, accurate]);
 
   // Points in every OPEN doorway and window, at a couple of heights. These are
   // the routes air uses to move between rooms, so seeding them guarantees the
@@ -104,7 +132,7 @@ export function FlowField3D() {
   // doing on its own.
   const gateways = useMemo(() => {
     const g: Array<[number, number, number]> = [];
-    for (const o of [...plan.doors, ...plan.windows]) {
+    for (const o of [...simPlan.doors, ...simPlan.windows]) {
       if (!o.open) continue;
       const cx = (o.a[0] + o.b[0]) / 2;
       const cz = (o.a[1] + o.b[1]) / 2;
@@ -113,7 +141,7 @@ export function FlowField3D() {
       g.push([cx, lo, cz], [cx, hi, cz]);
     }
     return g;
-  }, [plan.doors, plan.windows]);
+  }, [simPlan.doors, simPlan.windows]);
 
   // World-space boxes of everything standing in the rooms (rotation-aware
   // footprint). The streamline pass clips against these so no line ever draws
@@ -121,7 +149,7 @@ export function FlowField3D() {
   // for that visually.
   const obstacles = useMemo(
     () =>
-      plan.items
+      simPlan.items
         .filter((it) => it.category === "furniture" || it.mount === "floor")
         .map((it) => {
           const [cx, cy, cz] = it.position;
@@ -134,7 +162,7 @@ export function FlowField3D() {
             max: [cx + hx, cy + sh / 2, cz + hz] as [number, number, number],
           };
         }),
-    [plan.items],
+    [simPlan.items],
   );
 
   // Line density is a per-task setting (see Scenario.viz) — outside a task, and
@@ -146,7 +174,7 @@ export function FlowField3D() {
   // Real wall slabs + the holes that open doors/windows punch through them.
   const { wallBoxes, gapBoxes } = useMemo(() => {
     const pad = 0.02;
-    const wb = plan.walls.map((w) => {
+    const wb = simPlan.walls.map((w) => {
       const x0 = Math.min(w.a[0], w.b[0]);
       const x1 = Math.max(w.a[0], w.b[0]);
       const z0 = Math.min(w.a[1], w.b[1]);
@@ -158,7 +186,7 @@ export function FlowField3D() {
         max: [x1 + (x1 - x0 < 1e-6 ? h : pad), w.height, z1 + (z1 - z0 < 1e-6 ? h : pad)] as [number, number, number],
       };
     });
-    const gb = [...plan.doors, ...plan.windows]
+    const gb = [...simPlan.doors, ...simPlan.windows]
       .filter((o) => o.open)
       .map((o) => {
         const b = openingBox(o, WALL_THICKNESS);
@@ -170,7 +198,7 @@ export function FlowField3D() {
         };
       });
     return { wallBoxes: wb, gapBoxes: gb };
-  }, [plan.walls, plan.doors, plan.windows]);
+  }, [simPlan.walls, simPlan.doors, simPlan.windows]);
 
   // Absolute air temperature (°C) at a world point, read off the same geodesic
   // field the Temp view draws. The solver's field is a DELTA from the outdoor
@@ -223,9 +251,9 @@ export function FlowField3D() {
     () =>
       setPaths(
         buildStreamlinePaths(built, {
-          roofY: plan.wallHeight,
+          roofY: simPlan.wallHeight,
           maxSeeds: vizMaxSeeds,
-          rooms: plan.rooms.map((r) => r.rect),
+          rooms: simPlan.rooms.map((r) => r.rect),
           gateways,
           obstacles,
           walls: wallBoxes,
@@ -234,7 +262,7 @@ export function FlowField3D() {
           tempRange: rangeRef.current ?? undefined,
         }),
       ),
-    [built, plan.wallHeight, plan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes, tempSampler, tempRangeOf],
+    [built, simPlan.wallHeight, simPlan.rooms, gateways, obstacles, vizMaxSeeds, wallBoxes, gapBoxes, tempSampler, tempRangeOf],
   );
 
   const useOpenFoam = engine === "openfoam" && accurate?.field != null;
@@ -344,13 +372,18 @@ export function FlowField3D() {
     if (dashRef.current) dashRef.current.material.dashOffset -= delta * 0.55;
     // converge to steady state once
     if (!converged.current) {
+      // Not while the mouse is down. The plan under the drag is changing every
+      // move, so any work done here is thrown away on the next one — and it is
+      // the most expensive work in the app, which is precisely what made the
+      // drag stutter. The last settled field stays on screen until release.
+      if (dragging) return;
       const sim = built.sim;
       // Accurate engine: skip the live solve — inject the OpenFOAM velocity
       // field, then let the same scalar fill carry temperature/smell along it.
       if (useOpenFoam && accurate?.field) {
         applyFieldToSim(built, accurate.field);
         { const gf = geodesicFields(built);
-          fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(plan, built) };
+          fieldsRef.current = { temp: gf.temp, smell: gf.smell, noise: computeNoiseField(simPlan, built) };
           rangeRef.current = tempRangeOf(gf.temp);
           setRoomTemps(roomMeans(built, gf.temp)); }
         converged.current = true;
@@ -359,8 +392,12 @@ export function FlowField3D() {
         setSimReady(true);
         return;
       }
-      for (let b = 0; b < BATCH; b++) sim.step(0.05);
-      steps.current += BATCH;
+      // As many steps as fit in this frame's budget, and never fewer than one.
+      const until = performance.now() + STEP_BUDGET_MS;
+      do {
+        sim.step(0.05);
+        steps.current += 1;
+      } while (steps.current < TARGET_STEPS && performance.now() < until);
       if (steps.current >= TARGET_STEPS) {
         // temperature & air quality: per-grid geodesic fields (fill the whole
         // connected house from the sources; walls / shut doors block)
@@ -368,7 +405,7 @@ export function FlowField3D() {
         fieldsRef.current = {
           temp: gf.temp,
           smell: gf.smell,
-          noise: computeNoiseField(plan, built),
+          noise: computeNoiseField(simPlan, built),
         };
         rangeRef.current = tempRangeOf(gf.temp);
         setRoomTemps(roomMeans(built, gf.temp));
@@ -386,7 +423,7 @@ export function FlowField3D() {
     if (!showAir || !headPts) return;
     const { sim, nx, ny, nz, dx, origin, worldToCell, inside } = built;
     const dt = Math.min(delta, 0.05);
-    const roofY = plan.wallHeight;
+    const roofY = simPlan.wallHeight;
     const ox = origin[0], oy = origin[1], oz = origin[2];
     const ex = ox + nx * dx, ey = Math.min(oy + ny * dx, roofY), ez = oz + nz * dx;
     for (let p = 0; p < NUM_PARTICLES; p++) {

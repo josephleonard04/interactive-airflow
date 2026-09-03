@@ -27,6 +27,9 @@ const MAX_W = 258;
 const MAX_H = 190;
 
 const TOOLS: Array<{ id: SketchTool; label: string; hint: string }> = [
+  // First, because it is the one that needs no decision: box the place you mean
+  // and say the rest in words. The four wishes below are the shortcuts.
+  { id: "plain", label: "▢ Just an area", hint: "Box an area, then type what you want there" },
   { id: "warm", label: "🔥 Warm", hint: "Box the area you want warmer" },
   { id: "cool", label: "❄️ Cool", hint: "Box the area you want cooler" },
   { id: "fresh", label: "🌬️ Fresh air", hint: "Box the area you want aired out" },
@@ -255,7 +258,9 @@ export function SketchCanvas() {
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
             <span className="muted-line" style={{ margin: 0, flex: 1 }}>
-              Reads as: {reading?.text ?? "—"}
+              {/* A plain box has nothing to read yet, and "Reads as: —" looks
+                  like a failure rather than a half-finished sentence. */}
+              {reading ? `Reads as: ${reading.text}` : "Now say what you want there, below."}
             </span>
             <button className="ghost" style={{ fontSize: 11 }} onClick={clearSketch}>
               Clear all
@@ -264,7 +269,8 @@ export function SketchCanvas() {
         </div>
       ) : (
         <p className="muted-line" style={{ marginTop: 5 }}>
-          Pick a pen, then drag a box over the area you mean — or drag an arrow from one room to another.
+          Drag a box over the area you mean, then type what you want there — or pick one of the
+          four wishes instead, or drag an arrow from one room to another.
         </p>
       )}
     </div>
