@@ -33,7 +33,8 @@ LLM_PROVIDER = "anthropic"
 # WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 # OPENAI_MODEL = "gpt-4.1-mini"
 
-# Required by LLM_PROVIDER = "anthropic", and free. Costs nothing to leave on.
+# Required by LLM_PROVIDER = "workers-ai". Binding it costs nothing and is
+# harmless on the other providers, so it stays on either way.
 [ai]
 binding = "AI"
 
