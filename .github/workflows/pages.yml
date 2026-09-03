@@ -12,6 +12,16 @@
 # Optional: set a LOG_ENDPOINT repository secret and finished sessions are POSTed
 # there as well as downloaded. Without it Submit simply downloads the file, which
 # is the normal path — these sessions are run with a facilitator who asks for it.
+#
+# THE GOAL PARSER NEEDS A PUBLIC URL, or the model half of the language layer is
+# dead on the published page: with GOAL_PARSER_URL unset the browser falls back
+# to http://127.0.0.1:8000, which is the VISITOR'S own machine, where nothing is
+# listening. Deploy worker/ and set the repository VARIABLE (not secret — it is
+# a public URL, and secrets are unavailable to forks):
+#   Settings -> Secrets and variables -> Actions -> Variables -> New variable
+#   Name: GOAL_PARSER_URL   Value: https://<your-worker>.workers.dev
+# Unset, the app still runs; typed goals just fall back to the offline
+# dictionary, and the panel says so. See worker/README.md.
 
 name: Deploy to GitHub Pages
 
@@ -20,6 +30,7 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "shared/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -50,6 +61,7 @@ jobs:
       - name: Build
         env:
           VITE_LOG_ENDPOINT: ${{ secrets.LOG_ENDPOINT }}
+          VITE_GOAL_PARSER_URL: ${{ vars.GOAL_PARSER_URL }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

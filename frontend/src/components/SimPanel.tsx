@@ -333,6 +333,16 @@ export function SimPanel() {
                     or thing it is about and what you want there — for example “keep the bedroom
                     cool”, “fresh air near the bed”, or “no air blowing on the bed”.
                   </>
+                ) : unparsed.reason === "limited" ? (
+                  // It answered; it just declined to spend any more on us. Say
+                  // that plainly, and point at the half that still works, rather
+                  // than sending them to check their connection.
+                  <>
+                    The shared sentence-reader is busy right now, so I only understood
+                    “{unparsed.text}” as far as my built-in words go. Try again in a few minutes, or
+                    say it with a room and a wish — “keep the bedroom cool”, “fresh air near the
+                    bed”, “no air blowing on the bed”. Drawing it works too, and never waits.
+                  </>
                 ) : (
                   // Not the participant's fault and not fixable by rephrasing —
                   // say so, and give them the wording that still works. Telling

@@ -1,0 +1,15 @@
+{
+  "name": "interactive-airflow-goal-parser",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Public endpoint for the goal parser, so the published page can read sentences the offline dictionary cannot",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  },
+  "type": "module"
+}

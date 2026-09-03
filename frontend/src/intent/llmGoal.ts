@@ -31,7 +31,7 @@ const BACKEND_URL = (
 /** Why the fallback produced nothing. The UI needs different words for each:
  *  "the parser is not running" and "it read your sentence and there was no
  *  comfort goal in it" are the same empty list and completely different advice. */
-export type LlmReason = "ok" | "no-goal" | "unreachable" | "no-key" | "bad-key" | "error";
+export type LlmReason = "ok" | "no-goal" | "unreachable" | "no-key" | "bad-key" | "limited" | "error";
 
 export interface LlmResult {
   objectives: Objective[];
@@ -125,11 +125,19 @@ export async function parseGoalWithLLM(
     // whenever a key is merely present, so a typo'd or expired one looks fully
     // configured right up until every parse comes back 401 and the tool appears
     // to understand nothing.
+    // A SHARED PARSER RUNS OUT, and that is not the same failure as an
+    // unreachable one. The published page talks to one endpoint with a spending
+    // cap on it (worker/), so "too many sentences this hour" is a thing a
+    // participant can actually hit — and telling them the parser could not be
+    // reached, when it answered promptly to say they had had enough, sends them
+    // debugging a network that is fine.
     const reason: LlmReason = /ANTHROPIC_API_KEY/i.test(data.error)
       ? "no-key"
       : /401|authentication|invalid x-api-key/i.test(data.error)
         ? "bad-key"
-        : "error";
+        : /rate.?limit|too many|today's limit|hit .*limit|try again shortly/i.test(data.error)
+          ? "limited"
+          : "error";
     return { objectives: [], reason, detail: data.error };
   }
 

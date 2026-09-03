@@ -1,0 +1,17 @@
+# The public goal parser. See worker/README.md for the two commands that put it
+# live; nothing here contains a secret.
+
+name = "interactive-airflow-goal-parser"
+main = "src/index.js"
+compatibility_date = "2026-01-15"
+
+# Per-IP and per-day budgets live in KV. Create it once with
+#   npx wrangler kv namespace create BUDGET
+# and paste the id it prints here. Without this binding the Worker still runs,
+# but with NO spending cap — see checkBudget().
+# [[kv_namespaces]]
+# binding = "BUDGET"
+# id = "paste-the-id-here"
+
+[observability]
+enabled = true

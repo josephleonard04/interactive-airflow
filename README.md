@@ -73,6 +73,8 @@ A search completes in roughly 3–8 s in the browser, single-threaded.
 |---|---|
 | **[`frontend/`](frontend/)** | **The app.** Home editor, real-time solver, intent layer, placement search, study tasks, session logging. All current work is here. |
 | [`backend/`](backend/) | Optional FastAPI server: the LLM goal parser (hosted or a local model), and an OpenFOAM "accurate engine" pass. The app runs fully without it. |
+| [`worker/`](worker/) | The goal parser as a public endpoint, so the model half works for anyone with the link. See [worker/README.md](worker/README.md). |
+| [`shared/`](shared/) | `goal-contract.json` — the prompt, schema and objective vocabulary, read by both the backend and the worker so the two routes cannot drift. |
 | [`bridge/`](bridge/), [`intent/`](intent/) | Earlier LFM (GPU solver) bridge and notes. Parked. |
 | [`docs/`](docs/) | [Study protocol](docs/user-study-protocol.md), [positioning](docs/contribution-positioning.md), [related work](docs/related-work.md), [optimizer notes](docs/optimizer-research.md), [two-engine design](docs/openfoam-engine.md). |
 
@@ -96,6 +98,11 @@ pip install -r requirements.txt
 export ANTHROPIC_API_KEY=...          # or use a local model, below
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
+
+**For the published link**, the parser needs a public endpoint — deploy
+[`worker/`](worker/) once and set the `GOAL_PARSER_URL` repository variable, and
+every visitor gets the model route. Until then the page still runs; typed goals
+just fall back to the offline dictionary and the panel says so.
 
 **The goal parser can run on this machine instead of a hosted API** — which matters when the study room has no usable network, and when a participant's verbatim wording should not leave the laptop. Any OpenAI-compatible server works (Ollama, LM Studio, llama.cpp, vLLM):
 
@@ -185,6 +192,7 @@ the participant header; the report adds `multimodalSteps` and
 ```sh
 cd frontend && npx tsc --noEmit
 python backend/check_goal_parser.py     # local-model route, no model needed
+node worker/check_worker.mjs            # public endpoint: caps, budgets, CORS
 ```
 
 There is no unit-test suite. What the project relies on instead is that the simulation modules are importable headlessly, so behavior is checked by measurement: bundle a throwaway script with `esbuild --bundle --platform=node --define:import.meta.env='{}'` and run it in Node to sweep layouts, fingerprint every scenario before and after a change, or brute-force a task's answer. Every threshold in `scenarios.ts` was set that way, and the numbers are written down next to them.

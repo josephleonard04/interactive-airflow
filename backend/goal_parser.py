@@ -46,124 +46,29 @@ from typing import Any
 # can tell which one read the sentence. The log records which did, because a
 # coverage gap found by a 7B local model is not the same finding as one found by
 # Opus.
-MODEL = "claude-opus-5"
+#
+# THE PROMPT ITSELF LIVES IN shared/goal-contract.json, because there is a third
+# runtime now: the Cloudflare Worker that serves the published page (worker/).
+# A prompt kept in two languages is a prompt that drifts, and the whole claim of
+# this layer is that every route answers in one vocabulary.
+_CONTRACT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared", "goal-contract.json")
+
+with open(_CONTRACT_PATH, encoding="utf-8") as _f:
+    _CONTRACT = json.load(_f)
+
+MODEL = _CONTRACT["model"]
+SCALARS = _CONTRACT["scalars"]
+DIRECTIONS = _CONTRACT["directions"]
+SYSTEM = _CONTRACT["system"]
+OBJECTIVE_SCHEMA: dict[str, Any] = _CONTRACT["schema"]
+_LOCAL_FORMAT_RULE = _CONTRACT["localFormatRule"]
+
 LOCAL_MODEL_DEFAULT = "llama3.1"
 LOCAL_BASE_URL_DEFAULT = "http://localhost:11434/v1"
 
 
 def _provider() -> str:
     return (os.environ.get("GOAL_PARSER_PROVIDER") or "anthropic").strip().lower()
-
-# The objective vocabulary, kept in lockstep with frontend/src/intent/objectives.ts.
-SCALARS = ["temperature", "contaminant", "draft"]
-DIRECTIONS = ["low", "high"]
-
-OBJECTIVE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "objectives": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "scalar": {
-                        "type": "string",
-                        "enum": SCALARS,
-                        "description": (
-                            "temperature = how warm or cool it is. "
-                            "contaminant = smell, stale air, damp, moisture, "
-                            "mould, steam, or a wish for fresh air. "
-                            "draft = air you can feel moving on you."
-                        ),
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": DIRECTIONS,
-                        "description": (
-                            "What the person WANTS, not what they are complaining "
-                            "about. 'It is too cold in here' is a complaint about "
-                            "cold and therefore wants temperature HIGH. 'Keep it "
-                            "cool' is a wish and wants temperature LOW. Smell, "
-                            "damp and stale air are practically always 'low'. A "
-                            "draft on someone is 'low'; an explicit request for "
-                            "more breeze is 'high'."
-                        ),
-                    },
-                    "regionId": {
-                        "type": ["string", "null"],
-                        "description": (
-                            "id of the room the goal is ABOUT — where the person "
-                            "wants the condition met. Must be one of the room ids "
-                            "given, or null if the sentence names no place and "
-                            "the home has more than one room."
-                        ),
-                    },
-                    "nearItem": {
-                        "type": ["string", "null"],
-                        "description": (
-                            "Set when the goal is about a spot rather than a whole "
-                            "room — 'no draught on the bed', 'fresh air by the "
-                            "desk'. Must be one of the item types given, or null."
-                        ),
-                    },
-                    "sourceId": {
-                        "type": ["string", "null"],
-                        "description": (
-                            "For a smell goal only: the id of the room the smell "
-                            "comes FROM, if the sentence says. Otherwise null."
-                        ),
-                    },
-                    "usedSketch": {
-                        "type": "boolean",
-                        "description": (
-                            "True when this objective is about the box the person "
-                            "drew on the plan rather than a whole room — set it "
-                            "whenever a drawn area was given and the sentence "
-                            "points at it ('this area', 'here', 'that corner') or "
-                            "names no place at all. False when the sentence names "
-                            "its own room or item, and false when nothing was "
-                            "drawn."
-                        ),
-                    },
-                },
-                "required": ["scalar", "direction", "regionId", "nearItem", "sourceId", "usedSketch"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["objectives"],
-    "additionalProperties": False,
-}
-
-SYSTEM = """You turn one sentence from a non-expert into physical objectives an \
-airflow simulation can check. You are the fallback behind a keyword dictionary \
-that already failed on this sentence, so expect informal wording, typos, and \
-goals stated as complaints.
-
-Rules:
-
-1. Return the objectives the person WANTS, never the problem they describe. A \
-complaint asks for its opposite: "my room is much colder than the rest" wants \
-temperature high; "it gets so hot in the afternoon" wants temperature low; "it \
-is stuffy" wants contaminant low.
-2. One sentence can carry more than one objective ("keep the bedroom cool and \
-keep the kitchen smell out of it" is two). Compound places get one objective \
-each: "cool the living room and the bedroom" is two objectives, not one.
-3. Ground every objective in a room id from the list you are given. If the home \
-has exactly one room, use it — "it's stuffy in here" needs no room name. If the \
-sentence names a spot rather than a room ("on the bed", "where I sleep"), also \
-set nearItem to the matching item type.
-4. For a smell goal, regionId is the place being PROTECTED and sourceId is where \
-the smell comes from, when the sentence says.
-5. If the sentence contains no wish about the air at all — a question, a \
-greeting, small talk, an instruction about something else — return an empty \
-list. Do not guess a goal to be helpful. An empty list is a useful answer; an \
-invented one is not.
-6. A DRAWN AREA IS THE ANSWER TO "WHERE". When the person has boxed a spot on the plan, a sentence that points at it ("warm this corner", "less draught here") or names no place at all is about that box: set usedSketch true and set regionId to the room the box sits in. A sentence that names its own room or item is not about the box, however recently it was drawn — set usedSketch false.
-7. Words about comfort with no quantity named ("make the bed area nice to \
-sleep", "I want it bearable in here") do name a goal. Use the outdoor \
-temperature you are given to decide which: hot outside means they want it \
-cooler, cold outside means warmer, and otherwise they want fresher air."""
 
 
 def parser_configured() -> bool:
@@ -292,16 +197,6 @@ def _call_local(prompt: str) -> dict[str, Any]:
     except (KeyError, IndexError, TypeError):
         return {"error": "The local model returned no message content."}
     return {"text": _unwrap_json(text)}
-
-
-_LOCAL_FORMAT_RULE = (
-    "Reply with ONE JSON object and nothing else — no prose, no code fence. "
-    'Shape: {"objectives": [{"scalar": "temperature"|"contaminant"|"draft", '
-    '"direction": "low"|"high", "regionId": <room id or null>, '
-    '"nearItem": <item type or null>, "sourceId": <room id or null>, '
-    '"usedSketch": true|false}]}. '
-    'An empty list is written {"objectives": []}.'
-)
 
 
 def _unwrap_json(text: str) -> str:
