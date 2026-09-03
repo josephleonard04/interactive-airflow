@@ -15,24 +15,25 @@ compatibility_date = "2026-01-15"
 
 # Which model reads the sentence.
 #
+#   "anthropic"   (current) Claude Haiku 4.5, the model named in
+#                 shared/goal-contract.json. Best quality; needs credit on an
+#                 Anthropic account and an ANTHROPIC_API_KEY secret.
 #   "workers-ai"  FREE. Cloudflare's own models, 10,000 Neurons/day at no charge,
 #                 no API key of any kind — just uncomment the [ai] binding below.
 #                 An 8B open model reads less well than Haiku; it is only ever
 #                 the fallback behind the offline dictionary, and everything it
 #                 returns is validated against the floor plan.
-#   "anthropic"   Claude Haiku 4.5 (the model named in shared/goal-contract.json).
-#                 Best quality. Needs credit on an Anthropic account.
 #   "openai"      OPENAI_MODEL, default gpt-4.1-mini. Needs an OpenAI API key,
 #                 which is billed separately from any ChatGPT subscription.
 #
 #   npx wrangler secret put ANTHROPIC_API_KEY
 #   npx wrangler secret put OPENAI_API_KEY
 [vars]
-LLM_PROVIDER = "workers-ai"
+LLM_PROVIDER = "anthropic"
 # WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct"
 # OPENAI_MODEL = "gpt-4.1-mini"
 
-# Required by LLM_PROVIDER = "workers-ai", and free. Costs nothing to leave on.
+# Required by LLM_PROVIDER = "anthropic", and free. Costs nothing to leave on.
 [ai]
 binding = "AI"
 

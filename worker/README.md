@@ -40,60 +40,59 @@ Switch with `LLM_PROVIDER` in `wrangler.toml`.
 > grant no API access; the API is billed separately at platform.openai.com and
 > has no free tier.
 
-## Putting it live, free
-
-Three commands, no key, no card:
+## Putting it live
 
 ```sh
 cd worker
 npm install
+node setup.mjs
+```
+
+That walks the whole thing: signs you in to Cloudflare, creates the spending-cap
+store and writes its id into `wrangler.toml` for you, takes your Anthropic key,
+deploys, checks the endpoint actually answers, and prints the one remaining step.
+Re-running it is safe — it skips whatever is already done.
+
+**You need two accounts before you start:**
+
+1. **Cloudflare** — free, no card. The script opens a browser to sign in or sign up.
+2. **Anthropic** — <https://console.anthropic.com> → *Settings* → *API keys* →
+   *Create key*. Put a little credit on it; a parse costs a fraction of a cent,
+   and the caps below bound a worst-case day at small change.
+
+The key is typed into wrangler's prompt and stored on Cloudflare. It never enters
+this repository, this script, or the page anyone downloads.
+
+### The last step, on github.com
+
+The script prints this with your URL filled in, but for reference — the published
+page has to be told where the parser lives:
+
+1. <https://github.com/josephleonard04/interactive-airflow/settings/variables/actions>
+2. **New repository variable**
+3. Name `GOAL_PARSER_URL`, value the `https://....workers.dev` URL the script printed
+4. **Add variable**, then push any commit so Pages rebuilds
+
+It is a *variable*, not a secret, because it is a public URL — and secrets are not
+available to forks.
+
+### If you would rather not pay at all
+
+Set `LLM_PROVIDER = "workers-ai"` in `wrangler.toml` and skip the Anthropic key
+entirely: Cloudflare's own models, 10,000 Neurons a day free, no key of any kind.
+An 8B open model reads less well than Haiku — see the table above for what that
+does and does not cost you.
+
+### Doing it by hand
+
+```sh
 npx wrangler login
+npx wrangler kv namespace create BUDGET     # paste the id into wrangler.toml
+npx wrangler secret put ANTHROPIC_API_KEY
 npx wrangler deploy
+curl https://<your-worker>.workers.dev/api/health
+# {"ok":true,"provider":"anthropic","goalParser":true,"model":"claude-haiku-4-5"}
 ```
-
-`wrangler.toml` already ships with `LLM_PROVIDER = "workers-ai"` and the `[ai]`
-binding on, so that is the whole deployment. Check it:
-
-```sh
-curl https://interactive-airflow-goal-parser.<you>.workers.dev/api/health
-# {"ok":true,"provider":"workers-ai","goalParser":true,"model":"@cf/meta/llama-3.1-8b-instruct"}
-```
-
-Then tell the published page where it lives — a repository **variable**, not a
-secret, because it is a public URL and secrets are not available to forks:
-
-**Settings → Secrets and variables → Actions → Variables → New repository variable**
-
-| | |
-|---|---|
-| Name | `GOAL_PARSER_URL` |
-| Value | `https://interactive-airflow-goal-parser.<you>.workers.dev` |
-
-Push anything to `main` (or run the Pages workflow by hand) and the next build
-bakes that URL in.
-
-### Adding the spending caps
-
-Only needed on a **paid** provider, but harmless either way. Create the KV
-namespace and paste the id it prints into the commented-out `[[kv_namespaces]]`
-block in `wrangler.toml`:
-
-```sh
-npx wrangler kv namespace create BUDGET
-```
-
-> On a paid provider, skipping this leaves the Worker running with **no spending
-> cap**. On Workers AI the free allocation is the cap, and requests past it fail
-> rather than bill you.
-
-### Switching to a paid model later
-
-```sh
-npx wrangler secret put ANTHROPIC_API_KEY     # paste your key at the prompt
-```
-
-Set `LLM_PROVIDER = "anthropic"` in `wrangler.toml`, add the KV namespace above,
-and redeploy. The key stays on Cloudflare; it is never in the bundle.
 
 ## What it costs, and what stops it running away
 
