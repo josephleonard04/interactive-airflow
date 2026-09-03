@@ -51,6 +51,20 @@ const GLOBAL_PER_DAY = 4000;
 // and needs its own prepaid credit.
 const OPENAI_MODEL_DEFAULT = "gpt-4.1-mini";
 
+// The free route. Workers AI runs open models on Cloudflare's own edge with a
+// daily free allocation (10,000 Neurons) and NO api key at all — it is a binding
+// on this Worker, not an outbound call — so the published page can read
+// sentences without anyone holding a funded account.
+//
+// The trade is quality: an 8B open model is a weaker reader than Haiku. That
+// matters less here than it looks, because the model is only ever the FALLBACK
+// (the keyword dictionary answers first, offline, and handles the phrasings the
+// pilot produced), the reply is constrained by the same JSON schema, and every
+// id it returns is validated against the actual floor plan before the solver
+// sees it. A bad parse degrades to "I could not find a goal in that", which is
+// the behaviour without any model at all.
+const WORKERS_AI_MODEL_DEFAULT = "@cf/meta/llama-3.1-8b-instruct";
+
 const ALLOWED_ORIGINS = [
   "https://josephleonard04.github.io",
   "http://localhost:5173",
@@ -71,7 +85,12 @@ export default {
     // A health route, so "is the parser up?" can be answered without spending a
     // token. The page does not need it; a researcher before a session does.
     if (request.method === "GET" && url.pathname === "/api/health") {
-      return json({ ok: true, goalParser: Boolean(env.ANTHROPIC_API_KEY), model: CONTRACT.model }, 200, cors);
+      const p = (env.LLM_PROVIDER ?? "anthropic").toLowerCase();
+      return json(
+        { ok: true, provider: p, goalParser: !whatIsMissing(env, p), model: modelFor(env, p) },
+        200,
+        cors,
+      );
     }
 
     if (request.method !== "POST" || url.pathname !== "/api/parse-goal") {
@@ -79,11 +98,12 @@ export default {
     }
 
     const provider = (env.LLM_PROVIDER ?? "anthropic").toLowerCase();
-    const keyName = provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-    if (!env[keyName]) {
-      // Named exactly as the Python backend names it, because the frontend
-      // matches on this string to tell a missing key from a rejected one.
-      return json({ error: `${keyName} is not set on the backend.` }, 200, cors);
+    const missing = whatIsMissing(env, provider);
+    if (missing) {
+      // The key names are spelled exactly as the Python backend spells them,
+      // because the frontend matches on those strings to tell a missing
+      // credential from a rejected one and gives different advice for each.
+      return json({ error: missing }, 200, cors);
     }
 
     const raw = await request.text();
@@ -113,7 +133,12 @@ export default {
     const sketch = body.sketch_region && typeof body.sketch_region === "object" ? body.sketch_region : null;
 
     const prompt = buildPrompt(text, rooms, items, outdoorTemp, sketch);
-    const result = provider === "openai" ? await callOpenAI(env, prompt) : await callAnthropic(env, prompt);
+    const result =
+      provider === "openai"
+        ? await callOpenAI(env, prompt)
+        : provider === "workers-ai"
+          ? await callWorkersAI(env, prompt)
+          : await callAnthropic(env, prompt);
     if (result.error) return json({ error: result.error }, 200, cors);
 
     let parsed;
@@ -219,6 +244,69 @@ async function callOpenAI(env, prompt) {
   if (choice?.message?.refusal) return { error: "The model declined to answer this request." };
   const text = choice?.message?.content;
   return text ? { text } : { error: "Empty response from the model." };
+}
+
+/** Cloudflare's own models, over the AI binding. No key, no outbound request.
+ *
+ *  JSON mode here takes the schema DIRECTLY under `json_schema` — not wrapped in
+ *  {name, strict, schema} the way OpenAI wants it — and returns the parsed object
+ *  on `.response` rather than a string. Cloudflare is explicit that schema
+ *  compliance is not guaranteed, which is why the reply still goes through the
+ *  same id validation as every other route.
+ */
+async function callWorkersAI(env, prompt) {
+  let out;
+  try {
+    out = await env.AI.run(env.WORKERS_AI_MODEL || WORKERS_AI_MODEL_DEFAULT, {
+      messages: [
+        // The format rule is the one written for small local models, and an 8B
+        // model on the edge needs it for the same reason: it will otherwise wrap
+        // perfectly good JSON in an explanation.
+        { role: "system", content: `${CONTRACT.system}
+
+${CONTRACT.localFormatRule}` },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_schema", json_schema: CONTRACT.schema },
+    });
+  } catch (err) {
+    return { error: `Workers AI request failed: ${err}` };
+  }
+
+  const reply = out?.response;
+  if (reply === undefined || reply === null || reply === "") {
+    return { error: "Empty response from the model." };
+  }
+  // In JSON mode this is already an object; without it, or when the model
+  // ignores the mode, it is a string that may be fenced or prefaced.
+  return typeof reply === "string" ? { text: unwrapJson(reply) } : { text: JSON.stringify(reply) };
+}
+
+/** Pull the JSON object out of a reply that may be fenced or prefaced. */
+function unwrapJson(text) {
+  let body = text.trim();
+  const fenced = body.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) body = fenced[1].trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  return start !== -1 && end > start ? body.slice(start, end + 1) : body;
+}
+
+/** What this deploy is missing for the provider it selected, or null. */
+function whatIsMissing(env, provider) {
+  if (provider === "workers-ai") {
+    return env.AI ? null : "The Workers AI binding is not configured on the backend.";
+  }
+  if (provider === "openai") {
+    return env.OPENAI_API_KEY ? null : "OPENAI_API_KEY is not set on the backend.";
+  }
+  return env.ANTHROPIC_API_KEY ? null : "ANTHROPIC_API_KEY is not set on the backend.";
+}
+
+function modelFor(env, provider) {
+  if (provider === "workers-ai") return env.WORKERS_AI_MODEL || WORKERS_AI_MODEL_DEFAULT;
+  if (provider === "openai") return env.OPENAI_MODEL || OPENAI_MODEL_DEFAULT;
+  return CONTRACT.model;
 }
 
 function buildPrompt(text, rooms, items, outdoorTemp, sketch) {

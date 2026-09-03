@@ -17,7 +17,7 @@ Everything runs client-side: an in-browser Euler solver, the language layer, and
 ## Three ways to say what you want
 
 1. **By hand** — drag devices, aim them, open and close doors and windows.
-2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (Claude Haiku 4.5, via `backend/goal_parser.py` locally or `worker/` in public) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
+2. **By typing** — *"I want both rooms to be similar temperature"*. A dictionary parses it offline and instantly; a model (`worker/` for the published link, `backend/goal_parser.py` locally — Workers AI, Claude, OpenAI or a model on your own machine) is tried only for wording the dictionary cannot match, and answers in the same fixed objective vocabulary so the result stays checkable against the solver. A sentence neither can read still produces a search, against the task's own goals, and says so.
 3. **By drawing** — box an area and pick *warm / cool / fresh air / no wind*, or draw an arrow for "move air from here to there".
 
 The third one also combines with the second: **box an area, then type what you want there.** The drawn box answers "where" and the sentence answers "what", so "keep this area out of the draught" needs no room name — the box supplies it. The drawing travels with the sentence into both parsers, and the log records, per step, whether a drawing was on the pad and whether the parse actually used it.
@@ -101,8 +101,11 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 
 **For the published link**, the parser needs a public endpoint — deploy
 [`worker/`](worker/) once and set the `GOAL_PARSER_URL` repository variable, and
-every visitor gets the model route. Until then the page still runs; typed goals
-just fall back to the offline dictionary and the panel says so.
+every visitor gets the model route. It defaults to **Cloudflare Workers AI,
+which is free and needs no API key at all** (`npx wrangler deploy`, nothing
+else); `LLM_PROVIDER` switches it to Claude Haiku 4.5 or an OpenAI model when
+you want a stronger reader. Until then the page still runs; typed goals just
+fall back to the offline dictionary and the panel says so.
 
 **The goal parser can run on this machine instead of a hosted API** — which matters when the study room has no usable network, and when a participant's verbatim wording should not leave the laptop. Any OpenAI-compatible server works (Ollama, LM Studio, llama.cpp, vLLM):
 

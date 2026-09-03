@@ -298,6 +298,103 @@ const env = () => ({ ANTHROPIC_API_KEY: "sk-test", BUDGET: kv() });
   console.log("ok  an OpenAI refusal is read from message.refusal");
 }
 
+// --- Workers AI (the free route) -------------------------------------------
+
+{
+  // JSON mode returns the PARSED OBJECT on .response, not a string, and takes
+  // the schema directly under json_schema rather than OpenAI's {name, strict,
+  // schema} wrapper. Both are easy to get wrong and neither fails loudly.
+  let seen = null;
+  const e = {
+    LLM_PROVIDER: "workers-ai",
+    BUDGET: kv(),
+    AI: {
+      run: async (model, opts) => {
+        seen = { model, opts };
+        return {
+          response: {
+            objectives: [
+              { scalar: "contaminant", direction: "low", regionId: "bedroom", nearItem: null, sourceId: null, usedSketch: false },
+            ],
+          },
+        };
+      },
+    },
+  };
+  const res = await worker.fetch(post({ text: "it gets stuffy in here", rooms: ROOMS }), e);
+  const body = await res.json();
+
+  assert.equal(seen.model, "@cf/meta/llama-3.1-8b-instruct");
+  assert.equal(seen.opts.response_format.type, "json_schema");
+  assert.equal(
+    seen.opts.response_format.json_schema.type,
+    "object",
+    "Workers AI takes the schema itself, not an OpenAI-style wrapper",
+  );
+  assert.match(seen.opts.messages[0].content, /Reply with ONE JSON object/, "small models need the format rule");
+  assert.equal(body.objectives[0].scalar, "contaminant");
+  console.log("ok  Workers AI returns a parsed object and is read correctly");
+}
+
+{
+  // Without JSON mode, or when a small model ignores it, the reply is a string
+  // wrapped in an explanation and a code fence. That is the normal case for an
+  // 8B model, not an edge case.
+  const e = {
+    LLM_PROVIDER: "workers-ai",
+    BUDGET: kv(),
+    AI: {
+      run: async () => ({
+        response:
+          "Sure! Here is the JSON:" +
+          String.fromCharCode(10) + "```json" + String.fromCharCode(10) +
+          JSON.stringify({ objectives: [{ scalar: "draft", direction: "low", regionId: "living", nearItem: null, sourceId: null, usedSketch: false }] }) +
+          String.fromCharCode(10) + "```" + String.fromCharCode(10) + "Hope that helps!",
+      }),
+    },
+  };
+  const res = await worker.fetch(post({ text: "no wind on me", rooms: ROOMS }), e);
+  assert.equal((await res.json()).objectives[0].scalar, "draft");
+  console.log("ok  a fenced, chatty reply from a small model is still read");
+}
+
+{
+  // No key of any kind is needed — but the binding is, and a deploy that forgot
+  // it should say which thing is missing.
+  const res = await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), { LLM_PROVIDER: "workers-ai", BUDGET: kv() });
+  assert.match((await res.json()).error, /Workers AI binding is not configured/);
+
+  const health = await worker.fetch(
+    new Request("https://p.example/api/health", { method: "GET", headers: { Origin: ORIGIN } }),
+    { LLM_PROVIDER: "workers-ai", AI: { run: async () => ({}) } },
+  );
+  const h = await health.json();
+  assert.equal(h.provider, "workers-ai");
+  assert.equal(h.goalParser, true, "no key needed, so a bound Worker is ready");
+  assert.equal(h.model, "@cf/meta/llama-3.1-8b-instruct");
+  console.log("ok  the free route needs no key, and health reports which model");
+}
+
+{
+  // A weak model that invents a room must not reach the solver — the same
+  // guarantee as every other route, and the one that makes a small model safe
+  // to use here at all.
+  const e = {
+    LLM_PROVIDER: "workers-ai",
+    BUDGET: kv(),
+    AI: {
+      run: async () => ({
+        response: { objectives: [{ scalar: "temperature", direction: "high", regionId: "attic", nearItem: null, sourceId: null, usedSketch: true }] },
+      }),
+    },
+  };
+  const res = await worker.fetch(post({ text: "warm it up", rooms: ROOMS }), e);
+  const o = (await res.json()).objectives[0];
+  assert.equal(o.regionId, null, "a room the home does not have is dropped");
+  assert.equal(o.usedSketch, false, "and the box it never drew is not claimed");
+  console.log("ok  a small model's hallucinations are dropped like anyone else's");
+}
+
 // --- budgets ---------------------------------------------------------------
 
 {
