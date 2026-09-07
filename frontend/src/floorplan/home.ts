@@ -7,7 +7,13 @@ import {
   makeOpening,
   sharedEdge,
 } from "./geometry";
-import { DEFAULT_AC_SETPOINT, VENT_SIZE, ventMountY } from "./catalog";
+import {
+  DEFAULT_AC_SETPOINT,
+  DEFAULT_HEATER_SETPOINT,
+  FREE_PLAY_OUTDOOR_C,
+  VENT_SIZE,
+  ventMountY,
+} from "./catalog";
 import { rasterize } from "./raster";
 import { resolveOverlaps } from "./collision";
 import type { FloorPlan, HomeSize, Opening, PlacedItem, RoomDef, Vec3, WallSeg } from "./types";
@@ -370,11 +376,24 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
         setpoint: DEFAULT_AC_SETPOINT,
       }),
     );
-    // Heater starts OFF. It and the AC are both temperature sources of equal
-    // magnitude in the same room, so leaving both running made them cancel and
-    // the whole Temp view read flat — nothing to see. Summer preset: AC on,
-    // heater idle. The "Warm up" preset turns it back on.
-    items.push(against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], { category: "hvac", mount: "floor", flow: 0, on: false }));
+    // Heater starts OFF, and on a THERMOSTAT like the air conditioner beside
+    // it. Two temperature sources of equal magnitude in one room cancel and
+    // leave the whole Temperature view flat, so only one runs at a time; the
+    // "Warm up" preset turns this one back on.
+    //
+    // On a dial it was not a heater so much as a furnace: medium settled this
+    // room 17 K above the outdoor air, high 24 K, so "make it warmer" answered
+    // with a living room at 41 degrees. A number you can set is also a number
+    // the optimizer can offer. See PlacedItem.setpoint.
+    items.push(
+      against(gen, room, c, "north", 0.8, "heater", [0.8, 0.5, 0.18], {
+        category: "hvac",
+        mount: "floor",
+        flow: 0,
+        on: false,
+        setpoint: DEFAULT_HEATER_SETPOINT,
+      }),
+    );
     // 給気口: passive fresh-air inlet, high on the exterior (west) wall
     items.push(against(gen, room, c, "west", 0.82, "supply", VENT_SIZE, ventOpts()));
   }
@@ -427,7 +446,12 @@ export function generateHome(rawSize: HomeSize): FloorPlan {
   const items = resolveOverlaps(placeObjects(gen, rooms, [...doors, ...windows], H), rooms, [...doors, ...windows]);
   const grid = rasterize(rooms, bounds);
 
-  return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid };
+  // THE WEATHER TRAVELS WITH THE PLAN. A thermostat is an absolute temperature
+  // and the solver's field is a delta from outdoors, so anything that reads a
+  // setpoint has to know which day it is -- and callers that hold only a plan
+  // (the check scripts, the accurate engine) have nowhere else to learn it.
+  // See FloorPlan.outdoorTemp and FREE_PLAY_OUTDOOR_C.
+  return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows, items, grid, outdoorTemp: FREE_PLAY_OUTDOOR_C };
 }
 
 /** "Start from scratch": just the outer walls + an entrance. One open room so
@@ -443,5 +467,5 @@ export function generateEmpty(rawSize: HomeSize): FloorPlan {
   const doors: Opening[] = [];
   placeEntrance(walls, gen, room, doors);
   const grid = rasterize(rooms, bounds);
-  return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows: [], items: [], grid };
+  return { name: "My Home", size, bounds, wallHeight: H, rooms, walls, doors, windows: [], items: [], grid, outdoorTemp: FREE_PLAY_OUTDOOR_C };
 }

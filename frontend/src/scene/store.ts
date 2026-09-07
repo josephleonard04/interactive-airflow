@@ -1,5 +1,11 @@
 import { create } from "zustand";
-import { CATALOG, DEFAULT_AC_SETPOINT, ventMountY } from "../floorplan/catalog";
+import {
+  CATALOG,
+  DEFAULT_AC_SETPOINT,
+  DEFAULT_HEATER_SETPOINT,
+  FREE_PLAY_OUTDOOR_C,
+  ventMountY,
+} from "../floorplan/catalog";
 import {
   DOOR_WIDTH,
   WALL_THICKNESS,
@@ -19,7 +25,14 @@ import {
   type BackendHealth,
 } from "../engine/accurate";
 import { devicesNamedIn, type OptimizeGoal } from "../intent/optimize";
-import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
+import {
+  WITHHOLD_COMPLETE_SOLUTIONS,
+  findSolutions,
+  layoutKey,
+  withholdComplete,
+  type Solution,
+  type TaskZone,
+} from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
 import {
   compareOutcomes,
@@ -184,6 +197,10 @@ export interface SceneState {
     flow?: FlowHint,
     /** Nudge the layout already on screen instead of searching afresh. */
     refineOnly?: boolean,
+    /** The rectangle the participant drew, when they drew one. Scored as the
+     *  request itself rather than as a decoration on a room-level goal — see
+     *  TaskZone.fromRequest. */
+    regionRect?: Rect | null,
   ) => boolean;
   /** Candidate solutions from the last search, best first (empty = none yet). */
   solutionOptions: Solution[];
@@ -193,7 +210,7 @@ export interface SceneState {
   offeredLayouts: string[];
   /** The last goal the search actually ran, so a follow-up that only says "a bit
    *  more" has something to be a follow-up TO. */
-  lastSearch: { goal: OptimizeGoal; targetIds: string[]; text: string } | null;
+  lastSearch: { goal: OptimizeGoal; targetIds: string[]; text: string; regionRect: Rect | null } | null;
   /** The goal text those options answer, for the option-panel heading. */
   solutionGoal: string | null;
   /** Rooms the goal asked about, so the option cards can show their temperature. */
@@ -351,6 +368,21 @@ export interface SessionReport {
   multimodalSteps: number;
   /** Steps where the parse actually grounded a goal on the drawn box. */
   sketchGroundedSteps: number;
+  /** Steps where a drawn box was scored AS the request rather than used to pick
+   *  a room. Grounding a goal on a sketch and optimising the sketched patch are
+   *  two different things, and only this one licenses "the participant asked
+   *  about that area and the tool answered about that area". */
+  sketchScopedSteps: number;
+  /** How the app itself was configured for this run, so a session file can be
+   *  interpreted without knowing which build produced it. */
+  config: {
+    /** Whether the tool was allowed to hold back an option that finishes the
+     *  task and offer a partial one instead — see WITHHOLD_COMPLETE_SOLUTIONS.
+     *  While this is true, "the participant edited the suggestion" is NOT
+     *  evidence of a preference for manual control: the suggestion may simply
+     *  have been left unfinished on purpose. */
+    withholdCompleteSolutions: boolean;
+  };
   /** The task as it was set: weather, the goals and their thresholds, and the
    *  home as delivered. Everything needed to interpret the events without
    *  having the app to hand. */
@@ -504,7 +536,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const s = get();
     const sk = sketchToGoal(s.sketchMarks, s.plan);
     if (!sk) return false;
-    return s.runSearch(sk.goal, sk.targetIds, sk.text, sk.calm, sk.calm ? "the area you drew" : null, sk.flow);
+    // The drawn area travels with the drawn goal: a box round the bed and an
+    // arrow across the room are one request, and the box is the part that says
+    // WHERE. See TaskZone.fromRequest.
+    return s.runSearch(
+      sk.goal, sk.targetIds, sk.text, sk.calm,
+      sk.calm ? "the area you drew" : null, sk.flow, false, s.sketchRegion,
+    );
   },
 
   participantId: "",
@@ -600,7 +638,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const methodCounts: Record<string, number> = {};
     for (const e of s.sessionLog) methodCounts[e.method] = (methodCounts[e.method] ?? 0) + 1;
     const report: SessionReport = {
-      schema: 4,
+      schema: 5,
       participant: s.participantId || null,
       scenario: s.scenarioId,
       title: sc?.title ?? null,
@@ -620,6 +658,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           ? (e.data.objectives as Array<{ fromSketchArea?: boolean }>).some((o) => o.fromSketchArea)
           : false,
       ).length,
+      sketchScopedSteps: s.sessionLog.filter((e) => e.data.regionScored === "zone").length,
+      config: { withholdCompleteSolutions: WITHHOLD_COMPLETE_SOLUTIONS },
       task: {
         outdoorTemp: s.outdoorTemp,
         goals: (sc?.goals ?? []) as unknown[],
@@ -694,7 +734,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       simulatedModes: v && !s.simulatedModes.includes(s.simMode) ? [...s.simulatedModes, s.simMode] : s.simulatedModes,
     })),
 
-  outdoorTemp: 30, // a warm summer day — the case the cooling goals are about
+  // A mild day, so free play has both directions to play with — see
+  // FREE_PLAY_OUTDOOR_C. Every study scenario sets its own weather when it
+  // starts, so none of them inherits this.
+  outdoorTemp: FREE_PLAY_OUTDOOR_C,
   setOutdoorTemp: (c) =>
     // Onto the plan as well: a setpoint is an absolute temperature and the
     // solver's field is a delta from outdoors, so the two have to agree. See
@@ -801,8 +844,8 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     // nothing or a wrong guess, and the search answered a question nobody had
     // asked. See isAdjustment and FindOptions.refineOnly.
     if (isAdjustment(goalText) && s.lastSearch) {
-      const { goal, targetIds } = s.lastSearch;
-      return s.runSearch(goal, targetIds, goalText, false, null, undefined, true);
+      const { goal, targetIds, regionRect } = s.lastSearch;
+      return s.runSearch(goal, targetIds, goalText, false, null, undefined, true, regionRect);
     }
     const obj = objs[0];
     if (!obj) return false;
@@ -830,13 +873,13 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         : obj.scalar === "draft"
           ? "circulate"
           : "ventilate";
-    return s.runSearch(goal, targetIds, goalText, calm, obj.regionName);
+    return s.runSearch(goal, targetIds, goalText, calm, obj.regionName, undefined, false, obj.regionRect ?? null);
   },
 
   // The one search path, shared by the typed and the drawn input. Both arrive
   // here as (goal, rooms, a sentence to show) — downstream nothing knows or
   // cares which one the user reached for.
-  runSearch: (goal, targetIds, goalText, calm, regionName, flow, refineOnly) => {
+  runSearch: (goal, targetIds, goalText, calm, regionName, flow, refineOnly, regionRect) => {
     if (get().optimizing) return false;
     set({ optimizing: true });
     window.setTimeout(() => {
@@ -930,8 +973,40 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           }
           return { metric: g.metric, zone, roomId: g.roomId, everywhere: g.everywhere, atLeast: g.atLeast, atMost: g.atMost };
         });
+        // THE BOX THE PARTICIPANT DREW IS PART OF THE QUESTION.
+        //
+        // Until now it was not. The parser kept the rectangle — it is what
+        // grounds "this area" to a place — and then the search was handed the
+        // ROOM that rectangle sits in, so "keep this area cool" with a box
+        // round the bed was optimised as "cool the bedroom". Usually those
+        // agree. When they do not, the drawn box is the half that gets
+        // discarded, and the session log records a sketch that did nothing.
+        //
+        // Scored as the request, not as an extra constraint on it: see
+        // TaskZone.fromRequest. A predefined task zone (the study's own bed
+        // area, say) is a different object with its own flag off — the two are
+        // never merged, because one is what the task measures and the other is
+        // what this participant asked for.
+        //
+        // Candidate PLACEMENTS are still generated from the rooms; what the box
+        // changes is which of them wins. Aiming the generator at the rectangle
+        // as well is worth doing and is not what was broken here.
+        const requestZone: TaskZone[] =
+          regionRect
+            ? [{
+                metric:
+                  goal === "cool" || goal === "warm"
+                    ? "temperature"
+                    : goal === "circulate"
+                      ? "draft"
+                      : "smell",
+                zone: regionRect,
+                roomId: targetIds[0] ?? roomAt(before, regionRect.x + regionRect.w / 2, regionRect.z + regionRect.d / 2),
+                fromRequest: true,
+              }]
+            : [];
         const found = findSolutions(before, goal, targetIds, {
-          taskZones: zoneGoals,
+          taskZones: [...requestZone, ...zoneGoals],
           outdoorTemp: s.outdoorTemp,
           want: depth,
           lockPower: s.tools.lockPower === true,
@@ -945,9 +1020,10 @@ export const useSceneStore = create<SceneState>((set, get) => ({
           refineOnly,
           moveOpenings: s.tools.movableOpenings === true,
         });
-        // Never hand back a finished task — see withholdComplete.
+        // Offer the best that was found — see WITHHOLD_COMPLETE_SOLUTIONS for
+        // why the tool no longer swaps a complete option for a partial one.
         const taskGoals = s.scenarioId ? SCENARIOS[s.scenarioId].goals ?? [] : [];
-        const options = taskGoals.length
+        const options = taskGoals.length && WITHHOLD_COMPLETE_SOLUTIONS
           ? withholdComplete(
               found,
               (plan) => ({
@@ -1004,6 +1080,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // Without the arrangements, a log of "offered 3 options" cannot say
         // whether the one the participant took was the one the search ranked
         // first, or what the other two would have done.
+        //
+        // AND WHETHER EACH CARD FINISHED THE JOB. "Participants edited the
+        // suggestions" is only evidence about preference if the suggestions
+        // were complete; an edit to a card that met two of the task's three
+        // lines may be nothing but the participant finishing it. That
+        // distinction cannot be recovered later from a layout, so it is
+        // recorded per card, here, at the moment the card was offered.
+        const completeness = (plan: FloorPlan) =>
+          taskGoals.length
+            ? { met: checkGoals(taskGoals, plan, s.outdoorTemp).filter((r) => r.met).length, of: taskGoals.length }
+            : null;
         get().logEvent(
           "goal",
           {
@@ -1017,12 +1104,24 @@ export const useSceneStore = create<SceneState>((set, get) => ({
             found: found.length,
             withheld: found.length - ordered.length,
             repeated: ordered.length - fresh.length,
+            // Whether the tool was allowed to hold a finished answer back on
+            // this run, so a session file is self-describing on the point.
+            withholdingComplete: WITHHOLD_COMPLETE_SOLUTIONS,
+            // What the search was actually pointed at. A drawn box that was
+            // scored as the request reads differently from one that was only
+            // used to pick a room — see TaskZone.fromRequest.
+            regionRect: regionRect ?? null,
+            regionScored: regionRect ? "zone" : targetIds.length ? "rooms" : "house",
+            here: completeness(before),
             offered: ordered.map((o) => ({
               id: o.id,
               label: o.label,
               detail: o.detail,
               score: round2(o.score),
               readout: o.readout,
+              // Against the task's own lines: how much of the job this card
+              // does, so an edit to it can be read for what it is.
+              meets: completeness(o.plan),
               layout: snapshotLayout(o.plan),
             })),
           },
@@ -1030,7 +1129,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         );
         set({
           offeredLayouts,
-          lastSearch: { goal, targetIds, text: goalText },
+          lastSearch: { goal, targetIds, text: goalText, regionRect: regionRect ?? null },
           solutionOptions: ordered,
           solutionGoal: goalText,
           solutionTargets: targetIds,
@@ -1078,7 +1177,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
 
   startScenario: (id) => {
     const sc = SCENARIOS[id];
-    const fresh = sc.build();
+    // The task's weather travels ON the plan as well as in the store, so
+    // anything holding only the plan reads the same day — see findSolutions.
+    const fresh = { ...sc.build(), outdoorTemp: sc.outdoorTemp };
     set({
       plan: fresh,
       scenarioId: id,
@@ -1516,9 +1617,17 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       mount: spec.mount,
       flow: spec.flow,
       movable: true,
-      // An air conditioner arrives set to a temperature, not to "medium".
-      // Study scenarios fix the setting deliberately and never take this path.
-      ...(type === "ac" ? { setpoint: DEFAULT_AC_SETPOINT } : {}),
+      // An air conditioner or a heater arrives on a THERMOSTAT — set to a
+      // temperature, not to "medium".
+      //
+      // Free play only. A study scenario fixes its own units deliberately and
+      // is calibrated against them, so a device added mid-task must behave like
+      // the ones already in that home: two heaters in the winter living room,
+      // one on a dial and one on a thermostat, would be two different machines
+      // wearing the same label. See check-setpoint.mjs.
+      ...(!get().scenarioId && (type === "ac" || type === "heater")
+        ? { setpoint: type === "ac" ? DEFAULT_AC_SETPOINT : DEFAULT_HEATER_SETPOINT }
+        : {}),
     };
     set((s) => ({
       ...snapshot(s),

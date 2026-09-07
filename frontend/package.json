@@ -13,7 +13,10 @@
     "check:outcomes": "node scripts/check-outcomes.mjs",
     "check:apartment": "node scripts/check-apartment-ac.mjs",
     "check:setpoint": "node scripts/check-setpoint.mjs",
-    "check:scoping": "node scripts/check-scoping.mjs"
+    "check:scoping": "node scripts/check-scoping.mjs",
+    "check:zone": "node scripts/check-sketch-zone.mjs",
+    "check:suggestions": "node scripts/check-suggestions.mjs",
+    "check": "npm run check:outcomes && npm run check:apartment && npm run check:setpoint && npm run check:scoping && npm run check:zone && npm run check:suggestions"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

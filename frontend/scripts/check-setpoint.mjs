@@ -1,17 +1,21 @@
-// A dial marked 22 has to produce 22.
+// A dial marked 22 has to produce 22 — on the heater as well as on the AC.
 //
 //     node scripts/check-setpoint.mjs
 //
-// The air conditioner in a free-play home is set to a TEMPERATURE rather than to
-// a power level, which is only an improvement if the number means something. The
+// Both units in a free-play home are set to a TEMPERATURE rather than to a power
+// level, which is only an improvement if the number means something. The
 // solver's field is a delta from outdoors and it decays away from the unit, so
 // pinning the unit's own cells to the setpoint leaves the room several degrees
-// above it — a dial marked 22 that produces 26 is worse than the 1-2-3 it
+// off it — a dial marked 22 that produces 26 is worse than the 1-2-3 it
 // replaced, because it looks like it should be exact.
 //
 // SETPOINT_GAIN undoes the decay and SETPOINT_BIAS the room's own gains. Both
 // were measured here; this keeps them honest, across the range and across
-// weather, and checks the study scenarios still take the other path.
+// weather, on both sides, and checks the study scenarios still take the other
+// path. It also checks the temperatures the OPTIMIZER offers, which is a
+// separate question from whether the dial is accurate: a perfectly accurate
+// dial can still be handed a ridiculous number, and was — "make it warmer" used
+// to come back with a room at 41 °C.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -34,6 +38,7 @@ const home = await import(bundleOf("src/floorplan/home.ts", "home.mjs"));
 const sim = await import(bundleOf("src/sim/sim3d.ts", "sim.mjs"));
 const scenarios = await import(bundleOf("src/floorplan/scenarios.ts", "scenarios.mjs"));
 const catalog = await import(bundleOf("src/floorplan/catalog.ts", "catalog.mjs"));
+const solutions = await import(bundleOf("src/intent/solutions.ts", "solutions.mjs"));
 
 /** Mean temperature of the room the unit is in, in °C. */
 function roomTemp(plan, roomId, outdoorTemp) {
@@ -55,6 +60,16 @@ try {
     ac.setpoint,
     catalog.DEFAULT_AC_SETPOINT,
     "and it should arrive set to a temperature, not to a power level",
+  );
+  const heater = base.items.find((i) => i.type === "heater");
+  assert.ok(heater, "and with a heater");
+  assert.equal(heater.setpoint, catalog.DEFAULT_HEATER_SETPOINT, "which is on a thermostat too");
+  // The plan carries its own weather, or a thermostat and the search read
+  // different days — see findSolutions.
+  assert.equal(base.outdoorTemp, catalog.FREE_PLAY_OUTDOOR_C, "the free-play home carries its own weather");
+  assert.ok(
+    ac.setpoint < catalog.FREE_PLAY_OUTDOOR_C,
+    `an AC set to ${ac.setpoint} on a ${catalog.FREE_PLAY_OUTDOOR_C} °C day has nothing to do, and the home opens on a flat Temperature view`,
   );
   // One unit only: coldMag takes the MAX across cold sources rather than summing
   // them, so a second AC would mask the first and this measurement would be of
@@ -95,7 +110,7 @@ try {
   for (let i = 1; i < temps.length; i++) {
     assert.ok(temps[i] > temps[i - 1], `a warmer setting must not produce a colder room (${temps.join(", ")})`);
   }
-  console.log(`ok  monotone across the whole offered range (${catalog.AC_SETPOINT_MIN}-${catalog.AC_SETPOINT_MAX} °C)`);
+  console.log(`ok  monotone across the whole offered range (${catalog.SETPOINT_MIN}-${catalog.SETPOINT_MAX} °C)`);
 
   // An air conditioner set above the outdoor temperature has nothing to do, and
   // must never come back as a heater.
@@ -129,6 +144,95 @@ try {
     }
   }
   console.log("ok  no study scenario carries a setpoint, so none is recalibrated by this");
+
+  // ---- THE HEATER IS A THERMOSTAT TOO ------------------------------------
+  //
+  // On a power dial it was not a heater, it was a furnace: medium settled the
+  // living room 17 K above the outdoor air and high 24 K, so on a mild day
+  // "warm the living room" answered with a room in the forties. The same gain
+  // applies, without the bias — a fixed-temperature source overwrites the
+  // room's own gains rather than adding to them, which is what the missing 2 K
+  // turned out to be. See sim3d.
+  {
+    const warmRoom = (setpoint, outdoorTemp) =>
+      roomTemp(
+        {
+          ...base,
+          outdoorTemp,
+          items: base.items.map((i) =>
+            i.type === "ac" ? { ...i, on: false } : i.type === "heater" ? { ...i, on: true, setpoint } : i,
+          ),
+        },
+        heater.roomId,
+        outdoorTemp,
+      );
+    for (const outdoorTemp of [5, 12, 18]) {
+      const errors = [];
+      for (const setpoint of [20, 22, 23, 24, 25]) {
+        const got = warmRoom(setpoint, outdoorTemp);
+        errors.push({ setpoint, got: Number(got.toFixed(2)), off: Number((got - setpoint).toFixed(2)) });
+      }
+      const worst = errors.reduce((a, b) => (Math.abs(b.off) > Math.abs(a.off) ? b : a));
+      console.log(
+        `ok  outdoor ${String(outdoorTemp).padStart(2)} °C, heating: ` +
+          errors.map((e) => `${e.setpoint}->${e.got}`).join("  ") +
+          `  (worst ${worst.off > 0 ? "+" : ""}${worst.off})`,
+      );
+      assert.ok(
+        Math.abs(worst.off) <= 1,
+        `set ${worst.setpoint} °C produced ${worst.got} °C — a dial that misses by more than a degree is not a setting`,
+      );
+    }
+    // Below the outdoor temperature a heater has nothing to do, and must never
+    // come back as an air conditioner. Compared against the room with it off,
+    // for the same reason as the cooling side above.
+    const idleWarm = roomTemp(
+      { ...base, outdoorTemp: 24, items: base.items.map((i) => (i.type === "ac" ? { ...i, on: false } : i)) },
+      heater.roomId,
+      24,
+    );
+    const setCold = warmRoom(18, 24);
+    assert.ok(
+      setCold >= idleWarm - 0.3,
+      `set below outdoors it must not cool the room: ${setCold.toFixed(2)} °C against ${idleWarm.toFixed(2)} °C with it off`,
+    );
+    console.log(`ok  set below the outdoor temperature it stops heating (${setCold.toFixed(2)} against ${idleWarm.toFixed(2)} idle)`);
+  }
+
+  // ---- AND THE OPTIMIZER OFFERS COMFORTABLE ONES -------------------------
+  //
+  // A dial that is accurate to a tenth of a degree can still be handed a
+  // ridiculous number. Asked for a cooler room the search reaches for whatever
+  // scores best, and colder always scores better — so this is the check that
+  // "make it warmer" cannot come back with 41 °C, which is what it did.
+  {
+    const rooms = base.rooms.map((r) => r.id);
+    for (const [goal, band, type] of [
+      ["cool", catalog.COOL_SETPOINTS, "ac"],
+      ["warm", catalog.WARM_SETPOINTS, "heater"],
+    ]) {
+      const found = solutions.findSolutions(base, goal, rooms, {
+        outdoorTemp: catalog.FREE_PLAY_OUTDOOR_C,
+        want: 6,
+      });
+      assert.ok(found.length > 0, `the ${goal} search must offer something on the example home`);
+      const settings = new Set();
+      for (const sol of found) {
+        for (const it of sol.plan.items) {
+          if (it.type !== type || it.setpoint === undefined || it.on === false) continue;
+          settings.add(it.setpoint);
+          assert.ok(
+            band.includes(it.setpoint),
+            `"${sol.label}" sets the ${type} to ${it.setpoint} °C, outside the comfortable band ${band.join("/")}`,
+          );
+        }
+      }
+      // …and it does not offer the same temperature three times, or the band is
+      // decoration rather than a choice.
+      assert.ok(settings.size >= 2, `${goal} should offer more than one temperature (offered ${[...settings].join(", ") || "none"})`);
+      console.log(`ok  ${goal.padEnd(4)} offers ${[...settings].sort((a, b) => a - b).join(", ")} °C — all inside ${band.join("/")}`);
+    }
+  }
 
   console.log("\nsetpoint checks passed");
 } finally {

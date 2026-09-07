@@ -196,6 +196,9 @@ const SETPOINT_BIAS = 2.0;
 /** How far below outdoors the unit can pull, however low it is set. A domestic
  *  split system is not a blast chiller. */
 const SETPOINT_MAX_DROP = -26;
+/** And how far above, for a heater on a thermostat. A domestic panel heater is
+ *  not a furnace either. */
+const SETPOINT_MAX_RISE = 26;
 /** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the only one.
  *
  *  Only the AC and the heater used to warm or cool anything, so the humidity
@@ -566,20 +569,37 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       // 9 K ask, scaled by the gain that undoes the decay between the unit and
       // the room. Cooling only: an air conditioner set above the outdoor
       // temperature has nothing to do, and must never come out as a heater.
+      //
+      // A HEATER IS A THERMOSTAT TOO, and for the same reason. Left on its
+      // power dial it lands nowhere near a temperature anyone asked for: on the
+      // example home, medium settles the room 17 K above the outdoor air and
+      // high 24 K above, so on a 22 degree day "warm the living room" came back
+      // with a room at 41. That is not a warm room, it is a fault report.
+      //
+      // Same gain, same bias, clamped the other way: a heater set BELOW the
+      // outdoor temperature has nothing to do and must never come out as an air
+      // conditioner.
       const setpointDT =
-        isAC && it.setpoint !== undefined
+        (isAC || isHeater) && it.setpoint !== undefined
           ? clampf(
-              (it.setpoint - SETPOINT_BIAS - (plan.outdoorTemp ?? 21)) * SETPOINT_GAIN,
-              SETPOINT_MAX_DROP,
-              0,
+              // NO BIAS ON THE HEATING SIDE. The bias is the room's own gains,
+              // which an air conditioner has to overcome and a heater does not
+              // have to supply -- but the measurement says more than that: with
+              // a heat source pinned in the room, the settled temperature comes
+              // out at the source's own delta with the gains nowhere in it. The
+              // fixed-temperature cells simply dominate. Subtracting the bias
+              // anyway left every heating setpoint about 2 K short (set 24,
+              // room 21.84). See check-setpoint.mjs, which measures both sides.
+              (it.setpoint - (isAC ? SETPOINT_BIAS : 0) - (plan.outdoorTemp ?? 21)) * SETPOINT_GAIN,
+              isAC ? SETPOINT_MAX_DROP : 0,
+              isAC ? 0 : SETPOINT_MAX_RISE,
             )
           : null;
       const dT =
         wetT !== undefined
           ? wetT
-          : isAC
-            ? setpointDT ?? AC_T * mult
-            : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
+          : setpointDT ??
+            (isAC ? AC_T * mult : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1));
       let placed = 0;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);

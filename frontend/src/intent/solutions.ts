@@ -1,3 +1,4 @@
+import { COOL_SETPOINTS, WARM_SETPOINTS } from "../floorplan/catalog";
 import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, coldestPart, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
@@ -317,6 +318,23 @@ const DRAFT_PENALTY = 8;
  *  finding 0.296 (against a 0.17 bar) and finding the answer. */
 export interface TaskZone {
   metric: "temperature" | "smell" | "draft" | "drying";
+  /** THIS ZONE IS THE REQUEST, not one of the task's lines.
+   *
+   *  A participant draws a box round the bed and types "keep this area cool".
+   *  The parser kept the box, the search was handed the BEDROOM's id, and what
+   *  it optimised was a bedroom-level condition -- so the drawn rectangle
+   *  decorated the request without constraining it, and a layout that cooled
+   *  the far side of the room outranked one that cooled the bed. Anyone reading
+   *  the session log would have recorded that the participant sketched, and
+   *  would have been wrong about what the sketch did.
+   *
+   *  A zone flagged this way is scored as the request itself (see scoreOf and
+   *  SolutionMetrics.focus) rather than as a guard on top of it: the reading
+   *  inside the rectangle REPLACES the room reading in the proxy. Task lines
+   *  are a different thing and keep their own flag off -- a predefined bed zone
+   *  in the study setup is not the participant's box, and the two are never
+   *  merged. */
+  fromRequest?: boolean;
   /** Temperature goals: grade the room by its WARMEST part. See warmestPart. */
   everywhere?: boolean;
   /** The patch to measure over. Null = the whole room named by `roomId`. */
@@ -354,6 +372,17 @@ export interface SolutionMetrics {
    *  Nothing is judged pass or fail by it — see scoreOf, where it separates
    *  layouts that all pass by how much room they left themselves. */
   taskTight: number[];
+  /** What the air is like inside the rectangle the participant drew, or null
+   *  when they drew nothing. Every reading the goals are scored on, measured
+   *  over that patch instead of over a room. See TaskZone.fromRequest. */
+  focus: {
+    meanC: number;
+    warmestC: number;
+    coldestC: number;
+    speed: number;
+    fresh: number;
+    dryMin: number;
+  } | null;
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
   meanTargetC: number;
@@ -484,10 +513,30 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   // satisfied line against another.
   const taskShortfall: number[] = [];
   const taskTight: number[] = [];
+  // THE PATCH THE PARTICIPANT DREW, read every way a goal can be scored. It
+  // costs four passes over one small rectangle on a field that is already
+  // solved, and it is what makes "this area" mean the area. See
+  // TaskZone.fromRequest.
+  let focus: SolutionMetrics["focus"] = null;
+  const drawn = zones.find((z) => z.fromRequest)?.zone ?? null;
+  if (drawn) {
+    const meanD = zoneMean(built, temp, drawn);
+    focus = {
+      meanC: outdoorTemp + (meanD ?? 0),
+      warmestC: outdoorTemp + warmestPart(built, temp, drawn),
+      coldestC: outdoorTemp + coldestPart(built, temp, drawn),
+      speed: zoneSpeed(built, drawn) ?? 0,
+      fresh: Math.max(0, Math.min(1, 1 - (zoneMean(built, smell, drawn) ?? 0) / SMELL_FULL_SCALE)),
+      dryMin: slowestDry(built, dryF, drawn),
+    };
+  }
   // How far inside a goal's bar the "tight" copy of it sits, as a fraction of
   // that goal's own tolerance. 0.25 is a quarter of one tolerance step.
   const TIGHTEN = 0.25;
   for (const g of zones) {
+    // The request's own zone is scored as the request (above), not as a line to
+    // be guarded — a placeholder keeps this array parallel to `zones`.
+    if (g.fromRequest) { taskShortfall.push(0); taskTight.push(0); continue; }
     // "*" is every room, graded on the worst of them — see checkGoals.
     if (g.metric === "temperature" && g.everywhere && g.roomId === "*") {
       let worst = -Infinity;
@@ -589,6 +638,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     roomFresh,
     roomDryMin,
     taskShortfall,
+    focus,
     taskTight,
     worstTargetC: tTemps.length ? Math.max(...tTemps) : NaN, // see scoreOf: sign depends on the goal
     meanTargetC: tTemps.length ? tTemps.reduce((a, b) => a + b, 0) / tTemps.length : NaN,
@@ -671,6 +721,17 @@ function proxyScore(
   drying = false,
 ): number {
   const draft = Math.max(0, m.targetSpeed - DRAFT_CAP) * DRAFT_PENALTY;
+  // THE DRAWN RECTANGLE IS THE QUESTION when there is one. Every reading below
+  // has a room in it — the room mean, the room's worst corner, the room's
+  // freshness — because a typed goal names rooms. A sketched one does not: it
+  // names a patch of floor, and answering it with a room-level number is
+  // answering a question the participant did not ask. Same scale, same
+  // constants, same weights; only the patch being read changes, so nothing here
+  // needed retuning and a drawn goal and a typed one stay comparable.
+  //
+  // The room terms stay as the tiebreak (m.meanTargetC below): cooling the bed
+  // by making the bedroom unliveable is not what was meant either.
+  const f = m.focus;
   // A DRYING TASK IS SCORED ON MINUTES, not on how fast the air is moving.
   // Ranking by air speed picked the layout that stirred the bathroom hardest,
   // which is not the same as the one that clears the damp corner — the search
@@ -678,6 +739,7 @@ function proxyScore(
   // minutes against a 95-minute goal. Optimise the number the task is graded
   // on and the two finally point the same way.
   if (drying) {
+    if (m.focus) return -m.focus.dryMin;
     const ids = targetIds.length ? targetIds : [...m.roomDryMin.keys()];
     const mins = ids.map((id) => m.roomDryMin.get(id)).filter((v): v is number => v !== undefined);
     if (mins.length) return -Math.max(...mins);
@@ -703,14 +765,15 @@ function proxyScore(
     ? (goal === "cool" ? Math.max(...targetTemps) : Math.min(...targetTemps))
     : 0;
   if (goal === "cool") {
+    if (f) return -(0.6 * f.warmestC + 0.4 * f.meanC + 0.25 * m.meanTargetC) - draft;
     const hot = worstIds.map((id) => m.roomWarmestC.get(id)).filter((v): v is number => v !== undefined);
     const corner = hot.length ? Math.max(...hot) : roomMean;
     return -(0.6 * corner + 0.4 * roomMean + 0.25 * m.meanTargetC) - draft;
   }
   if (goal === "warm") {
     const cold = worstIds.map((id) => m.roomColdestC.get(id)).filter((v): v is number => v !== undefined);
-    const corner = cold.length ? Math.min(...cold) : roomMean;
-    const worst = 0.6 * corner + 0.4 * roomMean;
+    const corner = f ? f.coldestC : cold.length ? Math.min(...cold) : roomMean;
+    const worst = f ? 0.6 * f.coldestC + 0.4 * f.meanC : 0.6 * corner + 0.4 * roomMean;
     // The cold pool at the glazing counts too, at a third of a room's weight:
     // enough to break the tie between two placements that warm the room equally,
     // not enough to trade away the room the user actually asked about. Capped at
@@ -731,14 +794,14 @@ function proxyScore(
     // anyone means by "air this place out".
     const ids = targetIds.length ? targetIds : [...m.roomFresh.keys()];
     const fresh = ids.map((id) => m.roomFresh.get(id)).filter((v): v is number => v !== undefined);
-    const worstFresh = fresh.length ? Math.min(...fresh) : 0;
+    const worstFresh = f ? f.fresh : fresh.length ? Math.min(...fresh) : 0;
     return 10 * worstFresh + 0.02 * m.outflow + 0.2 * m.houseMeanSpeed;
   }
   // circulate: air moving WHERE IT WAS ASKED FOR. Scored on the house mean and
   // the worst room, "move air from here to there" was satisfied by stirring any
   // room at all — so a fan parked in the destination outscored one actually
   // pushing air through the doorway into it.
-  return 2 * m.targetSpeed + 0.5 * m.houseMeanSpeed;
+  return 2 * (f ? f.speed : m.targetSpeed) + 0.5 * m.houseMeanSpeed;
 }
 
 function evaluate(
@@ -856,19 +919,29 @@ function strategiesFor(
     //
     // So the off-variant is offered exactly where the dial is available.
     const fanStates = lockPower ? [true] : [true, false];
-    // AN AIR CONDITIONER WITH A SETPOINT HAS NO "HIGH". Its dial is a
-    // temperature now (see PlacedItem.setpoint), so a card reading "AC on high"
-    // described a control that is not on the screen — and the power it named
-    // no longer decides how cold the room gets, only how hard the jet blows.
+    // A UNIT WITH A SETPOINT HAS NO "HIGH". Its dial is a temperature now (see
+    // PlacedItem.setpoint), so a card reading "AC on high" described a control
+    // that is not on the screen — and the power it named no longer decides how
+    // cold the room gets, only how hard the jet blows.
     //
     // Varying the setpoint instead is both the honest label and more to choose
     // between: three temperatures against two power steps, and the difference
     // between them is one a person can actually picture.
-    const acSetpoint = ctx?.plan.items.find((it) => it.type === "ac" && it.setpoint !== undefined)?.setpoint;
-    const coolBy: Array<number | null> =
-      goal === "cool" && acSetpoint !== undefined
-        ? [...new Set([acSetpoint, acSetpoint - 2, acSetpoint - 4])].filter((v) => v >= 16)
-        : [null];
+    //
+    // AND THE TEMPERATURES ARE COMFORTABLE ONES. Offering the whole dial meant
+    // offering the extremes, because on every proxy the search has, colder
+    // scores better for "cool" and hotter better for "warm" without limit —
+    // so "a bit chilly in here" was answered with a room in the thirties. A
+    // request for comfort is a request for a comfortable temperature: see
+    // COOL_SETPOINTS and WARM_SETPOINTS, which are the settings a person would
+    // actually reach for. Anything outside them is still available on the
+    // stepper; it is just not something the tool RECOMMENDS.
+    const hasThermostat = ctx?.plan.items.some((it) => it.type === dev && it.setpoint !== undefined);
+    const coolBy: Array<number | null> = !hasThermostat
+      ? [null]
+      : goal === "cool"
+        ? COOL_SETPOINTS
+        : WARM_SETPOINTS;
     // THE SAME RULE FOR THE OPPOSITE DEVICE, which it did not used to get.
     //
     // A cooling strategy switches the heater off and a warming one switches the
@@ -1130,6 +1203,43 @@ function placeDevices(
                 })),
               )
           : candidateSpots(room, it.type, working.wallHeight, openings);
+        // THE PATCH THE PARTICIPANT DREW gets a candidate of its own, for the
+        // same reason the arrow's tail does: the generic list is derived from
+        // the ROOM — each wall, the centre — and contains nothing that means
+        // "stand next to that spot and face it". Scoring the box while
+        // generating candidates from the room leaves the search ranking a set
+        // of layouts none of which was chosen with the box in mind, and it
+        // showed: asked to cool one end of a room it returned a layout that was
+        // half a degree worse at that end than the one it returned for the
+        // other end.
+        //
+        // A stand-off from the box towards the middle of the room, facing the
+        // box: far enough back that the jet has room to develop, close enough
+        // that it is unmistakably about that patch. Floor devices only — a
+        // bolted wall unit's position is not on offer (see aimOnly).
+        const drawnZone = zones.find((z) => z.fromRequest)?.zone ?? null;
+        if (drawnZone && !aimOnly && it.mount !== "wall" && !ROOM_BOUND_DEVICES.includes(it.type)) {
+          const bx = drawnZone.x + drawnZone.w / 2;
+          const bz = drawnZone.z + drawnZone.d / 2;
+          if (bx >= room.rect.x && bx <= room.rect.x + room.rect.w && bz >= room.rect.z && bz <= room.rect.z + room.rect.d) {
+            const rx = room.rect.x + room.rect.w / 2;
+            const rz = room.rect.z + room.rect.d / 2;
+            const dx = rx - bx;
+            const dz = rz - bz;
+            const len = Math.hypot(dx, dz) || 1;
+            const back = Math.max(drawnZone.w, drawnZone.d) / 2 + 0.8;
+            spots.unshift({
+              position: [bx + (dx / len) * back, it.position[1], bz + (dz / len) * back],
+              // Facing the box: the yaw convention here is atan2(dx, dz) from
+              // the device towards what it is aimed at.
+              rotationY: Math.atan2(-dx / len, -dz / len),
+              roomId: room.id,
+              roomName: room.name,
+              axis: "area",
+              oscillate: false,
+            });
+          }
+        }
         // The tail of the arrow itself, aimed along it: the spot the user
         // literally pointed at, which no generic candidate list contains.
         if (flow && room.id === flow.fromRoomId && !ROOM_BOUND_DEVICES.includes(it.type)) {
@@ -1568,6 +1678,14 @@ export function findSolutions(
   targetIds: string[],
   opts: FindOptions,
 ): Solution[] {
+  // ONE WEATHER, NOT TWO. A thermostat reads plan.outdoorTemp and everything
+  // else here reads opts.outdoorTemp, so a caller that changes the weather
+  // without updating the plan gets a search scored on today and a unit
+  // answering yesterday. Both come from the same store field (see
+  // setOutdoorTemp), but the check scripts and the accurate engine hold a plan
+  // directly — and a silent 9 K disagreement is not a failure anyone would
+  // spot in the output.
+  plan = { ...plan, outdoorTemp: opts.outdoorTemp };
   const want = opts.want ?? 3;
   // A room with a moisture source is asking "how long until it is dry", not
   // "how fresh is the air" — see roomDryMin.
@@ -1892,6 +2010,33 @@ export function goalDevices(goal: OptimizeGoal): string[] {
  *
  * Outside a study task there are no goals to complete and nothing is withheld.
  */
+/** May the gallery hold back an option that finishes the task?
+ *
+ *  It used to, always, and the reasoning is written out inside withholdComplete
+ *  below: the study is about watching someone arrive at an answer, not about
+ *  handing it to them. The cost only became clear when the results were being
+ *  written up. A participant who edits a suggestion may be exercising a
+ *  preference for manual control -- that is the interesting finding -- or they
+ *  may simply be finishing a job the tool deliberately left half done. From the
+ *  log those two are indistinguishable, and the second one is an artefact of
+ *  this switch. A confound the analyst cannot see is worse than a suggestion
+ *  that is too good.
+ *
+ *  So: off. The search offers the best it found, and every offered option is
+ *  logged with how many of the task's own lines it meets (see the "goal" event
+ *  and SessionReport.config), so "did they edit a complete suggestion or an
+ *  incomplete one" is a question the data can answer.
+ *
+ *  Left as a switch rather than deleted because the withholding logic is sound
+ *  and the design question is a real one; whoever turns it back on will find the
+ *  session file records which way it was set for every run.
+ *
+ *  IMPORTANT: this is not the same thing as the search failing to find a
+ *  complete answer. Options that do not finish the task are still offered when
+ *  they are the best there is -- they always were. What changes is that a
+ *  complete one is no longer swapped out for a partial one behind the scenes. */
+export const WITHHOLD_COMPLETE_SOLUTIONS = false;
+
 export function withholdComplete(
   options: Solution[],
   metCount: (plan: FloorPlan) => { met: number; total: number },

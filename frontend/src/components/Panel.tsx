@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { AC_SETPOINT_MAX, AC_SETPOINT_MIN, CATALOG, DEFAULT_AC_SETPOINT, PALETTE } from "../floorplan/catalog";
+import { CATALOG, PALETTE, SETPOINT_MAX, SETPOINT_MIN } from "../floorplan/catalog";
+
 import { SCENARIOS, canAim, canMove, canTurn } from "../floorplan/scenarios";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
@@ -8,6 +9,12 @@ import { useSceneStore } from "../scene/store";
 import { RotationDial } from "./RotationDial";
 import { OutcomeLogger } from "./OutcomeLogger";
 import { SubmitTask } from "./SubmitTask";
+
+/** One step of a thermostat, kept inside the range the panel offers. Written
+  *  as a function because the narrowing on selected.setpoint does not survive
+  *  into a click handler. */
+const stepSetpoint = (v: number | undefined, by: number) =>
+  Math.min(SETPOINT_MAX, Math.max(SETPOINT_MIN, (v ?? SETPOINT_MIN) + by));
 
 /** One-per-home appliances in a study task — the Add button caps at this. */
 const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
@@ -268,34 +275,41 @@ export function Panel() {
                       {selected.on !== false ? "On" : "Off"}
                     </button>
                   </div>
-                  {/* AN AIR CONDITIONER IS SET TO A TEMPERATURE, not to
-                      "medium". Nobody thinks about their AC as a 1-2-3 dial,
-                      and asking a non-expert to translate the comfort they want
-                      into a power level is the exact translation this project
-                      exists to remove. Everything else — fans, heaters, vents —
-                      really is a speed, and keeps the dial. */}
-                  {selected.on !== false && selected.type === "ac" && (
+                  {/* A THERMOSTAT IS SET TO A TEMPERATURE, not to "medium".
+                      Nobody thinks about their air conditioner — or their
+                      heater — as a 1-2-3 dial, and asking a non-expert to
+                      translate the comfort they want into a power level is the
+                      exact translation this project exists to remove. Fans and
+                      vents really are speeds, and keep the dial.
+
+                      Shown for a unit that HAS a thermostat rather than for
+                      every unit of that type. Free-play homes give their air
+                      conditioner and their heater one; the study scenarios fix
+                      their units deliberately and carry no setpoint, and a
+                      stepper there would hand the participant a control that
+                      silently recalibrates the task. See check-setpoint.mjs. */}
+                  {selected.on !== false && selected.setpoint !== undefined && (
                     <div className="field setpoint-row" style={{ marginTop: 6 }}>
                       <span>set to</span>
                       <div className="setpoint">
                         <button
                           aria-label="Cooler"
-                          disabled={(selected.setpoint ?? DEFAULT_AC_SETPOINT) <= AC_SETPOINT_MIN}
+                          disabled={selected.setpoint <= SETPOINT_MIN}
                           onClick={() =>
                             updateItem(selected.id, {
-                              setpoint: Math.max(AC_SETPOINT_MIN, (selected.setpoint ?? DEFAULT_AC_SETPOINT) - 1),
+                              setpoint: stepSetpoint(selected.setpoint, -1),
                             })
                           }
                         >
                           −
                         </button>
-                        <output>{selected.setpoint ?? DEFAULT_AC_SETPOINT} °C</output>
+                        <output>{selected.setpoint} °C</output>
                         <button
                           aria-label="Warmer"
-                          disabled={(selected.setpoint ?? DEFAULT_AC_SETPOINT) >= AC_SETPOINT_MAX}
+                          disabled={selected.setpoint >= SETPOINT_MAX}
                           onClick={() =>
                             updateItem(selected.id, {
-                              setpoint: Math.min(AC_SETPOINT_MAX, (selected.setpoint ?? DEFAULT_AC_SETPOINT) + 1),
+                              setpoint: stepSetpoint(selected.setpoint, +1),
                             })
                           }
                         >
@@ -304,7 +318,7 @@ export function Panel() {
                       </div>
                     </div>
                   )}
-                  {selected.on !== false && selected.type !== "ac" && (
+                  {selected.on !== false && selected.setpoint === undefined && (
                     <div className="tools" style={{ marginTop: 4 }}>
                       {[1, 2, 3].map((lvl) => (
                         <button

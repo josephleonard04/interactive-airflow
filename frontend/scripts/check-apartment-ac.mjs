@@ -117,6 +117,12 @@ try {
     console.log(`\nbest cooling found: living ${best.living}°C  bedroom ${best.bedroom}°C  ("${best.label}")`);
   }
 
+  // WITHHOLDING IS OFF IN THE APP (see WITHHOLD_COMPLETE_SOLUTIONS and
+  // check-suggestions.mjs): a participant is now shown the best answer the
+  // search found, because a deliberately partial suggestion makes "they edited
+  // it" impossible to interpret. The function is still here and still correct,
+  // and this keeps it that way for whoever turns the switch back on.
+  //
   // THE GALLERY MUST NOT EMPTY ITSELF NOW THAT THE ROOMS ARE COOLER.
   //
   // The task's own temperature line is "everywhere at most 25 C", which a

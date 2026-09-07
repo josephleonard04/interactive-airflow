@@ -21,13 +21,44 @@ export const VENT_FLOW = 0.012;
 /** Vents sit just under the ceiling, like a real 給気口. */
 export const ventMountY = (wallHeight: number) => wallHeight - 0.35;
 
-/** What an air conditioner is set to when one arrives in a home, and the range
- *  the panel offers. An AC is set to a TEMPERATURE, not to a power level — see
- *  PlacedItem.setpoint. The study scenarios fix their unit deliberately and
- *  carry no setpoint, so none of this reaches them. */
-export const DEFAULT_AC_SETPOINT = 24;
-export const AC_SETPOINT_MIN = 16;
-export const AC_SETPOINT_MAX = 30;
+/** What a thermostat arrives set to, and the range the panel offers. An air
+ *  conditioner and a heater are both set to a TEMPERATURE rather than to a
+ *  power level — see PlacedItem.setpoint. The study scenarios fix their units
+ *  deliberately and carry no setpoint, so none of this reaches them.
+ *
+ *  The AC default sits just under the free-play outdoor temperature (see
+ *  FREE_PLAY_OUTDOOR_C): at 24 on a 22-degree day the unit that arrives running
+ *  would have nothing to do, the Temperature view would read flat, and the home
+ *  would look broken before anyone touched it. */
+/** The weather a free-play home starts in: a mild day, not a heatwave.
+ *
+ *  It used to start at 30, which is the day the study's cooling scenarios are
+ *  set on -- and that is the point: those tasks are ABOUT a hot day, and they
+ *  set their own weather when they start (see startScenario). The example home
+ *  is where someone tries things out, and on a 30-degree day every question
+ *  there has the same answer, which is more cooling. At 22 both directions are
+ *  live: a room can want warming or cooling, and the difference between a
+ *  setting of 19 and one of 25 is something a person can feel. */
+export const FREE_PLAY_OUTDOOR_C = 22;
+
+export const DEFAULT_AC_SETPOINT = 21;
+export const DEFAULT_HEATER_SETPOINT = 23;
+export const SETPOINT_MIN = 16;
+export const SETPOINT_MAX = 30;
+
+/** The temperatures the optimizer OFFERS for a cooling or a warming request.
+ *
+ *  Not the whole dial. Asked to make a room cooler the search used to reach for
+ *  the coldest setting it could justify, because colder scores better on every
+ *  proxy it has -- and it answered "a bit warm in here" with a room at 16, or
+ *  with a heater driven to 41. Nobody asking for a warmer room means 41; they
+ *  mean comfortable. A request for comfort is a request for a comfortable
+ *  temperature, so these are the bands a person would actually set, coolest and
+ *  warmest first so the gallery leads with the strongest of the sensible ones.
+ *
+ *  Free play only. The study scenarios fix their units and never reach here. */
+export const COOL_SETPOINTS = [19, 20, 21];
+export const WARM_SETPOINTS = [25, 24, 23];
 
 export const CATALOG: Record<string, ItemSpec> = {
   bed: { size: [1.5, 0.5, 2.0], category: "furniture", mount: "floor", label: "Bed" },
