@@ -28,7 +28,7 @@ export const GOAL_DEVICES: Record<OptimizeGoal, string[]> = {
   balanced: ["ac", "fan", "supply"],
 };
 
-export const DEVICE_LABEL: Record<string, string> = { ac: "AC", fan: "Fan", heater: "Heater", supply: "Vent" };
+export const DEVICE_LABEL: Record<string, string> = { ac: "AC", fan: "Fan", heater: "Heater", supply: "Fresh-air vent", return: "Exhaust vent" };
 
 /** Device types a suggested solution may never move to a DIFFERENT room — it may
  *  only reposition them inside the room they are already in.

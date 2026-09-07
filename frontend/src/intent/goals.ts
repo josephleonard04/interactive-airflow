@@ -185,8 +185,8 @@ export interface DryMap {
 const MAP_LABEL: Record<string, string> = {
   bathtub: "bath",
   kitchen_sink: "sink",
-  return: "extract",
-  supply: "inlet",
+  return: "exhaust",
+  supply: "fresh air",
   damp: "steam",
   smell: "smell",
   ac: "AC",

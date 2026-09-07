@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CATALOG, PALETTE } from "../floorplan/catalog";
+import { AC_SETPOINT_MAX, AC_SETPOINT_MIN, CATALOG, DEFAULT_AC_SETPOINT, PALETTE } from "../floorplan/catalog";
 import { SCENARIOS, canAim, canMove, canTurn } from "../floorplan/scenarios";
 import { itemColor, ROOM_COLOR } from "../floorplan/palette";
 import type { Opening, PlacedItem, RoomDef } from "../floorplan/types";
@@ -16,8 +16,8 @@ const ADD_MAX: Record<string, number> = { heater: 1, fan: 1, ac: 1 };
  *  worse, ambiguous about which way the air goes — the whole task turns on it
  *  pulling air OUT, so the name says so. */
 const PRETTY: Record<string, string> = {
-  return: "extract vent",
-  supply: "fresh-air inlet",
+  return: "exhaust vent",
+  supply: "fresh-air vent",
   damp: "steam",
   smell: "smell source",
   kitchen_sink: "kitchen sink",
@@ -268,7 +268,43 @@ export function Panel() {
                       {selected.on !== false ? "On" : "Off"}
                     </button>
                   </div>
-                  {selected.on !== false && (
+                  {/* AN AIR CONDITIONER IS SET TO A TEMPERATURE, not to
+                      "medium". Nobody thinks about their AC as a 1-2-3 dial,
+                      and asking a non-expert to translate the comfort they want
+                      into a power level is the exact translation this project
+                      exists to remove. Everything else — fans, heaters, vents —
+                      really is a speed, and keeps the dial. */}
+                  {selected.on !== false && selected.type === "ac" && (
+                    <div className="field setpoint-row" style={{ marginTop: 6 }}>
+                      <span>set to</span>
+                      <div className="setpoint">
+                        <button
+                          aria-label="Cooler"
+                          disabled={(selected.setpoint ?? DEFAULT_AC_SETPOINT) <= AC_SETPOINT_MIN}
+                          onClick={() =>
+                            updateItem(selected.id, {
+                              setpoint: Math.max(AC_SETPOINT_MIN, (selected.setpoint ?? DEFAULT_AC_SETPOINT) - 1),
+                            })
+                          }
+                        >
+                          −
+                        </button>
+                        <output>{selected.setpoint ?? DEFAULT_AC_SETPOINT} °C</output>
+                        <button
+                          aria-label="Warmer"
+                          disabled={(selected.setpoint ?? DEFAULT_AC_SETPOINT) >= AC_SETPOINT_MAX}
+                          onClick={() =>
+                            updateItem(selected.id, {
+                              setpoint: Math.min(AC_SETPOINT_MAX, (selected.setpoint ?? DEFAULT_AC_SETPOINT) + 1),
+                            })
+                          }
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {selected.on !== false && selected.type !== "ac" && (
                     <div className="tools" style={{ marginTop: 4 }}>
                       {[1, 2, 3].map((lvl) => (
                         <button

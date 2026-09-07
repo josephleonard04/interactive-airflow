@@ -7,7 +7,7 @@ import {
   makeOpening,
   sharedEdge,
 } from "./geometry";
-import { VENT_SIZE, ventMountY } from "./catalog";
+import { DEFAULT_AC_SETPOINT, VENT_SIZE, ventMountY } from "./catalog";
 import { rasterize } from "./raster";
 import { resolveOverlaps } from "./collision";
 import type { FloorPlan, HomeSize, Opening, PlacedItem, RoomDef, Vec3, WallSeg } from "./types";
@@ -186,6 +186,8 @@ export interface PlaceOpts {
   flow?: number;
   /** HVAC: whether it starts running. Undefined = on. */
   on?: boolean;
+  /** An air conditioner's target temperature in °C — see PlacedItem.setpoint. */
+  setpoint?: number;
 }
 
 /** Place an item against a wall (back to the wall, facing into the room),
@@ -231,6 +233,7 @@ export function against(
     mount,
     flow: opts.flow,
     ...(opts.on !== undefined ? { on: opts.on } : {}),
+    ...(opts.setpoint !== undefined ? { setpoint: opts.setpoint } : {}),
     movable: true,
   };
 }
@@ -273,6 +276,7 @@ export function inCorner(
     mount,
     flow: opts.flow,
     ...(opts.on !== undefined ? { on: opts.on } : {}),
+    ...(opts.setpoint !== undefined ? { setpoint: opts.setpoint } : {}),
     movable: true,
   };
 }
@@ -354,7 +358,18 @@ function placeObjects(gen: IdGen, rooms: RoomDef[], openings: Opening[], H: numb
     items.push(against(gen, room, c, "south", 0.22, "couch", [1.8, 0.8, 0.85]));
     items.push(against(gen, room, c, "north", 0.22, "tv", [1.4, 0.8, 0.1], { mount: "wall", y: 1.0 }));
     items.push(centre(gen, room, "table", [1.1, 0.45, 0.7]));
-    items.push(against(gen, room, c, "east", 0.3, "ac", [0.85, 0.32, 0.22], { category: "hvac", mount: "wall", y: H - 0.5, flow: 0.25 }));
+    // Arrives SET TO A TEMPERATURE rather than to a power level — see
+    // PlacedItem.setpoint. This is the free-play home; the study scenarios
+    // build their own and fix the unit deliberately.
+    items.push(
+      against(gen, room, c, "east", 0.3, "ac", [0.85, 0.32, 0.22], {
+        category: "hvac",
+        mount: "wall",
+        y: H - 0.5,
+        flow: 0.25,
+        setpoint: DEFAULT_AC_SETPOINT,
+      }),
+    );
     // Heater starts OFF. It and the AC are both temperature sources of equal
     // magnitude in the same room, so leaving both running made them cancel and
     // the whole Temp view read flat — nothing to see. Summer preset: AC on,

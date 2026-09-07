@@ -21,6 +21,14 @@ export const VENT_FLOW = 0.012;
 /** Vents sit just under the ceiling, like a real 給気口. */
 export const ventMountY = (wallHeight: number) => wallHeight - 0.35;
 
+/** What an air conditioner is set to when one arrives in a home, and the range
+ *  the panel offers. An AC is set to a TEMPERATURE, not to a power level — see
+ *  PlacedItem.setpoint. The study scenarios fix their unit deliberately and
+ *  carry no setpoint, so none of this reaches them. */
+export const DEFAULT_AC_SETPOINT = 24;
+export const AC_SETPOINT_MIN = 16;
+export const AC_SETPOINT_MAX = 30;
+
 export const CATALOG: Record<string, ItemSpec> = {
   bed: { size: [1.5, 0.5, 2.0], category: "furniture", mount: "floor", label: "Bed" },
   desk: { size: [1.2, 0.75, 0.6], category: "furniture", mount: "floor", label: "Desk" },
@@ -41,8 +49,8 @@ export const CATALOG: Record<string, ItemSpec> = {
   // extract are separate units, both mounted high on a WALL — which is where the
   // example home puts them, so the palette must create the same thing rather
   // than the old mid-ceiling diffuser.
-  supply: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Fresh-air inlet" },
-  return: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Extract vent" },
+  supply: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Fresh-air vent" },
+  return: { size: VENT_SIZE, category: "hvac", mount: "wall", flow: VENT_FLOW, label: "Exhaust vent" },
   bin: { size: [0.4, 0.7, 0.4], category: "furniture", mount: "floor", label: "Kitchen bin" },
   smell: { size: [0.34, 0.5, 0.34], category: "hvac", mount: "floor", label: "Smell source" },
   // "Damp patch" described the old flat-on-the-floor drawing. It is the same

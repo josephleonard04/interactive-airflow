@@ -178,6 +178,24 @@ const clampf = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi
 // else: the winter home has a heater, the studio and the bathroom have neither.
 const HEATER_T = 19;
 const AC_T = -17;
+/** Room settled temperature per Kelvin asked for below outdoors, when an air
+ *  conditioner is driven by a SETPOINT rather than the power dial.
+ *
+ *  The field decays away from the source, so pinning the unit's own cells to
+ *  exactly the setpoint leaves the room several degrees above it and a dial
+ *  marked 22 that produces 26 is not a setting, it is a riddle. The gain is the
+ *  inverse of that decay, measured on the example home: see check-setpoint.mjs,
+ *  which asserts the room the unit is in lands within a degree of what was
+ *  asked for across the whole range. */
+const SETPOINT_GAIN = 1.31;
+/** Kelvin the room settles ABOVE what the unit is asked for, so the unit is
+ *  asked for that much less. Measured as a flat 2.0 K across outdoor
+ *  temperatures from 28 to 35 °C — it is the room's own gains, not a fraction
+ *  of the outdoor gap, which is why it is subtracted rather than scaled. */
+const SETPOINT_BIAS = 2.0;
+/** How far below outdoors the unit can pull, however low it is set. A domestic
+ *  split system is not a blast chiller. */
+const SETPOINT_MAX_DROP = -26;
 /** HOT WATER IS A HEAT SOURCE, and in a bathroom it is the only one.
  *
  *  Only the AC and the heater used to warm or cool anything, so the humidity
@@ -543,8 +561,25 @@ export function buildSim3D(plan: FloorPlan, opts: Sim3DOptions = {}): Sim3D {
       }
     }
     if (isAC || isHeater || wetT !== undefined) {
+      // A SETPOINT REPLACES THE DIAL when the unit has one. What the field
+      // carries is a delta from outdoors, so "set to 22" on a 31 °C day is a
+      // 9 K ask, scaled by the gain that undoes the decay between the unit and
+      // the room. Cooling only: an air conditioner set above the outdoor
+      // temperature has nothing to do, and must never come out as a heater.
+      const setpointDT =
+        isAC && it.setpoint !== undefined
+          ? clampf(
+              (it.setpoint - SETPOINT_BIAS - (plan.outdoorTemp ?? 21)) * SETPOINT_GAIN,
+              SETPOINT_MAX_DROP,
+              0,
+            )
+          : null;
       const dT =
-        wetT !== undefined ? wetT : isAC ? AC_T * mult : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
+        wetT !== undefined
+          ? wetT
+          : isAC
+            ? setpointDT ?? AC_T * mult
+            : HEATER_T * (HEATER_POWER[it.power ?? 2] ?? 1);
       let placed = 0;
       for (const [i, j, k] of cells) {
         const c = sim.cIdx(i, j, k);

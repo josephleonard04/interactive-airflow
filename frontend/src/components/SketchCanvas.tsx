@@ -34,10 +34,12 @@ const TOOLS: Array<{ id: SketchTool; icon: string; label: string; hint: string }
   // First, because it is the one that needs no decision: box the place you mean
   // and say the rest in words. The four wishes after it are the shortcuts.
   //
-  // "Region", not "Just an area": it is the word the rest of the system already
-  // uses for this (regionId, regionRect, SketchRegionBinding), and "just" tells
-  // a participant the option is the lesser one when it is the general one.
-  { id: "plain", icon: "▢", label: "Region", hint: "Box a region, then type what you want there" },
+  // "Highlight", not "Region": region is the word the CODE uses (regionId,
+  // regionRect, SketchRegionBinding) and it reads as jargon on a button. The
+  // four pens after it each say one fixed thing; this one says "the bit I mean"
+  // and leaves the saying to the sentence underneath, which is the only way to
+  // ask for something the four do not cover.
+  { id: "plain", icon: "🖍️", label: "Highlight", hint: "Highlight the spot you mean, then type what you want there" },
   { id: "warm", icon: "🔥", label: "Warm", hint: "Box the area you want warmer" },
   { id: "cool", icon: "❄️", label: "Cool", hint: "Box the area you want cooler" },
   { id: "fresh", icon: "🌬️", label: "Fresh air", hint: "Box the area you want aired out" },
@@ -278,8 +280,9 @@ export function SketchCanvas() {
         </div>
       ) : (
         <p className="muted-line sketch-hint">
-          Drag a box over the area you mean, then say what you want there. Or pick a wish and
-          box it, or drag an arrow from one room to another.
+          <b>Highlight</b> the spot you mean, then type what you want there — that way you can ask
+          for anything, not just the four below. Or pick one of those and box it, or drag an arrow
+          from one room to another.
         </p>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { CATALOG, ventMountY } from "../floorplan/catalog";
+import { CATALOG, DEFAULT_AC_SETPOINT, ventMountY } from "../floorplan/catalog";
 import {
   DOOR_WIDTH,
   WALL_THICKNESS,
@@ -695,7 +695,11 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     })),
 
   outdoorTemp: 30, // a warm summer day — the case the cooling goals are about
-  setOutdoorTemp: (c) => set({ outdoorTemp: c }),
+  setOutdoorTemp: (c) =>
+    // Onto the plan as well: a setpoint is an absolute temperature and the
+    // solver's field is a delta from outdoors, so the two have to agree. See
+    // FloorPlan.outdoorTemp.
+    set((s) => ({ outdoorTemp: c, plan: { ...s.plan, outdoorTemp: c } })),
   tempRoomId: null,
   setTempRoom: (id) => set({ tempRoomId: id }),
   roomTempDeltas: new Map(),
@@ -1487,6 +1491,9 @@ export const useSceneStore = create<SceneState>((set, get) => ({
       mount: spec.mount,
       flow: spec.flow,
       movable: true,
+      // An air conditioner arrives set to a temperature, not to "medium".
+      // Study scenarios fix the setting deliberately and never take this path.
+      ...(type === "ac" ? { setpoint: DEFAULT_AC_SETPOINT } : {}),
     };
     set((s) => ({
       ...snapshot(s),

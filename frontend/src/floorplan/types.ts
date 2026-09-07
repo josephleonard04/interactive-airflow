@@ -44,6 +44,14 @@ export interface PlacedItem {
   on?: boolean;
   /** HVAC power level 1 (low) · 2 (medium) · 3 (high). Undefined = 2. */
   power?: number;
+  /** For an air conditioner: the temperature it is SET TO, in °C.
+   *
+   *  A 1/2/3 power dial is how the hardware works and not how anyone thinks
+   *  about an air conditioner — nobody sets their AC to "medium", they set it
+   *  to 24. When this is present it replaces the dial as what decides how cold
+   *  the unit runs; the jet speed is unaffected. Absent (every study scenario,
+   *  which fixes the setting deliberately) the dial is still what drives it. */
+  setpoint?: number;
   /** Fan only: oscillating (sweeps side to side) vs fixed direction. */
   oscillate?: boolean;
   /** AC & fan: vertical aim of the jet, in radians. 0 = horizontal (straight out
@@ -193,6 +201,15 @@ export interface FloorPlan {
    *  Only the cold half. The heater's warmth is untouched, so the winter home
    *  is unaffected — see TAU in sim3d.ts. */
   coldReach?: number;
+  /** Outdoor air temperature in °C, mirrored onto the plan.
+   *
+   *  The solver's temperature field is a DELTA from outdoors, so turning an air
+   *  conditioner's setpoint into a source value needs to know what outdoors is.
+   *  It lives here for the same reason the dials above do: the plan is what
+   *  every caller of buildSim3D already holds, and threading a new argument
+   *  through nine call sites is nine chances to miss one and silently change
+   *  the physics somewhere. The store keeps it in step — see setOutdoorTemp. */
+  outdoorTemp?: number;
   name: string;
   size: HomeSize;
   bounds: Rect;
