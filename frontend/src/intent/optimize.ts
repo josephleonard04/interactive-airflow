@@ -30,6 +30,47 @@ export const GOAL_DEVICES: Record<OptimizeGoal, string[]> = {
 
 export const DEVICE_LABEL: Record<string, string> = { ac: "AC", fan: "Fan", heater: "Heater", supply: "Fresh-air vent", return: "Exhaust vent" };
 
+/** Words that name a piece of equipment, per device type.
+ *
+ *  Deliberately NOT the comfort words. "cooler" and "heating" describe what
+ *  somebody wants, not which box they want it from — scoping a search to the
+ *  air conditioner because the sentence contained "cooler" would silently
+ *  forbid the fan on the most common phrasing there is. Only nouns a person
+ *  uses when they mean the appliance itself. */
+const DEVICE_WORDS: Record<string, string[]> = {
+  ac: ["ac", "a/c", "aircon", "air con", "air-con", "air conditioner", "air-conditioner", "air conditioning"],
+  fan: ["fan", "fans"],
+  heater: ["heater", "heaters", "radiator", "radiators"],
+  return: ["exhaust", "exhaust vent", "extractor", "extract vent", "extract fan"],
+  supply: ["fresh-air vent", "fresh air vent", "air inlet", "supply vent"],
+};
+
+/** Both vents, for a sentence that says "vent" without saying which. */
+const ANY_VENT = ["return", "supply"];
+
+/** Which pieces of equipment a sentence actually names.
+ *
+ *  "Move the fan into the bedroom" is a request about the fan. Answering it by
+ *  also re-aiming the air conditioner is not a better answer, it is a different
+ *  one — the participant asked for a change they could picture, and got a
+ *  layout they now have to audit to find out what else moved. Empty when the
+ *  sentence names no equipment, which is the normal case and leaves the search
+ *  free to use whatever the goal needs. */
+export function devicesNamedIn(text: string): string[] {
+  const t = ` ${text.toLowerCase().replace(/[^a-z0-9/\- ]+/g, " ").replace(/\s+/g, " ")} `;
+  const has = (phrase: string) => t.includes(` ${phrase} `);
+  const found = new Set<string>();
+  for (const [type, words] of Object.entries(DEVICE_WORDS)) {
+    if (words.some(has)) found.add(type);
+  }
+  // "the vent" on its own means whichever vent is in the room, so it names both
+  // rather than neither.
+  if (!found.has("return") && !found.has("supply") && (has("vent") || has("vents"))) {
+    for (const t2 of ANY_VENT) found.add(t2);
+  }
+  return [...found];
+}
+
 /** Device types a suggested solution may never move to a DIFFERENT room — it may
  *  only reposition them inside the room they are already in.
  *

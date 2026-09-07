@@ -12,7 +12,8 @@
     "typecheck": "tsc -b --noEmit",
     "check:outcomes": "node scripts/check-outcomes.mjs",
     "check:apartment": "node scripts/check-apartment-ac.mjs",
-    "check:setpoint": "node scripts/check-setpoint.mjs"
+    "check:setpoint": "node scripts/check-setpoint.mjs",
+    "check:scoping": "node scripts/check-scoping.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

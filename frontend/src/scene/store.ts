@@ -18,7 +18,7 @@ import {
   type AccurateResult,
   type BackendHealth,
 } from "../engine/accurate";
-import { type OptimizeGoal } from "../intent/optimize";
+import { devicesNamedIn, type OptimizeGoal } from "../intent/optimize";
 import { findSolutions, layoutKey, withholdComplete, type Solution } from "../intent/solutions";
 import { checkGoals } from "../intent/goals";
 import {
@@ -877,10 +877,28 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // this the studio task — a fan and two windows, with an extract that
         // runs all night by definition — was offered layouts that relocate the
         // extract vent.
-        const allowedDevices =
+        const taskAllows =
           s.tools.movable.length || s.tools.addable.length || s.tools.aimable.length
             ? Array.from(new Set([...s.tools.movable, ...s.tools.addable, ...s.tools.aimable]))
             : undefined;
+        // NAME A MACHINE AND THAT IS THE MACHINE THAT MOVES.
+        //
+        // "Move the fan into the bedroom" is a request about the fan. Answering
+        // it by also re-aiming the air conditioner is not a better answer, it is
+        // a different one: the participant asked for a change they could picture
+        // and got a layout they now have to audit to find what else moved. It
+        // also makes the study's own record ambiguous — a session where every
+        // suggestion touches everything cannot show which device the
+        // participant was actually reasoning about.
+        //
+        // Only narrows, never widens: a device the task forbids stays forbidden
+        // however the sentence is worded.
+        const named = devicesNamedIn(goalText);
+        const narrowed = named.length ? (taskAllows ?? named).filter((t) => named.includes(t)) : [];
+        // …and never narrows to nothing. Asking for a heater in a task that has
+        // none must not silently produce a search with no devices at all; that
+        // reads as a broken button rather than as "not here".
+        const allowedDevices = narrowed.length ? narrowed : taskAllows;
         // DIG DEEPER ONCE SOMETHING HAS BEEN OFFERED. Three cards is the right
         // number to SHOW, but it was also all the search ever ranked — so on a
         // second ask the pool was the same three, and demoting the ones already
@@ -888,7 +906,14 @@ export const useSceneStore = create<SceneState>((set, get) => ({
         // gives the ordering below real alternatives to lead with. It costs a
         // display-fidelity re-score each (~0.3 s), which is why it only happens
         // when there is history to avoid.
-        const depth = s.offeredLayouts.length ? 6 : 3;
+        //
+        // FREE PLAY GETS MORE OF THEM. Three is the right number when a study
+        // task is being protected — the gallery is deliberately not a menu of
+        // answers there, and withholdComplete drops the ones that finish the
+        // job. Outside a scenario there is no task to protect and nothing is
+        // withheld, so the same three was just less to choose from for no
+        // reason.
+        const depth = s.scenarioId ? (s.offeredLayouts.length ? 6 : 3) : s.offeredLayouts.length ? 8 : 6;
         // HAND THE SEARCH THE TASK'S OWN LINES. Without them it optimises a
         // proxy for the one goal word the sentence was reduced to, and on the
         // studio those are different questions — "ventilate" means room-mean

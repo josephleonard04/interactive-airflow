@@ -390,7 +390,7 @@ interface Strategy {
   id: string;
   label: string;
   /** Device settings by type. */
-  devices: Record<string, { on: boolean; power?: number; oscillate?: boolean }>;
+  devices: Record<string, { on: boolean; power?: number; oscillate?: boolean; setpoint?: number }>;
   interiorDoors: boolean;
   /** Which exterior windows to open, by id. A LIST, not a flag: the studio task
    *  turns entirely on opening ONE of its two windows and leaving the other
@@ -444,6 +444,7 @@ function withDevices(plan: FloorPlan, devices: Strategy["devices"]): FloorPlan {
         ...it,
         on: d.on,
         ...(d.power !== undefined ? { power: d.power } : {}),
+        ...(d.setpoint !== undefined ? { setpoint: d.setpoint } : {}),
         ...(it.type === "fan" && d.oscillate !== undefined ? { oscillate: d.oscillate } : {}),
       };
     }),
@@ -855,6 +856,19 @@ function strategiesFor(
     //
     // So the off-variant is offered exactly where the dial is available.
     const fanStates = lockPower ? [true] : [true, false];
+    // AN AIR CONDITIONER WITH A SETPOINT HAS NO "HIGH". Its dial is a
+    // temperature now (see PlacedItem.setpoint), so a card reading "AC on high"
+    // described a control that is not on the screen — and the power it named
+    // no longer decides how cold the room gets, only how hard the jet blows.
+    //
+    // Varying the setpoint instead is both the honest label and more to choose
+    // between: three temperatures against two power steps, and the difference
+    // between them is one a person can actually picture.
+    const acSetpoint = ctx?.plan.items.find((it) => it.type === "ac" && it.setpoint !== undefined)?.setpoint;
+    const coolBy: Array<number | null> =
+      goal === "cool" && acSetpoint !== undefined
+        ? [...new Set([acSetpoint, acSetpoint - 2, acSetpoint - 4])].filter((v) => v >= 16)
+        : [null];
     // THE SAME RULE FOR THE OPPOSITE DEVICE, which it did not used to get.
     //
     // A cooling strategy switches the heater off and a warming one switches the
@@ -871,22 +885,25 @@ function strategiesFor(
     // which is all a locked task can change anyway.
     const otherDevice = lockPower ? {} : { [other]: { on: false } };
     for (const power of lockPower ? [2] : [2, 3]) {
+      for (const setpoint of coolBy) {
       for (const doorsOpen of doorStates) {
         for (const fanOn of fanStates) {
         const devices = only({
-          [dev]: { on: true, power },
+          [dev]: setpoint === null ? { on: true, power } : { on: true, setpoint },
           ...otherDevice,
           // Locked tasks keep the fan on medium too — it is a device dial like
           // any other, and dropping it to low is a change the user cannot make.
           fan: { on: fanOn, power: lockPower ? 2 : doorsOpen ? 2 : 1, oscillate: true },
         });
         add({
-          id: `${dev}${power}-${doorsOpen ? "doors" : "shut"}${fanOn ? "" : "-nofan"}`,
+          id: `${dev}${setpoint === null ? power : `sp${setpoint}`}-${doorsOpen ? "doors" : "shut"}${fanOn ? "" : "-nofan"}`,
           // With the dial locked the only thing that varies is placement, so the
           // label must describe THAT rather than a power the user can't set.
           label: lockPower
             ? actionOn(devices)
-            : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
+            : setpoint !== null
+              ? `${DEVICE_LABEL[dev] ?? dev} set to ${setpoint} °C`
+              : `${DEVICE_LABEL[dev] ?? dev} on ${power === 3 ? "high" : "medium"}`,
           devices,
           interiorDoors: doorsOpen,
           openWindowIds: [],
@@ -897,6 +914,7 @@ function strategiesFor(
           ].join(", "),
         });
         }
+      }
       }
     }
     return out;
@@ -1803,7 +1821,49 @@ export function findSolutions(
       if (add) s.label = `${s.label}, ${add}`;
     }
   }
-  return kept.length ? kept : solutions.slice(0, 1);
+  return distinguish(kept.length ? kept : solutions.slice(0, 1));
+}
+
+/** Make sure no two cards read the same.
+ *
+ *  Two options can differ in the layout and still land on the same label — the
+ *  label names the device and where it went, and two arrangements can agree on
+ *  both while differing in the doors or whether the fan runs. On screen that is
+ *  the "why did it suggest the same thing twice" complaint: the gallery looks
+ *  broken, and the participant has to open both and compare to find out it
+ *  isn't.
+ *
+ *  The suffix comes from what actually differs, so it is a description rather
+ *  than an ordinal — "doors shut" tells you something, "(2)" does not. */
+function distinguish(list: Solution[]): Solution[] {
+  const seen = new Map<string, number>();
+  for (const s of list) seen.set(s.label, (seen.get(s.label) ?? 0) + 1);
+  if (![...seen.values()].some((n) => n > 1)) return list;
+
+  const used = new Set<string>();
+  return list.map((s) => {
+    if ((seen.get(s.label) ?? 0) < 2) {
+      used.add(s.label);
+      return s;
+    }
+    const doorsOpen = s.plan.doors.some((d) => !d.rooms.includes("outside") && d.open);
+    const fan = s.plan.items.find((i) => i.type === "fan");
+    const windowsOpen = s.plan.windows.some((w) => w.open);
+    for (const suffix of [
+      doorsOpen ? "doors open" : "doors shut",
+      fan ? (fan.on === false ? "fan off" : "fan running") : null,
+      windowsOpen ? "windows open" : "windows shut",
+    ]) {
+      if (!suffix) continue;
+      const candidate = `${s.label} — ${suffix}`;
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        return { ...s, label: candidate };
+      }
+    }
+    used.add(s.label);
+    return s;
+  });
 }
 
 /** Devices this goal will touch, for the review text. */
