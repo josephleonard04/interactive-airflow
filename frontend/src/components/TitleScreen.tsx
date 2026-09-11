@@ -1,6 +1,7 @@
 import before from "../assets/teaser/before.jpg";
 import after from "../assets/teaser/after.jpg";
 import sketch from "../assets/teaser/sketch.jpg";
+import manipulate from "../assets/teaser/manipulate.jpg";
 
 /** What a visitor sees first: the paper, then the idea, then the tool.
  *
@@ -36,10 +37,24 @@ export function TitleScreen({ onExplore }: { onExplore: () => void }) {
           <div className="teaser-arrow" aria-hidden>→</div>
 
           <div className="teaser-step">
-            <h2><b>2</b> Say it, sketch it, or both</h2>
+            <h2><b>2</b> Express a goal</h2>
+            {/* THE THREE MODALITIES, named. The paper's contribution is that
+                they combine — words say WHAT, a sketch says WHERE, and direct
+                manipulation lets the user just move the thing — so the teaser
+                shows all three rather than one text box. */}
             <div className="teaser-ask">
-              <div className="teaser-prompt">Keep the bedroom and living room warm</div>
-              <img src={sketch} alt="A sketch marking the bedroom and an arrow from the living room" />
+              <div className="teaser-mode">
+                <span>Natural language</span>
+                <div className="teaser-prompt">Keep the bedroom and living room warm</div>
+              </div>
+              <div className="teaser-mode">
+                <span>Sketch</span>
+                <img src={sketch} alt="A sketch marking the bedroom and an arrow from the living room" />
+              </div>
+              <div className="teaser-mode">
+                <span>Direct manipulation</span>
+                <img src={manipulate} alt="Dragging a fan to a new spot in the room" />
+              </div>
             </div>
             <p className="teaser-note">Optimization + simulation turn the request into suggestions</p>
           </div>
@@ -54,7 +69,7 @@ export function TitleScreen({ onExplore }: { onExplore: () => void }) {
           </div>
         </div>
         <figcaption>
-          Non-experts describe the air they want in plain words or a quick sketch. FlowWeaver searches for device
+          Non-experts describe the air they want in plain words, mark where with a quick sketch, or simply move things in the room. FlowWeaver searches for device
           placements, simulates the airflow, and offers editable suggestions to inspect and refine.
         </figcaption>
       </figure>

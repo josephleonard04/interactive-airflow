@@ -2,23 +2,25 @@ import type { RoomType } from "./types";
 
 // Colours for room floors and items, used by the 3D view and the panel.
 
-// NEUTRAL FLOORS. Airflow is drawn in a blue-to-red thermographic ramp, so a
-// green bedroom or a blue bathroom competed with the very colours the lines
-// use to say "cold" and "comfortable". Rooms are told apart by light, warm
-// greys and pale wood tones instead — nothing on the floor can be mistaken
-// for air.
+// NEUTRAL, MID-GREY FLOORS. Airflow is drawn in a blue-to-red thermographic
+// ramp, so a coloured floor competes with the colours the lines use to say
+// "cold" and "comfortable" — and a pale floor swallows the yellow and cyan in
+// the middle of that ramp (the first neutral set was light beige, and yellow
+// lines on it were hard to see). A mid grey with no hue gives every colour in
+// the ramp contrast, light and dark ends alike. Rooms are told apart by small
+// steps in lightness only.
 export const ROOM_COLOR: Record<RoomType, string> = {
-  living: "#e6e1d8",
-  bedroom: "#ddd8d0",
-  kitchen: "#e9e5de",
-  bathroom: "#d9d9d6",
+  living: "#8b9096",
+  bedroom: "#7f848a",
+  kitchen: "#959a9f",
+  bathroom: "#777c82",
 };
 
 export const ROOM_ACCENT: Record<RoomType, string> = {
-  living: "#9c9284",
-  bedroom: "#8f887e",
-  kitchen: "#a39b8d",
-  bathroom: "#8d8d88",
+  living: "#5f646a",
+  bedroom: "#55595f",
+  kitchen: "#696e73",
+  bathroom: "#4f5359",
 };
 
 const ITEM_COLOR: Record<string, string> = {
