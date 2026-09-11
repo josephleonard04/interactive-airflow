@@ -69,12 +69,12 @@ try {
       assert.notEqual(r.value, null, `${id}: ${r.id} could not be read on its own scenario home`);
       assert.ok(Number.isFinite(r.value), `${id}: ${r.id} is not a finite number`);
     }
-    // The bathroom as delivered does not dry at all — a censored reading, not a
-    // missing one. If that ever silently became a plain number, every "minutes
-    // saved" in the study would quietly become a different quantity.
+    // The bathroom is read as % RH now, and it has to be a percentage: a value
+    // outside 0-100 would mean the mapping had broken, not that the room was
+    // unusually damp.
     if (id === "humidity") {
-      assert.equal(readings[0].censored, true, "the shut bathroom must read as censored");
-      assert.equal(readings[0].value, 180, "and be clamped to the longest finite drying time, not the 999 sentinel");
+      assert.equal(readings[0].unit, "% RH");
+      assert.ok(readings[0].value > 50 && readings[0].value <= 100, `bathroom RH out of range: ${readings[0].value}`);
     }
     console.log(
       `ok  ${id.padEnd(9)} ${readings.map((r) => `${r.id}=${r.value}${r.unit === "°C" ? "°C" : ""}`).join("  ")}`,
@@ -183,33 +183,43 @@ try {
     );
   }
 
-  // --- bathroom: opening the window must dry it faster ----------------------
+  // --- bathroom: the right arrangement must lower the humidity -------------
+  //
+  // Opening the window where it is built does almost nothing — the extract
+  // beside it short-circuits the make-up air — and that is the lesson, so it is
+  // checked. Moving the extract across the room with the window open is the
+  // fix, and it has to read as a real drop in RH points.
 
   {
     const sc = SCENARIOS.humidity;
-    const shut = sc.build();
-    const open = {
-      ...shut,
-      windows: shut.windows.map((w) => ({ ...w, open: true })),
-      doors: shut.doors.map((d) => ({ ...d, open: true })),
+    const shut = { ...sc.build(), outdoorTemp: sc.outdoorTemp };
+    const opened = { ...shut, windows: shut.windows.map((w) => ({ ...w, open: true })) };
+    const room = shut.rooms.find((r) => r.id === "bathroom").rect;
+    const fixedVent = {
+      ...opened,
+      items: opened.items.map((it) =>
+        it.type === "return" ? { ...it, position: [room.x + 0.12, it.position[1], room.z + room.d * 0.2], rotationY: Math.PI / 2 } : it,
+      ),
     };
 
     const a = measureOutcomes("humidity", shut, sc.outdoorTemp);
-    const b = measureOutcomes("humidity", open, sc.outdoorTemp);
-    const d = compareOutcomes(a, b).find((x) => x.id === "bathroom_drying_time");
-    assert.equal(d.betterWhen, "lower", "a shorter drying time is better");
-    assert.ok(
-      d.improvement > 0,
-      `opening up must dry it faster (${val(a, "bathroom_drying_time")} -> ${val(b, "bathroom_drying_time")} min)`,
-    );
-    assert.equal(d.improvementIsLowerBound, true, "an improvement from a censored baseline is a lower bound");
-    assert.equal(d.percentImprovement, null, "and a percentage of a bound is not a percentage");
+    const onlyOpened = measureOutcomes("humidity", opened, sc.outdoorTemp);
+    const b = measureOutcomes("humidity", fixedVent, sc.outdoorTemp);
+    const goal = sc.goals[0].atMost;
+    assert.equal(sc.goals[0].metric, "humidity", "the bathroom task is scored on humidity, not drying time");
+    assert.ok(val(a, "bathroom_humidity") > goal, "the bathroom as delivered must start above the goal");
+    assert.ok(val(onlyOpened, "bathroom_humidity") > goal, "opening the window alone must not solve it — the short circuit is the lesson");
+
+    const d = compareOutcomes(a, b).find((x) => x.id === "bathroom_humidity");
+    assert.equal(d.betterWhen, "lower", "lower humidity is better");
+    assert.ok(val(b, "bathroom_humidity") <= goal, `the fix must meet the goal (${val(b, "bathroom_humidity")} vs ${goal})`);
+    assert.ok(d.improvement > 5, `and read as a real drop in RH points (got ${d.improvement})`);
+    assert.equal(d.percentImprovement, null, "no percentage of a percentage");
     const summary = summarizeOutcomes("humidity", compareOutcomes(a, b));
-    assert.equal(summary.unit, "min");
-    assert.match(summary.label, /at least/, "the summary label has to carry the bound");
+    assert.equal(summary.unit, "RH points");
     console.log(
-      `ok  humidity  opened up: ${val(a, "bathroom_drying_time")} -> ${val(b, "bathroom_drying_time")} min ` +
-        `(${summary.label.toLowerCase()} ${summary.value} min)`,
+      `ok  humidity  delivered ${val(a, "bathroom_humidity")}% RH, window opened ${val(onlyOpened, "bathroom_humidity")}%, ` +
+        `extract moved ${val(b, "bathroom_humidity")}% (${summary.label.toLowerCase()} ${summary.value} points)`,
     );
   }
 

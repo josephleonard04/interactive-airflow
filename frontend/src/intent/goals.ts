@@ -1,3 +1,4 @@
+import { meanRH, rhSwatch } from "../sim/humidity";
 import type { ScenarioGoal } from "../floorplan/scenarios";
 import { dampColor } from "../viz/smell";
 import type { FloorPlan, Rect } from "../floorplan/types";
@@ -53,6 +54,14 @@ export function goalPicture(g: ScenarioGoal, outdoorTemp: number): GoalPicture {
       before: { color: tempSwatch(start), word: start },
       after: { color: tempSwatch("comfortable"), word: "comfortable" },
       onTempScale: true,
+    };
+  }
+  if (g.metric === "humidity") {
+    // The two ends are readings on the percent scale, because the goal is one.
+    return {
+      before: { color: rhSwatch(92), word: "steamy, ~90% RH" },
+      after: { color: rhSwatch(g.atMost ?? 80), word: `below ${Math.round(g.atMost ?? 80)}% RH` },
+      onTempScale: false,
     };
   }
   if (g.metric === "drying") {
@@ -274,6 +283,22 @@ export function checkGoals(goals: ScenarioGoal[], plan: FloorPlan, outdoorTemp: 
     // a bathroom, answered in minutes rather than on a 0–1 scale nobody has an
     // intuition for. Scored on the SLOWEST corner, since that is the one that
     // goes black.
+    // "How humid is it in here?" — answered as % RH, the number on the
+    // hygrometer, over the room's occupied height. See sim/humidity.ts.
+    if (g.metric === "humidity") {
+      const rect = plan.rooms.find((r) => r.id === g.roomId)?.rect;
+      const rh = rect ? meanRH(built, fields.smell, rect) : null;
+      if (rh === null) return { label: g.label, met: false, detail: "", word: "" };
+      const met = (g.atLeast === undefined || rh >= g.atLeast) && (g.atMost === undefined || rh <= g.atMost);
+      return {
+        label: g.label,
+        met,
+        detail: `${Math.round(rh)}% RH`,
+        word: met ? "comfortable" : rh >= 88 ? "steamy" : "still humid",
+        color: rhSwatch(rh),
+      };
+    }
+
     if (g.metric === "drying") {
       const rect = plan.rooms.find((r) => r.id === g.roomId)?.rect;
       if (!rect) return { label: g.label, met: false, detail: "", word: "" };

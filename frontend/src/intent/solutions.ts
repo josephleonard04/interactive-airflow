@@ -3,6 +3,7 @@ import { findFreeSpot } from "../floorplan/collision";
 import type { FloorPlan, Opening, PlacedItem, Rect, Vec3 } from "../floorplan/types";
 import { REPORT_FIDELITY, buildSim3D, coldestPart, geodesicFields, roomMeans, slowestDry, warmestPart, zoneMean, zoneSpeed } from "../sim/sim3d";
 import { SMELL_FULL_SCALE } from "../viz/smell";
+import { RH_BACKGROUND, meanRH } from "../sim/humidity";
 import { windowZone } from "./goals";
 import { windowPlacements, windowSideName, withOpeningMoved } from "../floorplan/openings";
 import { candidateSpots } from "./searchOptimize";
@@ -317,7 +318,7 @@ const DRAFT_PENALTY = 8;
  *  closes that gap, and it is the difference between the smell task's search
  *  finding 0.296 (against a 0.17 bar) and finding the answer. */
 export interface TaskZone {
-  metric: "temperature" | "smell" | "draft" | "drying";
+  metric: "temperature" | "smell" | "draft" | "drying" | "humidity";
   /** THIS ZONE IS THE REQUEST, not one of the task's lines.
    *
    *  A participant draws a box round the bed and types "keep this area cool".
@@ -364,6 +365,10 @@ export interface SolutionMetrics {
    *  option could be told from another. Minutes is also the unit this task is
    *  actually scored in, so the card and the goal finally agree. */
   roomDryMin: Map<string, number>;
+  /** Mean % RH per room over the occupied height — what the bathroom task is
+   *  scored on now. The moisture field read the way a hygrometer would read
+   *  it; see sim/humidity.ts. */
+  roomRH: Map<string, number>;
   /** Per TaskZone, how far this plan is from satisfying it: 0 = met, larger =
    *  further away, in units of the goal's own tolerance. Empty off-scenario. */
   taskShortfall: number[];
@@ -382,6 +387,7 @@ export interface SolutionMetrics {
     speed: number;
     fresh: number;
     dryMin: number;
+    rh: number;
   } | null;
   /** The target room that came off WORST — the number the goal really rests on. */
   worstTargetC: number;
@@ -405,7 +411,7 @@ export interface Solution {
    *  kitchen smell showed "Studio 31.0 °C" on every card — the outdoor
    *  temperature, identical across all of them, and no help whatever in
    *  choosing between two ways of dealing with a bin. */
-  readout: "temperature" | "freshness" | "drying";
+  readout: "temperature" | "freshness" | "humidity";
   /** Short plain-language name for the approach. */
   label: string;
   /** What it actually does, for the option card. */
@@ -498,6 +504,11 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
   }
   const roomDryMin = new Map<string, number>();
   for (const r of plan.rooms) roomDryMin.set(r.id, slowestDry(built, dryF, r.rect));
+  const roomRH = new Map<string, number>();
+  for (const r of plan.rooms) {
+    const rh = meanRH(built, smell, r.rect);
+    if (rh !== null) roomRH.set(r.id, rh);
+  }
   const roomFresh = new Map<string, number>();
   // Against SMELL_FULL_SCALE, the same fixed reference the contamination view
   // normalises against — so a card saying "62% fresh" and the floor the user is
@@ -528,6 +539,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
       speed: zoneSpeed(built, drawn) ?? 0,
       fresh: Math.max(0, Math.min(1, 1 - (zoneMean(built, smell, drawn) ?? 0) / SMELL_FULL_SCALE)),
       dryMin: slowestDry(built, dryF, drawn),
+      rh: meanRH(built, smell, drawn) ?? RH_BACKGROUND,
     };
   }
   // How far inside a goal's bar the "tight" copy of it sits, as a fraction of
@@ -567,6 +579,10 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
       scale = 1;
     }
     else if (g.metric === "drying") { v = slowestDry(built, dryF, rect); scale = 30; }
+    // Five RH points is one tolerance step: the difference between a bathroom
+    // that is clearing and one that is not, and about a third of the range the
+    // task's arrangements span.
+    else if (g.metric === "humidity") { v = meanRH(built, smell, rect); scale = 5; }
     else { v = zoneMean(built, smell, rect); scale = 0.05; }
     if (v === null) { taskShortfall.push(0); taskTight.push(0); continue; }
     let short = 0;
@@ -637,6 +653,7 @@ function measure(plan: FloorPlan, targetIds: string[], outdoorTemp: number, fid:
     roomColdestC,
     roomFresh,
     roomDryMin,
+    roomRH,
     taskShortfall,
     focus,
     taskTight,
@@ -732,17 +749,18 @@ function proxyScore(
   // The room terms stay as the tiebreak (m.meanTargetC below): cooling the bed
   // by making the bedroom unliveable is not what was meant either.
   const f = m.focus;
-  // A DRYING TASK IS SCORED ON MINUTES, not on how fast the air is moving.
+  // A HUMIDITY TASK IS SCORED ON % RH, not on how fast the air is moving.
   // Ranking by air speed picked the layout that stirred the bathroom hardest,
-  // which is not the same as the one that clears the damp corner — the search
-  // moved the extract 1.5 m, reported a triumph, and left the room at 177
-  // minutes against a 95-minute goal. Optimise the number the task is graded
-  // on and the two finally point the same way.
+  // which is not the same as the one that clears the steam — the search once
+  // moved the extract 1.5 m, reported a triumph, and left the room as damp as
+  // it found it. Optimise the number the task is graded on and the two point
+  // the same way. (It was minutes-to-dry until the task became "reduce the
+  // humidity"; same field, read as RH — see sim/humidity.ts.)
   if (drying) {
-    if (m.focus) return -m.focus.dryMin;
-    const ids = targetIds.length ? targetIds : [...m.roomDryMin.keys()];
-    const mins = ids.map((id) => m.roomDryMin.get(id)).filter((v): v is number => v !== undefined);
-    if (mins.length) return -Math.max(...mins);
+    if (m.focus) return -m.focus.rh;
+    const ids = targetIds.length ? targetIds : [...m.roomRH.keys()];
+    const rh = ids.map((id) => m.roomRH.get(id)).filter((v): v is number => v !== undefined);
+    if (rh.length) return -Math.max(...rh);
   }
   // THE CORNER THAT IS STILL WRONG, not the average of the room.
   //
@@ -1560,10 +1578,10 @@ function refineOptions(
   goal: OptimizeGoal,
   targetIds: string[],
   opts: FindOptions,
-  dryingTask: boolean,
+  humidTask: boolean,
   want: number,
 ): Solution[] {
-  const fid = dryingTask ? SCREEN_DRY : SCREEN;
+  const fid = humidTask ? SCREEN_DRY : SCREEN;
   const primary = primaryFor(goal, plan, opts.allowedDevices, opts.movableDevices);
   const movable = opts.movableDevices;
   const aimable = opts.allowedDevices;
@@ -1583,7 +1601,7 @@ function refineOptions(
     if (out.length >= want) break;
     const budget = { left: opts.refineBudget ?? 70 };
     const { plan: better, improved, neighbours } = refine(
-      plan, goal, targetIds, opts.outdoorTemp, fid, dryingTask,
+      plan, goal, targetIds, opts.outdoorTemp, fid, humidTask,
       opts.taskZones ?? [], w.movable, w.aimable, budget,
     );
     // Improved if it can be; otherwise the best thing it looked at. A layout
@@ -1595,10 +1613,10 @@ function refineOptions(
     const key = layoutKey(pick);
     if (seen.has(key)) continue;
     seen.add(key);
-    const { metrics, score } = evaluate(pick, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask, opts.taskZones);
+    const { metrics, score } = evaluate(pick, goal, targetIds, opts.outdoorTemp, FINAL, humidTask, opts.taskZones);
     out.push({
       id: `refine-${out.length}`,
-      readout: dryingTask ? "drying" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
+      readout: humidTask ? "humidity" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
       label: w.label,
       detail: [w.note, ...movedLines(plan, pick)],
       plan: pick,
@@ -1687,11 +1705,11 @@ export function findSolutions(
   // spot in the output.
   plan = { ...plan, outdoorTemp: opts.outdoorTemp };
   const want = opts.want ?? 3;
-  // A room with a moisture source is asking "how long until it is dry", not
-  // "how fresh is the air" — see roomDryMin.
-  const dryingTask = plan.items.some((it) => it.type === "damp");
+  // A room with a moisture source is asking "how humid is it", not "how fresh
+  // is the air" — see roomRH.
+  const humidTask = plan.items.some((it) => it.type === "damp");
 
-  if (opts.refineOnly) return refineOptions(plan, goal, targetIds, opts, dryingTask, want);
+  if (opts.refineOnly) return refineOptions(plan, goal, targetIds, opts, humidTask, want);
 
   // RAISED FROM 48. It was never the binding constraint — tripling it changed
   // nothing, because the candidate LISTS ran out first — so widening those (see
@@ -1721,15 +1739,15 @@ export function findSolutions(
   for (const st of strategies) {
     const base = withOpenings(withDevices(plan, st.devices), st.interiorDoors, st.openWindowIds);
     const slice = { left: perStrategy };
-    const fid = dryingTask ? SCREEN_DRY : SCREEN;
-    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, dryingTask, opts.flow, opts.taskZones, opts.movableDevices);
+    const fid = humidTask ? SCREEN_DRY : SCREEN;
+    const { plan: placed, changes, primaryAlts } = placeDevices(base, goal, targetIds, opts.outdoorTemp, slice, opts.allowedDevices, humidTask, opts.flow, opts.taskZones, opts.movableDevices);
     // …and then, if the task allows it, where the GLAZING goes. Done after the
     // devices rather than as another strategy dimension: window position times
     // open/shut times power would multiply the strategy count past the point
     // where any of them get a placement search worth the name, and in practice
     // a person settles the extract first and then asks where the window should
     // be relative to it.
-    let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones).score };
+    let best = { plan: placed, changes, score: evaluate(placed, goal, targetIds, opts.outdoorTemp, fid, humidTask, opts.taskZones).score };
     if (opts.moveOpenings) {
       // WHERE THE GLAZING GOES AND WHERE THE GRILLE GOES ARE ONE QUESTION, not
       // two in sequence. This used to sweep window positions against the single
@@ -1754,7 +1772,7 @@ export function findSolutions(
           for (const spot of windowPlacements(base, win)) {
             if (spot.a[0] === win.a[0] && spot.a[1] === win.a[1]) continue;
             const trial = withOpeningMoved(base, { ...spot, open: win.open });
-            const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, dryingTask, opts.taskZones);
+            const { score } = evaluate(trial, goal, targetIds, opts.outdoorTemp, fid, humidTask, opts.taskZones);
             if (score > best.score) {
               best = {
                 plan: trial,
@@ -1828,9 +1846,9 @@ export function findSolutions(
   // the shortlist is now twelve and they are re-scored at MID (0.99) before
   // anything is picked. See MID.
   const shortlist = screened.slice(0, Math.max(want * 3, 9));
-  const midFid = dryingTask ? MID_DRY : MID;
+  const midFid = humidTask ? MID_DRY : MID;
   for (const f of shortlist) {
-    f.score = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, midFid, dryingTask, opts.taskZones).score;
+    f.score = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, midFid, humidTask, opts.taskZones).score;
   }
   shortlist.sort((a, b) => b.score - a.score);
   const finalists = shortlist.slice(0, Math.max(want, 3));
@@ -1848,11 +1866,11 @@ export function findSolutions(
   const polish = { left: opts.refineBudget ?? 60 };
   for (const f of finalists) {
     const { plan: better, improved } = refine(
-      f.plan, goal, targetIds, opts.outdoorTemp, dryingTask ? SCREEN_DRY : SCREEN,
-      dryingTask, opts.taskZones ?? [], opts.movableDevices, opts.allowedDevices, polish,
+      f.plan, goal, targetIds, opts.outdoorTemp, humidTask ? SCREEN_DRY : SCREEN,
+      humidTask, opts.taskZones ?? [], opts.movableDevices, opts.allowedDevices, polish,
     );
     if (!improved) continue;
-    const checked = evaluate(better, goal, targetIds, opts.outdoorTemp, midFid, dryingTask, opts.taskZones).score;
+    const checked = evaluate(better, goal, targetIds, opts.outdoorTemp, midFid, humidTask, opts.taskZones).score;
     if (checked > f.score) {
       f.plan = better;
       f.score = checked;
@@ -1860,7 +1878,7 @@ export function findSolutions(
   }
   finalists.sort((a, b) => b.score - a.score);
   const solutions: Solution[] = finalists.map((f) => {
-    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, dryingTask, opts.taskZones);
+    const { metrics, score } = evaluate(f.plan, goal, targetIds, opts.outdoorTemp, FINAL, humidTask, opts.taskZones);
     // WHAT THIS CARD ACTUALLY DOES, read off the plan rather than inherited.
     // The alternatives are built on the winner's plan and were carrying the
     // winner's change lines, so a card that moved the heater somewhere else
@@ -1871,7 +1889,7 @@ export function findSolutions(
     const detail = [f.strategy.note, ...movedLines(plan, f.plan), ...f.changes.filter((c) => c.startsWith("Window"))];
     return {
       id: f.strategy.id,
-      readout: dryingTask ? "drying" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
+      readout: humidTask ? "humidity" : goal === "ventilate" || goal === "circulate" ? "freshness" : "temperature",
       label: f.strategy.label,
       detail,
       plan: f.plan,
@@ -1902,10 +1920,10 @@ export function findSolutions(
           (k) => Math.abs(Math.atan2(Math.sin(aimOf(k.plan) - aimOf(s.plan)), Math.cos(aimOf(k.plan) - aimOf(s.plan)))) < ALT_MIN_TURN,
         )
       : kept.some((k) =>
-      dryingTask
+      humidTask
         ? Math.abs(
-            Math.max(...[...k.metrics.roomDryMin.values()]) - Math.max(...[...s.metrics.roomDryMin.values()]),
-          ) < 4
+            Math.max(...[...k.metrics.roomRH.values()]) - Math.max(...[...s.metrics.roomRH.values()]),
+          ) < 0.8
         : Math.abs(k.metrics.meanTargetC - s.metrics.meanTargetC) < 0.25 &&
           Math.abs(k.metrics.houseMeanSpeed - s.metrics.houseMeanSpeed) < 0.02,
     );
@@ -2063,7 +2081,7 @@ export function withholdComplete(
         it.type === primary ? it : current.items.find((o) => o.id === it.id) ?? it,
       ),
     };
-    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "drying");
+    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "humidity");
     return {
       ...s,
       id: `${s.id}-partial`,
@@ -2093,7 +2111,7 @@ export function withholdComplete(
    *  for any task where the openings and the placement both matter. */
   const openingsOnly = (s: Solution): Solution => {
     const plan: FloorPlan = { ...s.plan, items: current.items };
-    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "drying");
+    const { metrics, score } = evaluate(plan, goal, targetIds, outdoorTemp, FINAL, s.readout === "humidity");
     return {
       ...s,
       id: `${s.id}-openings`,

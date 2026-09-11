@@ -638,7 +638,7 @@ export const useSceneStore = create<SceneState>((set, get) => ({
     const methodCounts: Record<string, number> = {};
     for (const e of s.sessionLog) methodCounts[e.method] = (methodCounts[e.method] ?? 0) + 1;
     const report: SessionReport = {
-      schema: 5,
+      schema: 6, // 6: the bathroom outcome is % RH (bathroom_humidity), not drying minutes
       participant: s.participantId || null,
       scenario: s.scenarioId,
       title: sc?.title ?? null,

@@ -61,7 +61,7 @@ export function objectivesFromScenario(
       // bare `atMost` means keep it cool. Winter sets both, and there the floor
       // is the binding one — the room is cold and the task is to warm it.
       out.push({ ...base, scalar: "temperature", direction: g.atLeast != null ? "high" : "low" });
-    } else if (g.metric === "smell" || g.metric === "drying") {
+    } else if (g.metric === "smell" || g.metric === "drying" || g.metric === "humidity") {
       out.push({ ...base, scalar: "contaminant", direction: "low" });
     } else {
       out.push({ ...base, scalar: "draft", direction: g.atLeast != null ? "high" : "low" });

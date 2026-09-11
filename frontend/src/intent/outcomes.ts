@@ -1,12 +1,11 @@
+import { meanRH } from "../sim/humidity";
 import type { ScenarioId } from "../floorplan/scenarios";
 import type { FloorPlan, Rect } from "../floorplan/types";
 import {
-  DRY_UNVENTILATED,
   REPORT_FIDELITY,
   buildSim3D,
   geodesicFields,
   roomMeans,
-  slowestDry,
   zoneMean,
   zoneSpeed,
 } from "../sim/sim3d";
@@ -143,35 +142,31 @@ const itemOdor = (itemType: string, label: string): OutcomeMeasure => ({
 });
 
 /**
- * Minutes for the slowest corner of a room to dry.
+ * Relative humidity of a room, % RH — the room mean over the occupied height,
+ * which is what a hygrometer on the bathroom wall reads.
  *
- * The brief asks how FAST the bathroom dries, which would ideally be a rate in
- * RH points per minute. The solver does not produce a humidity curve over time
- * — it produces a time-to-dry per cell — so a "% RH / min" figure would be
- * invented units dressed as a measurement. Minutes is the quantity that exists,
- * it answers the same question (lower is faster, and `improvement` is minutes
- * saved), and it is what the bathroom view already draws.
+ * This is the bathroom outcome now. The task is "reduce the humidity", so the
+ * log records the humidity: delivered, submitted, and the difference in RH
+ * points. It is read off the solver's moisture field (see sim/humidity.ts) —
+ * a calibrated mapping rather than a psychrometric simulation, so the absolute
+ * percentages are estimates and the CHANGE between two arrangements of the same
+ * room is the quantity the model resolves.
+ *
+ * Not a ratio scale for this purpose: "20% less humid" of a percentage is a
+ * percentage of a percentage, and nobody means that. Improvement is reported
+ * in RH points only.
  */
-const dryingMinutes = (roomId: string, label: string): OutcomeMeasure => ({
-  id: `${roomId}_drying_time`,
+const roomHumidity = (roomId: string, label: string): OutcomeMeasure => ({
+  id: `${roomId}_humidity`,
   label,
-  unit: "min",
+  unit: "% RH",
   betterWhen: "lower",
-  ratioScale: true,
-  // The bathroom as delivered does not dry at all: shut, its slowest corner is
-  // never reached by fresh air and the solver returns the DRY_NEVER sentinel.
-  //
-  // CENSOR AT THE LONGEST FINITE TIME, not at the sentinel. Differencing 999
-  // gives "at least 901 minutes faster", which reads as though somebody timed a
-  // sixteen-hour bathroom — the 999 is a flag, not a duration. Clamped to
-  // DRY_UNVENTILATED the same session reports "at least 82 minutes faster",
-  // which is both true (the real baseline is worse than 180, so the real saving
-  // is larger) and a number that means what it says.
-  censoredAtOrAbove: DRY_UNVENTILATED,
+  ratioScale: false,
   read: ({ plan, built, fields }) => {
     const rect: Rect | undefined = plan.rooms.find((r) => r.id === roomId)?.rect;
     if (!rect) return null;
-    return Number(slowestDry(built, fields.dry, rect).toFixed(1));
+    const rh = meanRH(built, fields.smell, rect);
+    return rh === null ? null : Number(rh.toFixed(1));
   },
 });
 
@@ -195,8 +190,8 @@ export const SCENARIO_OUTCOMES: Record<ScenarioId, OutcomeMeasure[]> = {
   // footprint is the outcome.
   summer: [itemOdor("bed", "Odour at the bed")],
 
-  // Bathroom: dry out quickly after a shower.
-  humidity: [dryingMinutes("bathroom", "Time for the slowest corner to dry")],
+  // Bathroom: bring the humidity down after a shower.
+  humidity: [roomHumidity("bathroom", "Bathroom humidity")],
 
   // Apartment, AC bolted above the bed: cool both rooms WITHOUT blowing on the
   // sleeper. Two of these three can be satisfied by making the third worse,
@@ -291,16 +286,9 @@ export function summarizeOutcomes(
   }
 
   if (scenarioId === "humidity") {
-    const d = deltas.find((x) => x.id === "bathroom_drying_time");
+    const d = deltas.find((x) => x.id === "bathroom_humidity");
     if (!d || d.improvement === null) return null;
-    return {
-      // The delivered bathroom does not dry, so this is almost always a lower
-      // bound, and the label says so rather than leaving it in a flag someone
-      // reading a spreadsheet column will not see.
-      label: d.improvementIsLowerBound ? "Dries faster by (at least)" : "Dries faster by",
-      value: d.improvement,
-      unit: "min",
-    };
+    return { label: "Humidity reduced by", value: d.improvement, unit: "RH points" };
   }
 
   return null;

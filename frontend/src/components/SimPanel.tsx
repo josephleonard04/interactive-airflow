@@ -8,8 +8,8 @@ import { SCENARIOS } from "../floorplan/scenarios";
 import { objectivesFromScenario } from "../intent/fallback";
 import { isAdjustment } from "../intent/objectives";
 import { TEMP_MAX_C, TEMP_MIN_C, TEMP_NEUTRAL_C, flowGradientCss, rgbCss, tempColor, tempGradientCss, tempLabel } from "../viz/temperature";
-import { contaminantGradientCss, smellColor } from "../viz/smell";
-import { drySwatch } from "../intent/goals";
+import { SMELL_FULL_SCALE, contaminantGradientCss, smellColor } from "../viz/smell";
+import { rhOf, rhSwatch } from "../sim/humidity";
 import { SketchCanvas } from "./SketchCanvas";
 
 // Controls for the in-scene 3D airflow simulation (the field itself renders in the
@@ -628,19 +628,19 @@ function SolutionOptions({
               // Every card on the studio task read "Studio 31.0 °C" — the same
               // outdoor number three times over, telling the participant nothing
               // about the thing they asked about.
-              if (o.readout === "drying") {
-                const m = o.metrics.roomDryMin.get(id);
+              if (o.readout === "humidity") {
+                const rh = o.metrics.roomRH.get(id);
                 return (
                   <span
                     key={id}
                     style={{
                       fontSize: 11, padding: "2px 6px", borderRadius: 999,
                       border: "1px solid var(--line)",
-                      background: m != null ? drySwatch(m) : "transparent",
+                      background: rh != null ? rhSwatch(rh) : "transparent",
                     }}
-                    title={`${nameOf(id)} — predicted time for the slowest part to dry`}
+                    title={`${nameOf(id)} — predicted relative humidity, room average`}
                   >
-                    {nameOf(id)} {m == null ? "—" : m >= 179 ? "stays wet" : `dry in ~${Math.round(m)} min`}
+                    {nameOf(id)} {rh == null ? "—" : `~${Math.round(rh)}% RH`}
                   </span>
                 );
               }
@@ -833,16 +833,16 @@ function Legend({ mode, outdoorTemp, contaminant }: { mode: SimMode; outdoorTemp
     return (
       <div style={{ marginTop: 10 }}>
         <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 4 }}>
-          {contaminant === "Humidity" ? "Moisture in the air" : "Contaminant concentration"}
+          {contaminant === "Humidity" ? "Relative humidity" : "Contaminant concentration"}
         </div>
         <div style={{ height: 11, borderRadius: 6, background: contaminantGradientCss(contaminant === "Humidity" ? "humidity" : "smell") }} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-          <span>{contaminant === "Humidity" ? "Dry" : "Fresh air"}</span>
-          <span>{contaminant === "Humidity" ? "Damp" : "Strongest smell"}</span>
+          <span>{contaminant === "Humidity" ? `~${Math.round(rhOf(0))}% RH` : "Fresh air"}</span>
+          <span>{contaminant === "Humidity" ? `${Math.round(rhOf(SMELL_FULL_SCALE))}%+ RH` : "Strongest smell"}</span>
         </div>
         <p className="muted-line" style={{ marginTop: 6 }}>
           {contaminant === "Humidity"
-            ? "Carried by the airflow, and it only leaves where the air does — dries out near an open window or an extract, and sits where the air is still."
+            ? "Steam from the shower and bath is carried by the airflow, and it only leaves where the air does — the humidity drops near an open window or an extract, and stays high where the air is still."
             : "Carried by the airflow: it spreads where the air goes and leaves where the air leaves, so the floor turns green wherever fresh air is reaching and magenta where the smell collects. The scale is fixed, so the same color always means the same strength — open a window or move the fan, run it again, and the floor greens out as the room actually clears."}
         </p>
       </div>

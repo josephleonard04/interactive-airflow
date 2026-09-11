@@ -124,10 +124,11 @@ export interface ScenarioGoal {
   /** Shown next to the tick-box. Phrased as the thing to achieve. */
   label: string;
   /** What to measure. */
-  /** `drying` is measured in MINUTES and scored on the slowest corner of the
-   *  room — how long it stays wet after a shower, which is the question people
-   *  actually ask about a bathroom. The others are levels, not durations. */
-  metric: "temperature" | "smell" | "draft" | "drying";
+  /** `humidity` is % RH, the room mean over the occupied height — the number
+   *  on a bathroom hygrometer. See sim/humidity.ts. (`drying`, minutes for the
+   *  slowest corner to dry, is what the bathroom task used before; kept so old
+   *  session files and zones still type-check.) */
+  metric: "temperature" | "smell" | "draft" | "drying" | "humidity";
   /** Room it is measured in. Ignored when `nearItem` is set. */
   roomId: string;
   /** Measure over the footprint of this item type instead of the whole room —
@@ -1077,7 +1078,7 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
       "winters — the kind of home where the bathroom corner goes black with mould " +
       "and the windows drip with condensation on a winter morning. You can still " +
       "decide where the window and the extract vent go, on any of the outside " +
-      "walls. Get the damp corner behind the bath drying out.",
+      "walls. Bring the bathroom's humidity down after a shower.",
     // Split into the same four labelled parts as the winter and summer tasks:
     // the situation, what done looks like, and the two lists of what does and
     // does not move. Same reasoning as those two — a single paragraph buries
@@ -1094,8 +1095,8 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // done" the other tasks carry — without it the absence of a checklist reads
     // as a missing feature rather than as permission to stop.
     goal:
-      "Get the bathroom drying out properly after a shower, so the damp corner behind the " +
-      "bath does not stay wet. Keep changing things until you are happy with the result, " +
+      "Bring the bathroom's humidity down after a shower, so the steam clears and the damp " +
+      "corner behind the bath does not stay clammy. Keep changing things until you are happy with the result, " +
       "then press Submit. There is no score to collect and no right number to hit: you " +
       "decide when it is good enough.",
     youCanChange:
@@ -1114,84 +1115,40 @@ export const SCENARIOS: Record<ScenarioId, Scenario> = {
     // things the solver knows, and neither is being asked about here — four tabs
     // where two would do is four things to rule out before you can start.
     views: ["airflow", "contamination"],
-    // ONE GOAL, MEASURED AS A TIME. "How long does it stay wet after a shower"
-    // is the question a person actually asks about a bathroom; 0.27 on a
-    // contaminant scale is not. Scored on the 90th percentile of the room, so a
-    // genuinely stagnant corner fails while the single crevice behind the tub
-    // that no arrangement can reach does not decide the task.
+    // ONE GOAL, MEASURED AS RELATIVE HUMIDITY. The task is "reduce the
+    // humidity", and % RH is the number on a bathroom hygrometer and the one
+    // the study reports — see sim/humidity.ts for how it is read off the
+    // solver's moisture field, and what that mapping is and is not.
     //
-    // Measured over 11 vent positions × 12 window positions (4 walls × 3):
-    //     window SHUT (any vent)                    59 min
-    //     as built — window open beside the vent    51 min   the short circuit
-    //     openings on opposite sides of the room    31 min
-    // Range with the window open is 31–53 min, and the slowest arrangements are
-    // all the two openings clustered in the same corner: the air crosses a metre
-    // of wall and leaves, and the rest of the room never moves. 29 of the 132
-    // get under 35 minutes, all of them with the window and the extract on
-    // opposite sides.
+    // It used to be minutes-to-dry on the slowest corner. The physics under it
+    // has not changed — the same moisture field, the same extract and window —
+    // only the quantity read off it, so the lesson is identical: the extract
+    // has to cross the room from the window, and opening the window alone does
+    // almost nothing.
     //
-    // The window STARTS beside the extract, so opening it is not the answer —
-    // left diagonally opposite the vent where it used to be, merely opening it
-    // dried the room in 32 minutes and the placement question never came up.
+    // CALIBRATION. 12 vent spots (3 per wall) x 16 legal window spots, room-
+    // mean % RH at report fidelity:
+    //     as delivered — window shut, vent by the window    90.4
+    //     window opened where it is built                   90.5   does nothing
+    //     window shut, best of all 12 vent spots            87.6
+    //     window open, all 192 combinations                 75.5 - 92.1
+    //     best: vent in the top-left, far from the glazing  75.5
+    // 82 sits 5.6 points under the best a sealed room can do and 8.4 under
+    // the room as delivered, so neither "open the window" nor "move the vent"
+    // alone passes; 56 of the 192 open arrangements do. Unlike the old
+    // drying-time goal the spread is a slope rather than a cliff: every step
+    // of separating the extract from the window buys a few points.
     goals: [
-      // 98 -> 66 min, and the widest margin this task has had. Re-measured on
-      // the room as it now is -- 4.2 x 3.6 with the long wall across the view,
-      // the wet run along the top, the door on the left and the glazing on the
-      // right -- and, for the first time, with the hot water modelled as heat
-      // (sim3d WET_T). That last one changes the physics, not just the picture:
-      // warm air comes off the shower and the bath, rises, and rolls back down
-      // the cool glazing, so the room has a convective turnover the extract can
-      // work with or against.
-      //
-      // Extract swept over 10 positions, window open:
-      //     as delivered (right wall, by the window)  113 min  <- the problem
-      //     bottom-right corner                       104 min
-      //     right wall, upper                          90 min
-      //     top-right corner                           77 min
-      //     ------------------------------------------------ the cliff
-      //     bottom mid                                 56 min
-      //     top mid                                    41 min
-      //     left wall, lower                           40 min
-      //     bottom-left corner                         38 min
-      //     left wall, upper                           31 min
-      //     top-left corner                            31 min  <- the answer
-      //
-      // The split is not a slope, it is a cliff between the half of the room
-      // the window is in and the half it is not: 77 against 56 with nothing
-      // between. Put the extract on the far side and the air has to cross the
-      // whole floor, over the steam, to get from one to the other. 66 sits mid-
-      // gap -- 53% clear of the answer, 14% clear of the nearest miss.
-      //
-      // Shut, the room never dries: an extract with no make-up air cannot turn
-      // it over. It is not inert, though — it still clears the patch of air
-      // directly in front of the grille (0.25 against 0.86 in the far corner),
-      // because a fan drawn as doing nothing looks switched off. See sealedHalo.
-      //
-      // THE SEARCH MOVES THE WINDOW TOO. It is half the question here — the
-      // grille and the glazing short-circuit when they are close — so a search
-      // that could only toggle it was answering something else. Joint sweep, 8
-      // vent spots x 13 legal window spots, window open:
-      //     vent as delivered, window anywhere      113-141 min   nothing works
-      //     vent top-left, window bottom-right       24 min       the best pair
-      //     57 of 104 combinations under 66 min
-      // The vent still dominates: every arrangement that leaves it on the
-      // window's own wall is 113 min or worse, whatever the glazing does.
-      { label: "The bathroom dries out fast after a shower", metric: "drying", roomId: "bathroom", atMost: 66 },
+      { label: "The bathroom's humidity comes down after a shower", metric: "humidity", roomId: "bathroom", atMost: 82 },
     ],
     success:
-      "Everywhere in the bathroom dry within 66 minutes, measured on the slow " +
-      "90% of the room. Two things have to happen and neither is enough alone. " +
-      "The window must be OPEN — shut, the extract has no make-up air, moves " +
-      "nothing, and all ten vent positions read 180 minutes. And the extract " +
-      "must cross to the LEFT half of the room, away from the glazing: 31 min " +
-      "in the top-left corner beside the shower, 38 in the bottom-left, against " +
-      "113 min where it is built a few centimeters above the window. There the " +
-      "two short-circuit — the air comes in, goes straight back out, and the " +
-      "steam between the shower and the bath never clears. The split is a cliff, " +
-      "not a slope: everything on the window’s side of the room is 77 minutes " +
-      "or worse, everything on the far side is 56 or better. The floor around a " +
-      "well-placed grille goes visibly dry; around a short-circuited one it does " +
-      "not, which is the picture the task turns on.",
+      "The bathroom at 82% relative humidity or lower, averaged over the room. " +
+      "Two things have to happen and neither is enough alone. The window must be " +
+      "OPEN — shut, the extract has no make-up air and the room stays near 90% " +
+      "wherever the grille goes. And the extract must move AWAY from the window: " +
+      "built beside it, the two short-circuit — the air comes in and goes straight " +
+      "back out, and the room reads 90% with the window wide open. Across the " +
+      "room from the glazing, the best spots reach about 76%.",
     build: buildBathroom,
   },
   smell: {
