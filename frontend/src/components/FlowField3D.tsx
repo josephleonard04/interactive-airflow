@@ -486,23 +486,23 @@ export function FlowField3D() {
     <group>
       {showStreamlines && (
         <group>
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={5} transparent opacity={0.16} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={11} transparent opacity={0.18} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
           {/* faint continuous core so the path always reads */}
-          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={1.6} transparent opacity={0.35} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
+          <Line points={paths!.points} segments vertexColors={paths!.colors} lineWidth={3.6} transparent opacity={0.45} depthWrite={false} renderOrder={FLOW_RENDER_ORDER} />
           {/* animated dashes flowing along the line = moving air */}
           <Line
             ref={dashRef}
             points={paths!.points}
             segments
             vertexColors={paths!.colors}
-            lineWidth={2.4}
+            lineWidth={5}
             transparent
             opacity={0.95}
             depthWrite={false}
             renderOrder={FLOW_RENDER_ORDER}
             dashed
-            dashSize={0.22}
-            gapSize={0.16}
+            dashSize={0.3}
+            gapSize={0.18}
           />
         </group>
       )}

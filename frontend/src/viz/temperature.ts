@@ -31,27 +31,19 @@ export interface RGB {
   b: number;
 }
 
-// Perceptually ordered stops: deep blue (cold) → light blue (cool) → warm-neutral
-// (comfortable) → orange → deep red (hot). Distinct enough in lightness that the
-// bands stay readable for colour-vision-deficient viewers and in greyscale.
-// STEEP THROUGH THE MIDDLE, WHICH IS WHERE ROOMS ACTUALLY LIVE, and ending where
-// indoor air ends. The neutral sits at 22 °C, so the two things a heating task is
-// about are unmistakable: a heater's air (~26.5 °C measured) is red, and a cold
-// bedroom (~17.5 °C) is a strong blue. Every stop is saturated — the neutral is a
-// light warm grey rather than near-white, so "comfortable" reads as a colour and
-// not as blank floor.
 const STOPS: Array<{ c: number; rgb: RGB }> = [
-  { c: 10, rgb: { r: 0.02, g: 0.05, b: 0.33 } }, // deep navy — a freezing pane
-  { c: 13, rgb: { r: 0.04, g: 0.19, b: 0.74 } }, // strong blue
-  { c: 16, rgb: { r: 0.09, g: 0.41, b: 0.94 } }, // azure — a cold room
-  { c: 18.5, rgb: { r: 0.33, g: 0.65, b: 0.99 } }, // mid blue — too cool to sit in
-  { c: 20.5, rgb: { r: 0.67, g: 0.85, b: 0.99 } }, // pale blue — slightly cool
-  { c: 22, rgb: { r: 0.95, g: 0.93, b: 0.88 } }, // light warm grey — comfortable
-  { c: 23.5, rgb: { r: 0.99, g: 0.82, b: 0.45 } }, // amber
-  { c: 25, rgb: { r: 0.99, g: 0.59, b: 0.19 } }, // orange
-  { c: 26.5, rgb: { r: 0.96, g: 0.32, b: 0.10 } }, // red — a heater's own air
-  { c: 28, rgb: { r: 0.88, g: 0.12, b: 0.06 } }, // strong red
-  { c: 32, rgb: { r: 0.60, g: 0.02, b: 0.05 } }, // deep red — a heatwave room
+  // THERMOGRAPHIC, like a thermal camera: blue is cold, red is hot, and cyan,
+  // green and yellow fill the middle. The earlier ramp faded to a pale grey in
+  // the comfort band, which read as "blank floor" and could not share a legend
+  // with the streamlines. Asked for by Igarashi so the airflow and temperature
+  // views speak one colour language; comfortable air (22 °C) is now green.
+  { c: 10, rgb: { r: 0.05, g: 0.05, b: 0.55 } }, // deep blue — a freezing pane
+  { c: 14, rgb: { r: 0.0, g: 0.3, b: 1.0 } }, // blue — a cold room
+  { c: 18, rgb: { r: 0.0, g: 0.78, b: 1.0 } }, // cyan — too cool to sit in
+  { c: 22, rgb: { r: 0.2, g: 0.85, b: 0.25 } }, // green — comfortable
+  { c: 25, rgb: { r: 1.0, g: 0.9, b: 0.1 } }, // yellow — warm
+  { c: 28, rgb: { r: 1.0, g: 0.5, b: 0.0 } }, // orange — a heater's own air
+  { c: 32, rgb: { r: 0.85, g: 0.05, b: 0.05 } }, // red — a heatwave room
 ];
 
 /** Colour for an absolute air temperature in °C. */
@@ -82,13 +74,14 @@ export const FLOW_MIN_SPREAD_C = 2;
 
 /** Diverging ramp for the airflow lines and dots, in normalized 0..1. */
 const FLOW_STOPS: Array<{ u: number; rgb: RGB }> = [
-  { u: 0.0, rgb: { r: 0.04, g: 0.25, b: 0.95 } }, // full blue — the coldest air here
-  { u: 0.22, rgb: { r: 0.31, g: 0.63, b: 0.99 } },
-  { u: 0.42, rgb: { r: 0.73, g: 0.87, b: 0.99 } },
-  { u: 0.5, rgb: { r: 0.95, g: 0.93, b: 0.89 } }, // mixed — neither, and it shows
-  { u: 0.58, rgb: { r: 0.99, g: 0.85, b: 0.55 } },
-  { u: 0.78, rgb: { r: 0.99, g: 0.52, b: 0.14 } },
-  { u: 1.0, rgb: { r: 0.95, g: 0.09, b: 0.05 } }, // full red — the warmest air here
+  // The same thermographic family as the Temperature view (see STOPS): the
+  // coldest air in this home is blue, the warmest red, and the mixing between
+  // them passes through cyan, green and yellow rather than fading to grey.
+  { u: 0.0, rgb: { r: 0.0, g: 0.25, b: 1.0 } }, // blue — the coldest air here
+  { u: 0.25, rgb: { r: 0.0, g: 0.78, b: 1.0 } }, // cyan
+  { u: 0.5, rgb: { r: 0.2, g: 0.85, b: 0.25 } }, // green — mixed room air
+  { u: 0.75, rgb: { r: 1.0, g: 0.88, b: 0.1 } }, // yellow
+  { u: 1.0, rgb: { r: 0.9, g: 0.08, b: 0.05 } }, // red — the warmest air here
 ];
 
 /**
