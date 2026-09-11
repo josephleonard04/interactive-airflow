@@ -5,7 +5,7 @@ import manipulate from "../assets/teaser/manipulate.jpg";
 
 /** What a visitor sees first: the paper, then the idea, then the tool.
  *
- *  Igarashi's order — title, teaser, then the demo. The published link is
+ *  Title, teaser, then the demo. The published link is
  *  shared with reviewers and colleagues who have not read the paper, and
  *  dropping them straight onto a home-size form told them nothing about what
  *  the tool is for. The teaser is a simplified Figure 1: the same three steps
@@ -15,14 +15,15 @@ export function TitleScreen({ onExplore }: { onExplore: () => void }) {
   return (
     <div className="title-screen">
       <header className="title-head">
-        <p className="title-venue">CHI 2027 · Research prototype</p>
+        <p className="title-venue">Research prototype</p>
         <h1>
           FlowWeaver
           <span>Translating Indoor Airflow Needs into Editable Configurations through Multi-Modal Control</span>
         </h1>
-        <p className="title-authors">
-          Joseph Leonard, Hongbo Zhang, Hengyuan Chang, Bo Zhu, Haoran Xie, and Takeo Igarashi
-        </p>
+        {/* ANONYMOUS FOR REVIEW. CHI review is double-blind and this page is the
+            supplementary demo, so it names no authors and no institution. Put
+            the author line back only after the paper is accepted. */}
+        <p className="title-authors">Anonymous authors · Supplementary material for review</p>
       </header>
 
       <figure className="teaser">
